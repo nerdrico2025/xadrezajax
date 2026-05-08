@@ -102,7 +102,14 @@ export default function Login() {
         value={password}
         onChangeText={setPassword}
       />
-
+      
+      {/* ESQUECI SENHA */}
+      
+      <TouchableOpacity onPress={() => router.push("/forgot-password")}>
+        <Text style={styles.forgot}>
+            Esqueci minha senha
+        </Text>
+      </TouchableOpacity>
       {error ? (
         <Text style={styles.error}>
           {error}
@@ -243,6 +250,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 40,
     fontSize: 12,
+  },
+
+  forgot: {
+  color: "#888",
+  textAlign: "right",
+  marginBottom: 12,
   },
 
 });
