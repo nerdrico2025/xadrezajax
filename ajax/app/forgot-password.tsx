@@ -5,10 +5,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Image,
 } from "react-native";
 
 import { useState } from "react";
 import { router } from "expo-router";
+
+const emailIcon = require("../assets/images/email_icon.svg");
 
 export default function ForgotPassword() {
 
@@ -45,14 +48,17 @@ export default function ForgotPassword() {
         Digite seu email para receber o código
       </Text>
 
-      <TextInput
-        placeholder="Email"
-        placeholderTextColor="#777"
-        style={styles.input}
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-      />
+      <View style={styles.inputContainer}>
+        <Image source={emailIcon} style={styles.inputIcon} />
+        <TextInput
+          placeholder="Email"
+          placeholderTextColor="#777"
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+        />
+      </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -90,13 +96,24 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   input: {
+    flex: 1,
+    color: "#FFF",
+  },
+  inputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#161616",
     borderWidth: 1,
     borderColor: "#2A2A2A",
     borderRadius: 12,
     padding: 16,
-    color: "#FFF",
     marginBottom: 16,
+  },
+  inputIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 12,
+    tintColor: "#777",
   },
   button: {
     backgroundColor: "#1B5F7A",

@@ -5,12 +5,26 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Image,
 } from "react-native";
 
 import { useState } from "react";
 import { router } from "expo-router";
 
+import { useTheme } from "@/hooks/useTheme";
+import { Colors } from "@/constants/theme";
+
+const sunIcon = require("../assets/images/sun.svg");
+const moonIcon = require("../assets/images/moon.svg");
+const logoAjax = require("../assets/images/logo_ajax.svg");
+const emailIcon = require("../assets/images/email_icon.svg");
+const lockIcon = require("../assets/images/cadeado.svg");
+const googleIcon = require("../assets/images/google_icon.svg");
+
 export default function Login() {
+
+  const { theme, toggleTheme } = useTheme();
+  const colors = Colors[theme ?? "light"];
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -24,7 +38,6 @@ export default function Login() {
 
     setError("");
 
-    // validação básica
     if (!email || !password) {
       setError("Preencha todos os campos");
       return;
@@ -32,96 +45,133 @@ export default function Login() {
 
     setLoading(true);
 
-    // simulação backend
     setTimeout(() => {
 
-      // usuário fake
       const fakeEmail = "admin@ajax.com";
       const fakePassword = "123456";
 
-      if (
-        email === fakeEmail &&
-        password === fakePassword
-      ) {
+      if (email === fakeEmail && password === fakePassword) {
 
         setLoading(false);
-
         router.replace("/home");
 
       } else {
 
         setLoading(false);
-
         setError("Email ou senha inválidos");
       }
 
     }, 2000);
   };
 
-  // login google fake
   const handleGoogleLogin = () => {
 
     setError("");
-
     setGoogleLoading(true);
 
     setTimeout(() => {
-
       setGoogleLoading(false);
-
       router.replace("/home");
-
     }, 2000);
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
 
-      <Text style={styles.title}>
-        AJAX
-      </Text>
+      {/* BOTÃO TEMA */}
+      <TouchableOpacity onPress={toggleTheme} style={styles.themeButton}>
+        <Image
+          source={theme === "light" ? moonIcon : sunIcon}
+          style={styles.themeIcon}
+          resizeMode="contain"
+        />
+      </TouchableOpacity>
 
-      <Text style={styles.subtitle}>
-        Clube de Xadrez
-      </Text>
+      {theme === "light" && (
+        <Image
+          source={logoAjax}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+      )}
 
-      <TextInput
-        placeholder="Email"
-        placeholderTextColor="#777"
-        style={styles.input}
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-      />
+      {theme === "dark" && (
+        <Image
+          source={logoAjax}
+          style={[styles.logo, { tintColor: "#1B5F7A" }]}
+          resizeMode="contain"
+        />
+      )}
 
-      <TextInput
-        placeholder="Senha"
-        placeholderTextColor="#777"
-        secureTextEntry
-        style={styles.input}
-        value={password}
-        onChangeText={setPassword}
-      />
-      
-      {/* ESQUECI SENHA */}
-      
+      <View style={[
+        styles.inputContainer,
+        {
+          borderColor: colors.icon,
+          backgroundColor: colors.background,
+        },
+      ]}>
+        <Image
+          source={emailIcon}
+          style={[styles.inputIcon, { tintColor: colors.icon }]}
+        />
+        <TextInput
+          placeholder="Email"
+          placeholderTextColor={colors.icon}
+          style={[
+            styles.input,
+            {
+              color: colors.text,
+            },
+          ]}
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+        />
+      </View>
+
+      <View style={[
+        styles.inputContainer,
+        {
+          borderColor: colors.icon,
+          backgroundColor: colors.background,
+        },
+      ]}>
+        <Image
+          source={lockIcon}
+          style={[styles.inputIcon, { tintColor: colors.icon }]}
+        />
+        <TextInput
+          placeholder="Senha"
+          placeholderTextColor={colors.icon}
+          secureTextEntry
+          style={[
+            styles.input,
+            {
+              color: colors.text,
+            },
+          ]}
+          value={password}
+          onChangeText={setPassword}
+        />
+      </View>
+
       <TouchableOpacity onPress={() => router.push("/forgot-password")}>
-        <Text style={styles.forgot}>
-            Esqueci minha senha
+        <Text style={[styles.forgot, { color: colors.icon }]}>
+          Esqueci minha senha
         </Text>
       </TouchableOpacity>
+
       {error ? (
         <Text style={styles.error}>
           {error}
         </Text>
       ) : null}
 
-      {/* LOGIN NORMAL */}
+      {/* LOGIN */}
       <TouchableOpacity
-        style={styles.button}
+        style={[styles.button, { backgroundColor: colors.tint }]}
         onPress={handleLogin}
       >
-
         {loading ? (
           <ActivityIndicator color="#FFF" />
         ) : (
@@ -129,35 +179,37 @@ export default function Login() {
             Entrar
           </Text>
         )}
-
       </TouchableOpacity>
 
-      {/* LOGIN GOOGLE */}
+      {/* GOOGLE */}
       <TouchableOpacity
-        style={styles.googleButton}
+        style={[
+          styles.googleButton,
+          {
+            borderColor: colors.icon,
+            backgroundColor: colors.background,
+          },
+        ]}
         onPress={handleGoogleLogin}
       >
-
         {googleLoading ? (
-          <ActivityIndicator color="#FFF" />
+          <ActivityIndicator color={colors.text} />
         ) : (
-          <Text style={styles.googleText}>
-            Continuar com Google
-          </Text>
+          <>
+            <Image source={googleIcon} style={styles.googleIcon} />
+            <Text style={[styles.googleText, { color: colors.text }]}>
+              Continuar com Google
+            </Text>
+          </>
         )}
-
       </TouchableOpacity>
 
-      {/* LINK CADASTRO */}
-      <TouchableOpacity
-        onPress={() => router.push("/register")}
-      >
-        <Text style={styles.link}>
-          Criar conta
+      <TouchableOpacity onPress={() => router.push("/register")}>
+        <Text style={[styles.link, { color: colors.icon }]}>
+          Ainda não possui uma conta? Cadastre-se
         </Text>
       </TouchableOpacity>
 
-      {/* USUÁRIO MOCK */}
       <Text style={styles.fakeUser}>
         admin@ajax.com | 123456
       </Text>
@@ -170,37 +222,49 @@ const styles = StyleSheet.create({
 
   container: {
     flex: 1,
-    backgroundColor: "#0A0A0A",
     justifyContent: "center",
     padding: 24,
   },
 
+  themeButton: {
+    position: "absolute",
+    top: 50,
+    right: 20,
+  },
+
   title: {
-    color: "#FFFFFF",
     fontSize: 42,
     fontWeight: "bold",
     textAlign: "center",
   },
 
   subtitle: {
-    color: "#1B5F7A",
     textAlign: "center",
     marginBottom: 40,
     letterSpacing: 2,
   },
 
   input: {
-    backgroundColor: "#161616",
+    flex: 1,
+    padding: 0,
+  },
+
+  inputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
     borderWidth: 1,
-    borderColor: "#2A2A2A",
     borderRadius: 12,
     padding: 16,
-    color: "#FFFFFF",
     marginBottom: 16,
   },
 
+  inputIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 12,
+  },
+
   button: {
-    backgroundColor: "#1B5F7A",
     padding: 18,
     borderRadius: 12,
     alignItems: "center",
@@ -218,23 +282,26 @@ const styles = StyleSheet.create({
   googleButton: {
     marginTop: 16,
     borderWidth: 1,
-    borderColor: "#333",
     padding: 18,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
     minHeight: 58,
-    backgroundColor: "#161616",
+    flexDirection: "row",
+  },
+
+  googleIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 12,
   },
 
   googleText: {
-    color: "#FFFFFF",
     fontWeight: "600",
     fontSize: 16,
   },
 
   link: {
-    color: "#AAAAAA",
     textAlign: "center",
     marginTop: 24,
   },
@@ -253,9 +320,20 @@ const styles = StyleSheet.create({
   },
 
   forgot: {
-  color: "#888",
-  textAlign: "right",
-  marginBottom: 12,
+    textAlign: "right",
+    marginBottom: 12,
+  },
+
+  themeIcon: {
+    width: 28,
+    height: 28,
+  },
+
+  logo: {
+    width: 300,
+    height: 300,
+    alignSelf: "center",
+    marginBottom: 15,
   },
 
 });

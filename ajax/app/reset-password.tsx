@@ -5,10 +5,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Image,
 } from "react-native";
 
 import { useState } from "react";
 import { router } from "expo-router";
+
+const lockIcon = require("../assets/images/cadeado.svg");
 
 export default function ResetPassword() {
 
@@ -49,23 +52,29 @@ export default function ResetPassword() {
 
       <Text style={styles.title}>Nova Senha</Text>
 
-      <TextInput
-        placeholder="Nova senha"
-        placeholderTextColor="#777"
-        secureTextEntry
-        style={styles.input}
-        value={password}
-        onChangeText={setPassword}
-      />
+      <View style={styles.inputContainer}>
+        <Image source={lockIcon} style={styles.inputIcon} />
+        <TextInput
+          placeholder="Nova senha"
+          placeholderTextColor="#777"
+          secureTextEntry
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+        />
+      </View>
 
-      <TextInput
-        placeholder="Confirmar senha"
-        placeholderTextColor="#777"
-        secureTextEntry
-        style={styles.input}
-        value={confirmPassword}
-        onChangeText={setConfirmPassword}
-      />
+      <View style={styles.inputContainer}>
+        <Image source={lockIcon} style={styles.inputIcon} />
+        <TextInput
+          placeholder="Confirmar senha"
+          placeholderTextColor="#777"
+          secureTextEntry
+          style={styles.input}
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+        />
+      </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -95,13 +104,24 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   input: {
+    flex: 1,
+    color: "#FFF",
+  },
+  inputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#161616",
     borderWidth: 1,
     borderColor: "#2A2A2A",
     borderRadius: 12,
     padding: 16,
-    color: "#FFF",
     marginBottom: 16,
+  },
+  inputIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 12,
+    tintColor: "#777",
   },
   button: {
     backgroundColor: "#1B5F7A",

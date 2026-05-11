@@ -5,10 +5,16 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Image,
 } from "react-native";
 
 import { useState } from "react";
 import { router } from "expo-router";
+
+const userIcon = require("../assets/images/user-bold.svg");
+const emailIcon = require("../assets/images/email_icon.svg");
+const lockIcon = require("../assets/images/cadeado.svg");
+const googleIcon = require("../assets/images/google_icon.svg");
 
 export default function Register() {
 
@@ -81,31 +87,40 @@ export default function Register() {
         Cadastro de Usuário
       </Text>
 
-      <TextInput
-        placeholder="Nome"
-        placeholderTextColor="#777"
-        style={styles.input}
-        value={name}
-        onChangeText={setName}
-      />
+      <View style={styles.inputContainer}>
+        <Image source={userIcon} style={styles.inputIcon} />
+        <TextInput
+          placeholder="Nome"
+          placeholderTextColor="#777"
+          style={styles.input}
+          value={name}
+          onChangeText={setName}
+        />
+      </View>
 
-      <TextInput
-        placeholder="Email"
-        placeholderTextColor="#777"
-        style={styles.input}
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-      />
+      <View style={styles.inputContainer}>
+        <Image source={emailIcon} style={styles.inputIcon} />
+        <TextInput
+          placeholder="Email"
+          placeholderTextColor="#777"
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+        />
+      </View>
 
-      <TextInput
-        placeholder="Senha"
-        placeholderTextColor="#777"
-        secureTextEntry
-        style={styles.input}
-        value={password}
-        onChangeText={setPassword}
-      />
+      <View style={styles.inputContainer}>
+        <Image source={lockIcon} style={styles.inputIcon} />
+        <TextInput
+          placeholder="Senha"
+          placeholderTextColor="#777"
+          secureTextEntry
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+        />
+      </View>
 
       {error ? (
         <Text style={styles.error}>
@@ -135,9 +150,12 @@ export default function Register() {
         {googleLoading ? (
           <ActivityIndicator color="#FFF" />
         ) : (
-          <Text style={styles.googleText}>
-            Continuar com Google
-          </Text>
+          <>
+            <Image source={googleIcon} style={styles.googleIcon} />
+            <Text style={styles.googleText}>
+              Continuar com Google
+            </Text>
+          </>
         )}
       </TouchableOpacity>
 
@@ -178,13 +196,26 @@ const styles = StyleSheet.create({
   },
 
   input: {
+    flex: 1,
+    color: "#FFFFFF",
+  },
+
+  inputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#161616",
     borderWidth: 1,
     borderColor: "#2A2A2A",
     borderRadius: 12,
     padding: 16,
-    color: "#FFFFFF",
     marginBottom: 16,
+  },
+
+  inputIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 12,
+    tintColor: "#777",
   },
 
   button: {
@@ -213,6 +244,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minHeight: 58,
     backgroundColor: "#161616",
+    flexDirection: "row",
+  },
+
+  googleIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 12,
   },
 
   googleText: {
