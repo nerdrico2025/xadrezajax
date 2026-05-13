@@ -32,22 +32,28 @@ export default function ResetPassword() {
   const styles = StyleSheet.create({
     container: {
       flex: 1,
-      justifyContent: "center",
+      justifyContent: "flex-start",
       padding: 24,
       backgroundColor: colors.background,
     },
     topBar: {
-      width: "100%",
+      position: "absolute",
+      top: 50,
+      left: 20,
+      right: 20,
+      height: 48,
       flexDirection: "row",
       justifyContent: "flex-end",
       alignItems: "center",
-      marginBottom: 24,
+      zIndex: 10,
     },
     title: {
-      color: colors.text,
       fontSize: 32,
+      fontWeight: "bold",
       textAlign: "center",
-      marginBottom: 40,
+      marginTop: 150,
+      marginBottom: 16,
+      color: colors.text,
     },
     error: {
       color: colors.error,

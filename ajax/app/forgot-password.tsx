@@ -31,11 +31,15 @@ export default function ForgotPassword() {
       backgroundColor: colors.background,
     },
     topBar: {
-      width: "100%",
+      position: "absolute",
+      top: 50,
+      left: 20,
+      right: 20,
+      height: 48,
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      marginBottom: 24,
+      zIndex: 10,
     },
     backButton: {
       width: 48,
@@ -127,9 +131,7 @@ export default function ForgotPassword() {
           />
         </TouchableOpacity>
       </View>
-      <view>
-        
-      </view>
+
       <Text style={[styles.title, { color: colors.text }]}>Recuperar Senha</Text>
 
       <Text style={styles.subtitle}>

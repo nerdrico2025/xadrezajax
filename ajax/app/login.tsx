@@ -94,10 +94,10 @@ export default function Login() {
       height: 24,
     },
     topBar: {
-      width: "100%",
-      flexDirection: "row",
-      justifyContent: "flex-end",
-      alignItems: "center",
+      position: "absolute",
+      top: 50,
+      right: 20,
+      zIndex: 10,
     },
   });
 
