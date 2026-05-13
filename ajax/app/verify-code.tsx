@@ -1,20 +1,79 @@
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
+  Image,
 } from "react-native";
 
 import { useState } from "react";
 import { router } from "expo-router";
 
+import { useTheme } from "@/hooks/useTheme";
+import Button from "../components/Button";
+import InputLine from "../components/InputLine";
+import { Colors } from "@/constants/theme";
+
+const sunIcon = require("../assets/images/sun.svg");
+const moonIcon = require("../assets/images/moon.svg");
+
 export default function VerifyCode() {
+
+  const { theme, toggleTheme } = useTheme();
+  const colors = Colors[theme];
 
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      justifyContent: "center",
+      padding: 24,
+      backgroundColor: colors.background,
+    },
+    topBar: {
+      width: "100%",
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      alignItems: "center",
+      marginBottom: 24,
+    },
+    title: {
+      color: colors.text,
+      fontSize: 32,
+      textAlign: "center",
+      marginBottom: 40,
+    },
+    subtitle: {
+      fontSize: 20,
+      fontWeight: "bold",
+      textAlign: "center",
+      marginBottom: 24,
+    },
+    error: {
+      color: colors.error,
+      textAlign: "center",
+      marginBottom: 10,
+    },
+    resend: {
+      marginTop: 16,
+      textAlign: "center",
+      color: colors.tint,
+      fontWeight: "600",
+    },
+    themeButton: {
+      height: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 10,
+    },
+    themeIcon: {
+      width: 24,
+      height: 24,
+    },
+  });
 
   const handleVerify = () => {
 
@@ -43,19 +102,31 @@ export default function VerifyCode() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
 
-      <Text style={styles.title}>Verificação</Text>
+      <View style={styles.topBar}>
+        <TouchableOpacity
+          onPress={toggleTheme}
+          style={styles.themeButton}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Image
+            source={theme === "light" ? moonIcon : sunIcon}
+            style={styles.themeIcon}
+            resizeMode="contain"
+          />
+        </TouchableOpacity>
+      </View>
 
-      <Text style={styles.subtitle}>
+      <Text style={[styles.title, { color: colors.text }]}>Verificação</Text>
+
+      <Text style={[styles.subtitle, { color: colors.tint }]}>
         Digite o código enviado para seu email
       </Text>
 
-      <TextInput
+      <InputLine
         placeholder="123456"
-        placeholderTextColor="#777"
         keyboardType="numeric"
-        style={styles.input}
         value={code}
         onChangeText={setCode}
         maxLength={6}
@@ -63,15 +134,12 @@ export default function VerifyCode() {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <TouchableOpacity style={styles.button} onPress={handleVerify}>
-        {loading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <Text style={styles.buttonText}>
-            Validar código
-          </Text>
-        )}
-      </TouchableOpacity>
+      <Button
+        title="Validar código"
+        onPress={handleVerify}
+        loading={loading}
+        variant="primary"
+      />
 
       <TouchableOpacity onPress={() => alert("Código reenviado!")}>
         <Text style={styles.resend}>
@@ -83,55 +151,3 @@ export default function VerifyCode() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0A0A0A",
-    justifyContent: "center",
-    padding: 24,
-  },
-  title: {
-    color: "#FFF",
-    fontSize: 32,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  subtitle: {
-    color: "#1B5F7A",
-    textAlign: "center",
-    marginBottom: 40,
-  },
-  input: {
-    backgroundColor: "#161616",
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
-    borderRadius: 12,
-    padding: 16,
-    color: "#FFF",
-    marginBottom: 16,
-    textAlign: "center",
-    fontSize: 18,
-    letterSpacing: 8,
-  },
-  button: {
-    backgroundColor: "#1B5F7A",
-    padding: 18,
-    borderRadius: 12,
-    alignItems: "center",
-    minHeight: 58,
-  },
-  buttonText: {
-    color: "#FFF",
-    fontWeight: "bold",
-  },
-  error: {
-    color: "#FF4D4D",
-    textAlign: "center",
-    marginBottom: 10,
-  },
-  resend: {
-    color: "#1B5F7A",
-    textAlign: "center",
-    marginTop: 20,
-  },
-});

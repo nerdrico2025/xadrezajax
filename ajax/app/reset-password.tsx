@@ -1,25 +1,70 @@
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   Image,
 } from "react-native";
 
 import { useState } from "react";
 import { router } from "expo-router";
 
+import { useTheme } from "@/hooks/useTheme";
+import Button from "../components/Button";
+import InputLine from "../components/InputLine";
+import { Colors } from "@/constants/theme";
+
 const lockIcon = require("../assets/images/cadeado.svg");
+const sunIcon = require("../assets/images/sun.svg");
+const moonIcon = require("../assets/images/moon.svg");
 
 export default function ResetPassword() {
+
+  const { theme, toggleTheme } = useTheme();
+  const colors = Colors[theme];
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      justifyContent: "center",
+      padding: 24,
+      backgroundColor: colors.background,
+    },
+    topBar: {
+      width: "100%",
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      alignItems: "center",
+      marginBottom: 24,
+    },
+    title: {
+      color: colors.text,
+      fontSize: 32,
+      textAlign: "center",
+      marginBottom: 40,
+    },
+    error: {
+      color: colors.error,
+      textAlign: "center",
+      marginBottom: 10,
+    },
+    themeButton: {
+      height: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 10,
+    },
+    themeIcon: {
+      width: 24,
+      height: 24,
+    },
+  });
 
   const handleReset = () => {
 
@@ -48,94 +93,50 @@ export default function ResetPassword() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
 
-      <Text style={styles.title}>Nova Senha</Text>
-
-      <View style={styles.inputContainer}>
-        <Image source={lockIcon} style={styles.inputIcon} />
-        <TextInput
-          placeholder="Nova senha"
-          placeholderTextColor="#777"
-          secureTextEntry
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-        />
+      <View style={styles.topBar}>
+        <TouchableOpacity
+          onPress={toggleTheme}
+          style={styles.themeButton}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Image
+            source={theme === "light" ? moonIcon : sunIcon}
+            style={styles.themeIcon}
+            resizeMode="contain"
+          />
+        </TouchableOpacity>
       </View>
 
-      <View style={styles.inputContainer}>
-        <Image source={lockIcon} style={styles.inputIcon} />
-        <TextInput
-          placeholder="Confirmar senha"
-          placeholderTextColor="#777"
-          secureTextEntry
-          style={styles.input}
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-        />
-      </View>
+      <Text style={[styles.title, { color: colors.text }]}>Nova Senha</Text>
+
+      <InputLine
+        icon={lockIcon}
+        placeholder="Nova senha"
+        secureTextEntry
+        value={password}
+        onChangeText={setPassword}
+      />
+
+      <InputLine
+        icon={lockIcon}
+        placeholder="Confirmar senha"
+        secureTextEntry
+        value={confirmPassword}
+        onChangeText={setConfirmPassword}
+      />
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <TouchableOpacity style={styles.button} onPress={handleReset}>
-        {loading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <Text style={styles.buttonText}>Salvar</Text>
-        )}
-      </TouchableOpacity>
+      <Button
+        title="Salvar"
+        onPress={handleReset}
+        loading={loading}
+        variant="primary"
+      />
 
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0A0A0A",
-    justifyContent: "center",
-    padding: 24,
-  },
-  title: {
-    color: "#FFF",
-    fontSize: 32,
-    textAlign: "center",
-    marginBottom: 40,
-  },
-  input: {
-    flex: 1,
-    color: "#FFF",
-  },
-  inputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#161616",
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  inputIcon: {
-    width: 20,
-    height: 20,
-    marginRight: 12,
-    tintColor: "#777",
-  },
-  button: {
-    backgroundColor: "#1B5F7A",
-    padding: 18,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  buttonText: {
-    color: "#FFF",
-    fontWeight: "bold",
-  },
-  error: {
-    color: "#FF4D4D",
-    textAlign: "center",
-    marginBottom: 10,
-  },
-});

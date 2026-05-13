@@ -8,22 +8,49 @@ import { Platform } from 'react-native';
 const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
 
+const primaryColor = '#1B5F7A';
+
 export const Colors = {
   light: {
-    text: '#11181C',
+    text: '#0D0D0D',
     background: '#fff',
-    tint: tintColorLight,
+    tint: '#0a7ea4',
     icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    tabIconDefault: '#0d0d0d',
+    tabIconSelected: '#0a7ea4',
+    error: '#FF4D4D',
+    link: '#0a7ea4',
+    primary: primaryColor,
+    secondary: '#555',
+
+    // 🔥 BOTÕES
+    buttonPrimary: primaryColor,
+    buttonPrimaryText: '#FFFFFF',
+
+    buttonSecondary: '#D7D7D7',
+    buttonSecondaryText: '#0D0D0D',
+    buttonBorder: 'transparent',
   },
+
   dark: {
     text: '#ECEDEE',
     background: '#151718',
-    tint: tintColorDark,
+    tint: '#fff',
     icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    tabIconDefault: '#f5f5f5',
+    tabIconSelected: '#0a7ea4',
+    error: '#FF4D4D',
+    link: '#0a7ea4',
+    primary: primaryColor,
+    secondary: '#555',
+
+    // 🔥 BOTÕES (AGORA MUDA NO DARK)
+    buttonPrimary: '#0a7ea4',
+    buttonPrimaryText: '#ffffff',
+
+    buttonSecondary: '#D7D7D7',
+    buttonSecondaryText: '#0d0d0d',
+    buttonBorder: 'transparent',
   },
 };
 

@@ -5,7 +5,7 @@ import { useColorScheme } from "react-native";
 type ThemeOption = "light" | "dark";
 
 interface ThemeContextData {
-  theme: ThemeOption | null;
+  theme: ThemeOption;
   toggleTheme: () => Promise<void>;
   resetToSystem: () => Promise<void>;
   userPreference: ThemeOption | null;
@@ -16,7 +16,7 @@ interface ThemeProviderProps {
 }
 
 export const ThemeContext = createContext<ThemeContextData>({
-  theme: null,
+  theme: "light",
   toggleTheme: async () => {},
   resetToSystem: async () => {},
   userPreference: null,
@@ -25,8 +25,8 @@ export const ThemeContext = createContext<ThemeContextData>({
 export function ThemeProvider({ children }: ThemeProviderProps) {
   const systemTheme = useColorScheme(); // dark ou light
 
-  const [theme, setTheme] = useState<ThemeOption | null>(
-    systemTheme as ThemeOption | null,
+  const [theme, setTheme] = useState<ThemeOption>(
+    "light", // start with light theme by default
   );
   const [userPreference, setUserPreference] = useState<ThemeOption | null>(null);
 
@@ -41,14 +41,16 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
       setTheme(savedTheme);
       setUserPreference(savedTheme);
     } else {
-      setTheme(systemTheme as ThemeOption | null);
+      const defaultTheme = (systemTheme as ThemeOption) || "light";
+      setTheme(defaultTheme);
     }
   };
 
   // atualiza se o sistema mudar (e usuário não tiver escolhido)
   useEffect(() => {
     if (!userPreference) {
-      setTheme(systemTheme as ThemeOption | null);
+      const defaultTheme = (systemTheme as ThemeOption) || "light";
+      setTheme(defaultTheme);
     }
   }, [systemTheme, userPreference]);
 
@@ -62,7 +64,8 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
 
   const resetToSystem = async () => {
     setUserPreference(null);
-    setTheme(systemTheme as ThemeOption | null);
+    const defaultTheme = (systemTheme as ThemeOption) || "light";
+    setTheme(defaultTheme);
     await AsyncStorage.removeItem("theme");
   };
 
