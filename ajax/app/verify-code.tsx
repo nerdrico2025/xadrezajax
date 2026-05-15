@@ -4,7 +4,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
+  ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useState } from "react";
 import { router } from "expo-router";
@@ -109,7 +111,9 @@ export default function VerifyCode() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+        <View style={[styles.container, { backgroundColor: colors.background, width: "100%", maxWidth: 400, alignSelf: "center" }]}>
 
       <View style={styles.topBar}>
         <TouchableOpacity
@@ -153,8 +157,9 @@ export default function VerifyCode() {
           Reenviar código
         </Text>
       </TouchableOpacity>
-
-    </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 

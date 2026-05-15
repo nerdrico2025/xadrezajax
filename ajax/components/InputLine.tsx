@@ -8,17 +8,19 @@ import {
   Platform,
 } from "react-native";
 
-import { useState, useRef } from "react";
+import { useState, useRef, ReactNode } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 
 interface InputLineProps extends TextInputProps {
   icon?: any;
+  iconComponent?: ReactNode;
   placeholder: string;
 }
 
 export default function InputLine({
   icon,
+  iconComponent,
   placeholder,
   ...rest
 }: InputLineProps) {
@@ -70,13 +72,17 @@ export default function InputLine({
           },
         ]}
       >
-        {icon && (
+        {iconComponent ? (
+          <View style={styles.iconWrapper}>
+            {iconComponent}
+          </View>
+        ) : icon ? (
           <Image
             source={icon}
             style={[styles.icon, { tintColor: colors.icon }]}
             resizeMode="contain"
           />
-        )}
+        ) : null}
         <TextInput
           placeholder={placeholder}
           placeholderTextColor={colors.icon}
@@ -115,7 +121,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 0,
-    paddingVertical: 12,
+    paddingVertical: 8,
+  },
+  iconWrapper: {
+    width: 20,
+    height: 20,
+    marginRight: 12,
+    marginLeft: 8,
+    justifyContent: "center",
+    alignItems: "center",
   },
   icon: {
     width: 20,

@@ -4,7 +4,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
+  ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useState } from "react";
 import { router } from "expo-router";
@@ -44,7 +46,7 @@ export default function Login() {
     },
     logoContainer: {
       alignItems: "center",
-      marginBottom: 10,
+      marginBottom: 5,
     },
     logo: {
       width: 280,
@@ -54,7 +56,7 @@ export default function Login() {
       fontSize: 32,
       fontWeight: "bold",
       textAlign: "left",
-      marginBottom: 22,
+      marginBottom: 10,
       color: colors.background === "#0D0D0D" ? colors.tint : colors.text,
     },
     forgotPassword: {
@@ -143,7 +145,9 @@ export default function Login() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+        <View style={[styles.container, { backgroundColor: colors.background, width: "100%", maxWidth: 400, alignSelf: "center" }]}>
 
       <View style={styles.topBar}>
         <TouchableOpacity
@@ -221,6 +225,8 @@ export default function Login() {
       <TouchableOpacity onPress={() => router.push("/register")}>        
         <Text style={styles.link}>Ainda não tem conta? Cadastre-se</Text>
       </TouchableOpacity>
-    </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }

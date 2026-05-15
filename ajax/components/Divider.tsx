@@ -39,13 +39,13 @@ export default function Divider({ text }: DividerProps) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
-    alignItems: "center",    justifyContent: "center",    marginVertical: 20,
+    alignItems: "center",    justifyContent: "center",    marginVertical: 10,
   },
 
   text: {
     marginHorizontal: 16,
     fontWeight: "600",
-    fontSize: 14,
+    fontSize: 12,
   },
   simpleLine: {
     height: 1,

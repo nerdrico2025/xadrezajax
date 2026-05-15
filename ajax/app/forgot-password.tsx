@@ -4,7 +4,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
+  ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useState } from "react";
 import { router } from "expo-router";
@@ -112,7 +114,9 @@ export default function ForgotPassword() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+        <View style={[styles.container, { backgroundColor: colors.background, width: "100%", maxWidth: 400, alignSelf: "center" }]}>
 
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => router.push('/login')} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -157,7 +161,8 @@ export default function ForgotPassword() {
           variant="primary"
         />
       </View>
-
-    </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
