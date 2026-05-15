@@ -269,9 +269,7 @@ class PasswordResetTests(APITestCase):
 
         # Correção para o Django 6.0+: Passando o SECRET_KEY como o 'secret' exigido
         expired_token = password_reset_token_generator._make_token_with_timestamp(
-            self.user,
-            0,
-            settings.SECRET_KEY
+            self.user, 0, settings.SECRET_KEY
         )
 
         response = self.client.post(

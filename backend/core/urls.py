@@ -21,10 +21,12 @@ from django.urls import include, path
 
 
 def home(request):
-    return JsonResponse({
-        "status": "ok",
-        "message": "backend rodando",
-    })
+    return JsonResponse(
+        {
+            "status": "ok",
+            "message": "backend rodando",
+        }
+    )
 
 
 urlpatterns = [

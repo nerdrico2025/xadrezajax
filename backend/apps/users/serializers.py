@@ -65,9 +65,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
     def validate_email(self, value):
         normalized = value.lower()
         if not User.objects.filter(email=normalized).exists():
-            raise serializers.ValidationError(
-                "E-mail não cadastrado."
-            )
+            raise serializers.ValidationError("E-mail não cadastrado.")
         return normalized
 
 
@@ -80,9 +78,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         if not attrs.get("uid") and not attrs.get("email"):
-            raise serializers.ValidationError(
-                "É necessário informar uid ou email."
-            )
+            raise serializers.ValidationError("É necessário informar uid ou email.")
         if attrs["new_password"] != attrs["password_confirm"]:
             raise serializers.ValidationError(
                 {"password_confirm": "As senhas não coincidem."}

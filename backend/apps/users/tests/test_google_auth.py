@@ -48,9 +48,7 @@ class GoogleAuthNewUserTests(APITestCase):
         self.client.post(
             GOOGLE_AUTH_URL, {"id_token": "valid.token.new"}, format="json"
         )
-        self.assertTrue(
-            User.objects.filter(email="magnus@chess.com").exists()
-        )
+        self.assertTrue(User.objects.filter(email="magnus@chess.com").exists())
 
     @patch(VERIFY_TOKEN_PATH)
     def test_new_user_has_unusable_password(self, mock_verify):
@@ -78,9 +76,7 @@ class GoogleAuthNewUserTests(APITestCase):
         )
         self.assertIn("user", response.data)
         self.assertEqual(response.data["user"]["email"], "magnus@chess.com")
-        self.assertEqual(
-            response.data["user"]["full_name"], "Magnus Carlsen"
-        )
+        self.assertEqual(response.data["user"]["full_name"], "Magnus Carlsen")
 
     @patch(VERIFY_TOKEN_PATH)
     def test_full_name_is_populated_from_google_payload(self, mock_verify):
@@ -107,9 +103,7 @@ class GoogleAuthExistingUserTests(APITestCase):
 
     @patch(VERIFY_TOKEN_PATH)
     def test_existing_user_returns_200(self, mock_verify):
-        mock_verify.return_value = make_google_payload(
-            email="hikaru@chess.com"
-        )
+        mock_verify.return_value = make_google_payload(email="hikaru@chess.com")
         response = self.client.post(
             GOOGLE_AUTH_URL,
             {"id_token": "valid.token.existing"},
@@ -119,23 +113,17 @@ class GoogleAuthExistingUserTests(APITestCase):
 
     @patch(VERIFY_TOKEN_PATH)
     def test_existing_user_does_not_create_duplicate(self, mock_verify):
-        mock_verify.return_value = make_google_payload(
-            email="hikaru@chess.com"
-        )
+        mock_verify.return_value = make_google_payload(email="hikaru@chess.com")
         self.client.post(
             GOOGLE_AUTH_URL,
             {"id_token": "valid.token.existing"},
             format="json",
         )
-        self.assertEqual(
-            User.objects.filter(email="hikaru@chess.com").count(), 1
-        )
+        self.assertEqual(User.objects.filter(email="hikaru@chess.com").count(), 1)
 
     @patch(VERIFY_TOKEN_PATH)
     def test_existing_user_receives_jwt_pair(self, mock_verify):
-        mock_verify.return_value = make_google_payload(
-            email="hikaru@chess.com"
-        )
+        mock_verify.return_value = make_google_payload(email="hikaru@chess.com")
         response = self.client.post(
             GOOGLE_AUTH_URL,
             {"id_token": "valid.token.existing"},
@@ -147,9 +135,7 @@ class GoogleAuthExistingUserTests(APITestCase):
     @patch(VERIFY_TOKEN_PATH)
     def test_google_auth_does_not_make_external_requests(self, mock_verify):
         """Garante que o teste nunca chama a API real do Google."""
-        mock_verify.return_value = make_google_payload(
-            email="hikaru@chess.com"
-        )
+        mock_verify.return_value = make_google_payload(email="hikaru@chess.com")
         self.client.post(
             GOOGLE_AUTH_URL,
             {"id_token": "valid.token.existing"},
@@ -174,9 +160,7 @@ class GoogleAuthFailureTests(APITestCase):
     @patch(VERIFY_TOKEN_PATH)
     def test_invalid_token_does_not_create_user(self, mock_verify):
         mock_verify.side_effect = ValueError("Token inválido ou expirado.")
-        self.client.post(
-            GOOGLE_AUTH_URL, {"id_token": "token.invalido"}, format="json"
-        )
+        self.client.post(GOOGLE_AUTH_URL, {"id_token": "token.invalido"}, format="json")
         self.assertEqual(User.objects.count(), 0)
 
     @patch(VERIFY_TOKEN_PATH)
@@ -194,9 +178,7 @@ class GoogleAuthFailureTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_empty_id_token_returns_400(self):
-        response = self.client.post(
-            GOOGLE_AUTH_URL, {"id_token": ""}, format="json"
-        )
+        response = self.client.post(GOOGLE_AUTH_URL, {"id_token": ""}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     @patch(VERIFY_TOKEN_PATH)
@@ -207,9 +189,7 @@ class GoogleAuthFailureTests(APITestCase):
         )
         # Patch no GOOGLE_CLIENT_ID para simular divergência de aud
         with patch("apps.users.services.settings") as mock_settings:
-            mock_settings.GOOGLE_CLIENT_ID = (
-                "test-client-id.apps.googleusercontent.com"
-            )
+            mock_settings.GOOGLE_CLIENT_ID = "test-client-id.apps.googleusercontent.com"
             response = self.client.post(
                 GOOGLE_AUTH_URL,
                 {"id_token": "token.wrong.aud"},

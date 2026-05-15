@@ -1,4 +1,3 @@
-
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
@@ -76,9 +75,7 @@ class GoogleAuthView(APIView):
         serializer.is_valid(raise_exception=True)
 
         try:
-            payload = verify_google_id_token(
-                serializer.validated_data["id_token"]
-            )
+            payload = verify_google_id_token(serializer.validated_data["id_token"])
         except GoogleTokenError as exc:
             return Response(
                 {"detail": str(exc)},
@@ -128,9 +125,7 @@ class PasswordResetRequestView(APIView):
         user = User.objects.get(email=email)
         uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
         token = password_reset_token_generator.make_token(user)
-        reset_url = request.build_absolute_uri(
-            "/api/v1/auth/password-reset/confirm/"
-        )
+        reset_url = request.build_absolute_uri("/api/v1/auth/password-reset/confirm/")
         reset_link = f"{reset_url}?uid={uidb64}&token={token}"
         subject = "Recuperação de senha - Xadrez AJAX"
         message = (
@@ -181,9 +176,7 @@ class PasswordResetConfirmView(APIView):
             user = User.objects.filter(pk=uid).first()
         else:
             user = User.objects.filter(email=email).first()
-        if not user or not password_reset_token_generator.check_token(
-            user, token
-        ):
+        if not user or not password_reset_token_generator.check_token(user, token):
             return Response(
                 {"detail": "Token inválido ou expirado."},
                 status=status.HTTP_400_BAD_REQUEST,
