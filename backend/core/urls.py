@@ -16,9 +16,20 @@ Including another URLconf
 """
 
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import include, path
 
+
+def home(request):
+    return JsonResponse({
+        "status": "ok",
+        "message": "backend rodando",
+    })
+
+
 urlpatterns = [
+    path("", home),
     path("admin/", admin.site.urls),
     path("api/v1/auth/", include("apps.users.urls", namespace="users")),
+    path("accounts/", include("django.contrib.auth.urls")),
 ]

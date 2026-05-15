@@ -28,13 +28,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv("SECRET_KEY")
-DEBUG = os.getenv("DEBUG", "False") == "True"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
-
-# SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
-
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "*"]
 
 DJANGO_APPS = [
     "django.contrib.admin",
@@ -47,8 +42,10 @@ DJANGO_APPS = [
 # Application definition
 
 THIRD_PARTY_APPS = [
+    "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
 ]
 
 LOCAL_APPS = [
@@ -60,6 +57,7 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -68,6 +66,14 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 ROOT_URLCONF = "core.urls"
+
+CORS_ALLOW_ALL_ORIGINS = True
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:19006",  # Expo web
+    "http://127.0.0.1:19006",
+    "http://localhost:8000",
+]
 
 TEMPLATES = [
     {
@@ -169,3 +175,20 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = "static/"
+
+# CORS Configuration
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:19006",
+    "http://127.0.0.1:19006",
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
+]
+CORS_ALLOW_CREDENTIALS = True
+
+# Google Sign-In (OAuth2 id_token validation — must match mobile/web client ID)
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+
+# Envio de e-mail em desenvolvimento local. O backend de console imprime
+# o e-mail no terminal durante o fluxo de recuperação de senha.
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+DEFAULT_FROM_EMAIL = "no-reply@xadrezajax.local"

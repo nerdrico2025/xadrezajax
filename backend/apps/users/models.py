@@ -14,6 +14,18 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True, verbose_name="E-mail")
     full_name = models.CharField(max_length=150, verbose_name="Nome completo")
 
+    class ThemeChoices(models.TextChoices):
+        LIGHT = "light", "Claro"
+        DARK = "dark", "Escuro"
+        SYSTEM = "system", "Sistema"
+
+    theme_preference = models.CharField(
+        max_length=10,
+        choices=ThemeChoices.choices,
+        default=ThemeChoices.SYSTEM,
+        verbose_name="Preferência de tema",
+    )
+
     is_active = models.BooleanField(default=True, verbose_name="Ativo")
     is_staff = models.BooleanField(default=False, verbose_name="Staff")
     date_joined = models.DateTimeField(default=timezone.now)

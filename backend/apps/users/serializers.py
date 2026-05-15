@@ -50,7 +50,57 @@ class UserResponseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "email", "full_name", "date_joined"]
+        fields = [
+            "id",
+            "email",
+            "full_name",
+            "date_joined",
+            "theme_preference",
+        ]
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(write_only=True)
+
+    def validate_email(self, value):
+        normalized = value.lower()
+        if not User.objects.filter(email=normalized).exists():
+            raise serializers.ValidationError(
+                "E-mail não cadastrado."
+            )
+        return normalized
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField(required=False, allow_blank=False)
+    email = serializers.EmailField(required=False)
+    token = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+    password_confirm = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        if not attrs.get("uid") and not attrs.get("email"):
+            raise serializers.ValidationError(
+                "É necessário informar uid ou email."
+            )
+        if attrs["new_password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError(
+                {"password_confirm": "As senhas não coincidem."}
+            )
+        validate_password(attrs["new_password"])
+        if attrs.get("email"):
+            attrs["email"] = attrs["email"].lower()
+        return attrs
+
+
+class ThemePreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["theme_preference"]
+
+
+class TokenBlacklistSerializer(serializers.Serializer):
+    refresh = serializers.CharField(write_only=True)
 
 
 class ChessTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -65,5 +115,12 @@ class ChessTokenObtainPairSerializer(TokenObtainPairSerializer):
             "id": self.user.id,
             "email": self.user.email,
             "full_name": self.user.full_name,
+            "theme_preference": self.user.theme_preference,
         }
         return data
+
+
+class GoogleAuthSerializer(serializers.Serializer):
+    """Recebe o id_token gerado pelo SDK do Google no app mobile."""
+
+    id_token = serializers.CharField(required=True, write_only=True)
