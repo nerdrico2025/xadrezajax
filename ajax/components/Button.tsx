@@ -1,24 +1,25 @@
+import { type ComponentProps, useRef } from "react";
 import {
   TouchableOpacity,
   Text,
   StyleSheet,
   ActivityIndicator,
   View,
-  Image,
   Animated,
 } from "react-native";
-
-import { useRef } from "react";
+import { Ionicons } from "@expo/vector-icons";
 
 import { useTheme } from "../hooks/useTheme";
 import { Colors } from "../constants/theme";
+
+type IoniconsName = ComponentProps<typeof Ionicons>["name"];
 
 type Props = {
   title: string;
   onPress: () => void;
   loading?: boolean;
   variant?: "primary" | "secondary";
-  icon?: any;
+  iconName?: IoniconsName;
 };
 
 export default function Button({
@@ -26,9 +27,8 @@ export default function Button({
   onPress,
   loading = false,
   variant = "primary",
-  icon,
+  iconName,
 }: Props) {
-
   const { theme } = useTheme();
   const colors = Colors[theme];
 
@@ -49,6 +49,9 @@ export default function Button({
   };
 
   const isPrimary = variant === "primary";
+  const textColor = isPrimary
+    ? colors.buttonPrimaryText
+    : colors.buttonSecondaryText;
 
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
@@ -59,44 +62,32 @@ export default function Button({
             backgroundColor: isPrimary
               ? colors.buttonPrimary
               : colors.buttonSecondary,
-            borderColor: isPrimary
-              ? "transparent"
-              : colors.buttonBorder,
+            borderColor: isPrimary ? "transparent" : colors.buttonBorder,
           },
         ]}
         onPress={onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         disabled={loading}
+        accessibilityRole="button"
+        accessibilityLabel={title}
       >
         {loading ? (
-          <ActivityIndicator
-            color={
-              isPrimary
-                ? colors.buttonPrimaryText
-                : colors.buttonSecondaryText
-            }
-          />
+          <ActivityIndicator color={textColor} />
         ) : (
           <View style={styles.content}>
-            
-            {icon && (
-              <Image source={icon} style={styles.icon} />
+            {iconName && (
+              <Ionicons
+                name={iconName}
+                size={20}
+                color={textColor}
+                style={styles.icon}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              />
             )}
 
-            <Text
-              style={[
-                styles.text,
-                {
-                  color: isPrimary
-                    ? colors.buttonPrimaryText
-                    : colors.buttonSecondaryText,
-                },
-              ]}
-            >
-              {title}
-            </Text>
-
+            <Text style={[styles.text, { color: textColor }]}>{title}</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -124,8 +115,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   icon: {
-    width: 20,
-    height: 20,
     marginRight: 10,
   },
 });

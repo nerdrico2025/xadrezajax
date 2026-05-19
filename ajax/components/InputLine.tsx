@@ -1,25 +1,28 @@
+import { type ComponentProps } from "react";
 import {
   View,
   TextInput,
-  Image,
   StyleSheet,
   TextInputProps,
   Animated,
   Platform,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 
-import { useState, useRef, ReactNode } from "react";
+import { useState, useRef, type ReactNode } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 
+type IoniconsName = ComponentProps<typeof Ionicons>["name"];
+
 interface InputLineProps extends TextInputProps {
-  icon?: any;
+  iconName?: IoniconsName;
   iconComponent?: ReactNode;
   placeholder: string;
 }
 
 export default function InputLine({
-  icon,
+  iconName,
   iconComponent,
   placeholder,
   ...rest
@@ -53,7 +56,7 @@ export default function InputLine({
     outputRange: [colors.icon, colors.primary],
   });
 
-  const inputOverrideStyle: any =
+  const inputOverrideStyle: Record<string, unknown> =
     Platform.OS === "web"
       ? {
           outlineWidth: 0,
@@ -73,14 +76,15 @@ export default function InputLine({
         ]}
       >
         {iconComponent ? (
-          <View style={styles.iconWrapper}>
-            {iconComponent}
-          </View>
-        ) : icon ? (
-          <Image
-            source={icon}
-            style={[styles.icon, { tintColor: colors.icon }]}
-            resizeMode="contain"
+          <View style={styles.iconWrapper}>{iconComponent}</View>
+        ) : iconName ? (
+          <Ionicons
+            name={iconName}
+            size={20}
+            color={colors.icon}
+            style={styles.icon}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
           />
         ) : null}
         <TextInput
@@ -119,32 +123,30 @@ const styles = StyleSheet.create({
   },
   container: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-end",
     paddingHorizontal: 0,
-    paddingVertical: 8,
+    paddingVertical: 2,
   },
   iconWrapper: {
     width: 20,
     height: 20,
     marginRight: 12,
-    marginLeft: 8,
     justifyContent: "center",
     alignItems: "center",
   },
   icon: {
-    width: 20,
-    height: 20,
     marginRight: 12,
-    marginLeft: 8,
+    marginBottom: 3,
   },
   input: {
     flex: 1,
     fontSize: 16,
     paddingRight: 8,
-    outline: 'none', // Remove browser focus outline
+    paddingVertical: 0,
+    textAlignVertical: "bottom",
   },
   underline: {
-    height: 1.5,
-    marginTop: 4,
+    height: StyleSheet.hairlineWidth,
+    marginTop: 1,
   },
 });

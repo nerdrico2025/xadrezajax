@@ -12,22 +12,42 @@ import { useState } from "react";
 import { router } from "expo-router";
 
 import { useTheme } from "@/hooks/useTheme";
-import Button from "../components/Button";
-import InputLine from "../components/InputLine";
-import Divider from "../components/Divider";
+import { useResponsive } from "@/hooks/useResponsive";
+import { responsiveValue } from "@/utils/responsive";
+import { Images } from "@/constants/images";
+import Button from "@/components/Button";
+import InputLine from "@/components/InputLine";
+import Divider from "@/components/Divider";
+import ThemeToggle from "@/components/ThemeToggle";
 import { Colors } from "@/constants/theme";
 
-const sunIcon = require("../assets/images/sun.svg");
-const moonIcon = require("../assets/images/moon.svg");
-const logoAjax = require("../assets/images/logo_ajax.svg");
-const emailIcon = require("../assets/images/email_icon.svg");
-const lockIcon = require("../assets/images/cadeado.svg");
-const googleIcon = require("../assets/images/google_icon.svg");
 
 export default function Login() {
 
-  const { theme, toggleTheme } = useTheme();
+  const { theme } = useTheme();
   const colors = Colors[theme];
+  const { screenSize, maxWidth } = useResponsive();
+
+  const logoSize = responsiveValue(screenSize, {
+    small: 220,
+    medium: 250,
+    large: 280,
+    tablet: 320,
+  });
+
+  const contentPadding = responsiveValue(screenSize, {
+    small: 18,
+    medium: 22,
+    large: 24,
+    tablet: 28,
+  });
+
+  const logoSpacing = responsiveValue(screenSize, {
+    small: 10,
+    medium: 12,
+    large: 14,
+    tablet: 16,
+  });
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -41,16 +61,16 @@ export default function Login() {
     container: {
       flex: 1,
       justifyContent: "center",
-      padding: 24,
+      padding: contentPadding,
       backgroundColor: colors.background,
     },
     logoContainer: {
       alignItems: "center",
-      marginBottom: 5,
+      marginBottom: logoSpacing,
     },
     logo: {
-      width: 280,
-      height: 280,
+      width: logoSize,
+      height: logoSize,
     },
     subtitle: {
       fontSize: 32,
@@ -84,16 +104,6 @@ export default function Login() {
       textAlign: "center",
       marginTop: 40,
       fontSize: 12,
-    },
-    themeButton: {
-      height: 48,
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 10,
-    },
-    themeIcon: {
-      width: 24,
-      height: 24,
     },
     topBar: {
       position: "absolute",
@@ -147,43 +157,22 @@ export default function Login() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View style={[styles.container, { backgroundColor: colors.background, width: "100%", maxWidth: 400, alignSelf: "center" }]}>
+        <View style={[styles.container, { backgroundColor: colors.background, width: "100%", maxWidth, alignSelf: "center" }]}>
 
       <View style={styles.topBar}>
-        <TouchableOpacity
-          onPress={toggleTheme}
-          style={styles.themeButton}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Image
-            source={theme === "light" ? moonIcon : sunIcon}
-            style={styles.themeIcon}
-            resizeMode="contain"
-          />
-        </TouchableOpacity>
+        <ThemeToggle />
       </View>
-
       <View style={styles.logoContainer}>
-        {theme === "light" && (
-          <Image
-            source={logoAjax}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-        )}
-
-        {theme === "dark" && (
-          <Image
-            source={logoAjax}
-            style={[styles.logo, { tintColor: colors.primary }]}
-            resizeMode="contain"
-          />
-        )}
+        <Image
+          source={Images.logoAjax}
+          style={styles.logo}
+          resizeMode="contain"
+        />
       </View>
       <Text style={styles.subtitle}>Entrar</Text>
 
       <InputLine
-        icon={emailIcon}
+        iconName="mail-outline"
         placeholder="Digite seu Email"
         value={email}
         onChangeText={setEmail}
@@ -191,7 +180,7 @@ export default function Login() {
       />
 
       <InputLine
-        icon={lockIcon}
+        iconName="lock-closed-outline"
         placeholder="Digite sua Senha"
         value={password}
         onChangeText={setPassword}
@@ -204,7 +193,6 @@ export default function Login() {
           <Text style={styles.forgotPassword}>Esqueceu a senha?</Text>
         </TouchableOpacity>
       </View>
-
       <Button
         title="Acessar"
         onPress={handleLogin}
@@ -219,7 +207,7 @@ export default function Login() {
         onPress={handleGoogleLogin}
         loading={googleLoading}
         variant="secondary"
-        icon={googleIcon}
+        iconName="logo-google"
       />
 
       <TouchableOpacity onPress={() => router.push("/register")}>        
