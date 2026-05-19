@@ -1,0 +1,95 @@
+name: CI — Lint & Tests
+
+on:
+  push:
+    branches:
+      - dev  
+
+jobs:
+
+  # Lint
+
+  lint:
+    name: Lint (flake8 + black)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Instalar dependências de lint
+        run: |
+          pip install flake8 black
+
+      - name: Rodar Black (verificação de formatação)
+        run: |
+          black --check --diff backend/
+
+      - name: Rodar Flake8 (análise estática)
+        run: |
+          flake8 backend/ --max-line-length=88 --extend-ignore=E203,W503
+
+
+  #Testes com PostgreSQL
+  test:
+    name: Tests (Django + PostgreSQL)
+    runs-on: ubuntu-latest
+    needs: lint  
+
+    # PostgreSQL sobe como sidecar
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: chess_db_test
+          POSTGRES_USER: chess_user
+          POSTGRES_PASSWORD: chess_password
+        ports:
+          - 5432:5432
+        
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    
+    env:
+      SECRET_KEY: "django-insecure-ci-only-key-not-used-in-production"
+      DEBUG: "True"
+      ALLOWED_HOSTS: "localhost,127.0.0.1"
+      DB_NAME: chess_db_test
+      DB_USER: chess_user
+      DB_PASSWORD: chess_password
+      DB_HOST: localhost     
+      DB_PORT: "5432"
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Instalar dependências do projeto
+        run: |
+          pip install -r backend/requirements.txt
+
+      - name: Rodar migrações
+        working-directory: backend
+        run: |
+          python manage.py migrate --noinput
+
+      - name: Rodar testes
+        working-directory: backend
+        run: |
+          python manage.py test --verbosity=2

@@ -1,0 +1,18 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+
+# Ambiente
+.env
+
+# Docker
+postgres_data/
