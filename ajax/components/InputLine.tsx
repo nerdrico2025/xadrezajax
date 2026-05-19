@@ -6,6 +6,7 @@ import {
   TextInputProps,
   Animated,
   Platform,
+  Pressable,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -25,13 +26,18 @@ export default function InputLine({
   iconName,
   iconComponent,
   placeholder,
+  secureTextEntry,
   ...rest
 }: InputLineProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
 
   const [isFocused, setIsFocused] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const lineColorAnim = useRef(new Animated.Value(0)).current;
+
+  const isPasswordField = secureTextEntry === true;
+  const hidePassword = isPasswordField && !passwordVisible;
 
   const handleFocus = () => {
     setIsFocused(true);
@@ -102,8 +108,26 @@ export default function InputLine({
           cursorColor={colors.primary}
           onFocus={handleFocus}
           onBlur={handleBlur}
+          secureTextEntry={hidePassword}
           {...rest}
         />
+        {isPasswordField && (
+          <Pressable
+            onPress={() => setPasswordVisible((visible) => !visible)}
+            style={styles.visibilityToggle}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel={
+              passwordVisible ? "Ocultar senha" : "Mostrar senha"
+            }
+          >
+            <Ionicons
+              name={passwordVisible ? "eye-off-outline" : "eye-outline"}
+              size={22}
+              color={colors.icon}
+            />
+          </Pressable>
+        )}
       </View>
       <Animated.View
         style={[
@@ -141,9 +165,16 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    paddingRight: 8,
+    paddingRight: 4,
     paddingVertical: 0,
     textAlignVertical: "bottom",
+  },
+  visibilityToggle: {
+    width: 32,
+    height: 32,
+    marginBottom: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   underline: {
     height: StyleSheet.hairlineWidth,
