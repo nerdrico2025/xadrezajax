@@ -3,7 +3,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Image,
   ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -12,24 +11,38 @@ import { useState } from "react";
 import { router } from "expo-router";
 
 import { useTheme } from "@/hooks/useTheme";
+import { useResponsive } from "@/hooks/useResponsive";
+import { responsiveValue } from "@/utils/responsive";
 import { Colors } from "@/constants/theme";
-import Button from "../components/Button";
-import InputLine from "../components/InputLine";
-
-const emailIcon = require("../assets/images/email_icon.svg");
-const sunIcon = require("../assets/images/sun.svg");
-const moonIcon = require("../assets/images/moon.svg");
+import Button from "@/components/Button";
+import InputLine from "@/components/InputLine";
+import ThemeToggle from "@/components/ThemeToggle";
 
 export default function ForgotPassword() {
 
-  const { theme, toggleTheme } = useTheme();
+  const { theme } = useTheme();
   const colors = Colors[theme];
+  const { screenSize, maxWidth } = useResponsive();
+
+  const contentPadding = responsiveValue(screenSize, {
+    small: 18,
+    medium: 22,
+    large: 24,
+    tablet: 28,
+  });
+
+  const titleTopMargin = responsiveValue(screenSize, {
+    small: 120,
+    medium: 140,
+    large: 150,
+    tablet: 180,
+  });
 
   const styles = StyleSheet.create({
     container: {
       flex: 1,
       justifyContent: "flex-start",
-      padding: 24,
+      padding: contentPadding,
       backgroundColor: colors.background,
     },
     topBar: {
@@ -58,7 +71,7 @@ export default function ForgotPassword() {
       fontSize: 32,
       fontWeight: "bold",
       textAlign: "center",
-      marginTop: 150,
+      marginTop: titleTopMargin,
       marginBottom: 16,
       color: colors.text,
     },
@@ -76,16 +89,6 @@ export default function ForgotPassword() {
     },
     actionContainer: {
       marginTop: 12,
-    },
-    themeButton: {
-      width: 48,
-      height: 48,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    themeIcon: {
-      width: 24,
-      height: 24,
     },
   });
 
@@ -116,51 +119,40 @@ export default function ForgotPassword() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View style={[styles.container, { backgroundColor: colors.background, width: "100%", maxWidth: 400, alignSelf: "center" }]}>
+        <View style={[styles.container, { backgroundColor: colors.background, width: "100%", maxWidth, alignSelf: "center" }]}>          
+          <View style={styles.topBar}>
+            <TouchableOpacity onPress={() => router.push("/login")} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={[styles.backButtonText, { color: colors.tint }]}>←</Text>
+            </TouchableOpacity>
 
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => router.push('/login')} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={[styles.backButtonText, { color: colors.tint }]}>←</Text>
-        </TouchableOpacity>
+            <ThemeToggle />
+          </View>
 
-        <TouchableOpacity
-          onPress={toggleTheme}
-          style={styles.themeButton}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Image
-            source={theme === "light" ? moonIcon : sunIcon}
-            style={styles.themeIcon}
-            resizeMode="contain"
+          <Text style={[styles.title, { color: colors.text }]}>Recuperar Senha</Text>
+
+          <Text style={styles.subtitle}>
+            Enviaremos um código para o seu email cadastrado. Use-o para redefinir a senha.
+          </Text>
+
+          <InputLine
+            iconName="mail-outline"
+            placeholder="Email"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
           />
-        </TouchableOpacity>
-      </View>
 
-      <Text style={[styles.title, { color: colors.text }]}>Recuperar Senha</Text>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <Text style={styles.subtitle}>
-        Enviaremos um código para o seu email cadastrado. Use-o para redefinir a senha.
-      </Text>
-
-      <InputLine
-        icon={emailIcon}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-      />
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      <View style={styles.actionContainer}>
-        <Button
-          title="Enviar código"
-          onPress={handleSendCode}
-          loading={loading}
-          variant="primary"
-        />
-      </View>
+          <View style={styles.actionContainer}>
+            <Button
+              title="Enviar código"
+              onPress={handleSendCode}
+              loading={loading}
+              variant="primary"
+            />
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
