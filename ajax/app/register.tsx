@@ -1,16 +1,34 @@
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
+  Image,
+  ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useState } from "react";
 import { router } from "expo-router";
 
+import { useTheme } from "@/hooks/useTheme";
+import { Colors } from "@/constants/theme";
+import Button from "../components/Button";
+import InputLine from "../components/InputLine";
+import Divider from "../components/Divider";
+
+const logoAjax = require("../assets/images/logo_ajax.svg");
+const userIcon = require("../assets/images/user-bold.svg");
+const emailIcon = require("../assets/images/email_icon.svg");
+const lockIcon = require("../assets/images/cadeado.svg");
+const googleIcon = require("../assets/images/google_icon.svg");
+const sunIcon = require("../assets/images/sun.svg");
+const moonIcon = require("../assets/images/moon.svg");
+
 export default function Register() {
+
+  const { theme, toggleTheme } = useTheme();
+  const colors = Colors[theme];
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -20,6 +38,59 @@ export default function Register() {
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const [error, setError] = useState("");
+
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      justifyContent: "center",
+      padding: 24,
+      backgroundColor: colors.background,
+    },
+    logoContainer: {
+      alignItems: "center",
+      marginBottom: 16,
+    },
+    logo: {
+      width: 280,
+      height: 280,
+    },
+    subtitle: {
+      fontSize: 32,
+      fontWeight: "bold",
+      textAlign: "left",
+      marginBottom: 22,
+      color: colors.background === "#0D0D0D" ? colors.tint : colors.text,
+    },
+    error: {
+      color: colors.error,
+      marginBottom: 10,
+      textAlign: "left",
+      fontWeight: "600",
+    },
+    link: {
+      textAlign: "center",
+      marginTop: 18,
+      color: colors.tabIconDefault,
+      fontWeight: "600",
+      fontSize: 14,
+    },
+    themeButton: {
+      height: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 10,
+    },
+    themeIcon: {
+      width: 24,
+      height: 24,
+    },
+    topBar: {
+      width: "100%",
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      alignItems: "center",
+    },
+  });
 
   const handleRegister = () => {
 
@@ -71,166 +142,91 @@ export default function Register() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+        <View style={[styles.container, { backgroundColor: colors.background, width: "100%", maxWidth: 400, alignSelf: "center" }]}>
 
-      <Text style={styles.title}>
-        Criar Conta
-      </Text>
+      <View style={styles.topBar}>
+        <TouchableOpacity
+          onPress={toggleTheme}
+          style={styles.themeButton}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Image
+            source={theme === "light" ? moonIcon : sunIcon}
+            style={styles.themeIcon}
+            resizeMode="contain"
+          />
+        </TouchableOpacity>
+      </View>
 
-      <Text style={styles.subtitle}>
-        Cadastro de Usuário
-      </Text>
+      <View style={styles.logoContainer}>
+        {theme === "light" && (
+          <Image
+            source={logoAjax}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        )}
 
-      <TextInput
-        placeholder="Nome"
-        placeholderTextColor="#777"
-        style={styles.input}
+        {theme === "dark" && (
+          <Image
+            source={logoAjax}
+            style={[styles.logo, { tintColor: colors.primary }]}
+            resizeMode="contain"
+          />
+        )}
+      </View>
+      <Text style={styles.subtitle}>Novo Usuário</Text>
+
+      <InputLine
+        icon={userIcon}
+        placeholder="Digite seu Nome"
         value={name}
         onChangeText={setName}
       />
 
-      <TextInput
-        placeholder="Email"
-        placeholderTextColor="#777"
-        style={styles.input}
+      <InputLine
+        icon={emailIcon}
+        placeholder="Digite seu Email"
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
       />
 
-      <TextInput
-        placeholder="Senha"
-        placeholderTextColor="#777"
-        secureTextEntry
-        style={styles.input}
+      <InputLine
+        icon={lockIcon}
+        placeholder="Digite sua Senha"
         value={password}
         onChangeText={setPassword}
+        secureTextEntry
       />
 
-      {error ? (
-        <Text style={styles.error}>
-          {error}
-        </Text>
-      ) : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      {/* BOTÃO CADASTRAR */}
-      <TouchableOpacity
-        style={styles.button}
+      <Button
+        title="Cadastrar"
         onPress={handleRegister}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <Text style={styles.buttonText}>
-            Cadastrar
-          </Text>
-        )}
-      </TouchableOpacity>
+        loading={loading}
+        variant="primary"
+      />
 
-      {/* GOOGLE */}
-      <TouchableOpacity
-        style={styles.googleButton}
+      <Divider text="ou" />
+
+      <Button
+        title="Cadastrar com Google"
         onPress={handleGoogleRegister}
-      >
-        {googleLoading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <Text style={styles.googleText}>
-            Continuar com Google
-          </Text>
-        )}
-      </TouchableOpacity>
+        loading={googleLoading}
+        variant="secondary"
+        icon={googleIcon}
+      />
 
-      {/* VOLTAR LOGIN */}
-      <TouchableOpacity
-        onPress={() => router.push("/login")}
-      >
-        <Text style={styles.link}>
-          Já possui conta? Entrar
-        </Text>
+      <TouchableOpacity onPress={() => router.push("/login")}>        
+        <Text style={styles.link}>Já possui uma conta? Faça o login</Text>
       </TouchableOpacity>
-
-    </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-
-  container: {
-    flex: 1,
-    backgroundColor: "#0A0A0A",
-    justifyContent: "center",
-    padding: 24,
-  },
-
-  title: {
-    color: "#FFFFFF",
-    fontSize: 36,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-
-  subtitle: {
-    color: "#1B5F7A",
-    textAlign: "center",
-    marginBottom: 40,
-    letterSpacing: 1,
-  },
-
-  input: {
-    backgroundColor: "#161616",
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
-    borderRadius: 12,
-    padding: 16,
-    color: "#FFFFFF",
-    marginBottom: 16,
-  },
-
-  button: {
-    backgroundColor: "#1B5F7A",
-    padding: 18,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 58,
-    marginTop: 8,
-  },
-
-  buttonText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-
-  googleButton: {
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: "#333",
-    padding: 18,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 58,
-    backgroundColor: "#161616",
-  },
-
-  googleText: {
-    color: "#FFFFFF",
-    fontWeight: "600",
-    fontSize: 16,
-  },
-
-  link: {
-    color: "#AAAAAA",
-    textAlign: "center",
-    marginTop: 24,
-  },
-
-  error: {
-    color: "#FF4D4D",
-    marginBottom: 10,
-    textAlign: "center",
-  },
-
-});

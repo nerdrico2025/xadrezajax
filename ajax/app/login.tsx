@@ -1,16 +1,33 @@
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
+  Image,
+  ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useState } from "react";
 import { router } from "expo-router";
 
+import { useTheme } from "@/hooks/useTheme";
+import Button from "../components/Button";
+import InputLine from "../components/InputLine";
+import Divider from "../components/Divider";
+import { Colors } from "@/constants/theme";
+
+const sunIcon = require("../assets/images/sun.svg");
+const moonIcon = require("../assets/images/moon.svg");
+const logoAjax = require("../assets/images/logo_ajax.svg");
+const emailIcon = require("../assets/images/email_icon.svg");
+const lockIcon = require("../assets/images/cadeado.svg");
+const googleIcon = require("../assets/images/google_icon.svg");
+
 export default function Login() {
+
+  const { theme, toggleTheme } = useTheme();
+  const colors = Colors[theme];
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,11 +37,76 @@ export default function Login() {
 
   const [error, setError] = useState("");
 
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      justifyContent: "center",
+      padding: 24,
+      backgroundColor: colors.background,
+    },
+    logoContainer: {
+      alignItems: "center",
+      marginBottom: 5,
+    },
+    logo: {
+      width: 280,
+      height: 280,
+    },
+    subtitle: {
+      fontSize: 32,
+      fontWeight: "bold",
+      textAlign: "left",
+      marginBottom: 10,
+      color: colors.background === "#0D0D0D" ? colors.tint : colors.text,
+    },
+    forgotPassword: {
+      textAlign: "right",
+      marginBottom: 12,
+      color: colors.tabIconDefault,
+      fontWeight: "600",
+      fontSize: 12,
+    },
+    error: {
+      color: colors.error,
+      marginBottom: 10,
+      textAlign: "center",
+      fontWeight: "600",
+    },
+    link: {
+      textAlign: "center",
+      marginTop: 24,
+      color: colors.tabIconDefault,
+      fontWeight: "600",
+      fontSize: 14,
+    },
+    fakeUser: {
+      color: colors.secondary,
+      textAlign: "center",
+      marginTop: 40,
+      fontSize: 12,
+    },
+    themeButton: {
+      height: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 10,
+    },
+    themeIcon: {
+      width: 24,
+      height: 24,
+    },
+    topBar: {
+      position: "absolute",
+      top: 50,
+      right: 20,
+      zIndex: 10,
+    },
+  });
+
   const handleLogin = () => {
 
     setError("");
 
-    // validação básica
     if (!email || !password) {
       setError("Preencha todos os campos");
       return;
@@ -32,230 +114,119 @@ export default function Login() {
 
     setLoading(true);
 
-    // simulação backend
     setTimeout(() => {
 
-      // usuário fake
       const fakeEmail = "admin@ajax.com";
       const fakePassword = "123456";
 
-      if (
-        email === fakeEmail &&
-        password === fakePassword
-      ) {
+      if (email === fakeEmail && password === fakePassword) {
 
         setLoading(false);
-
         router.replace("/home");
 
       } else {
 
         setLoading(false);
-
         setError("Email ou senha inválidos");
       }
 
     }, 2000);
   };
 
-  // login google fake
   const handleGoogleLogin = () => {
 
     setError("");
-
     setGoogleLoading(true);
 
     setTimeout(() => {
-
       setGoogleLoading(false);
-
       router.replace("/home");
-
     }, 2000);
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+        <View style={[styles.container, { backgroundColor: colors.background, width: "100%", maxWidth: 400, alignSelf: "center" }]}>
 
-      <Text style={styles.title}>
-        AJAX
-      </Text>
+      <View style={styles.topBar}>
+        <TouchableOpacity
+          onPress={toggleTheme}
+          style={styles.themeButton}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Image
+            source={theme === "light" ? moonIcon : sunIcon}
+            style={styles.themeIcon}
+            resizeMode="contain"
+          />
+        </TouchableOpacity>
+      </View>
 
-      <Text style={styles.subtitle}>
-        Clube de Xadrez
-      </Text>
+      <View style={styles.logoContainer}>
+        {theme === "light" && (
+          <Image
+            source={logoAjax}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        )}
 
-      <TextInput
-        placeholder="Email"
-        placeholderTextColor="#777"
-        style={styles.input}
+        {theme === "dark" && (
+          <Image
+            source={logoAjax}
+            style={[styles.logo, { tintColor: colors.primary }]}
+            resizeMode="contain"
+          />
+        )}
+      </View>
+      <Text style={styles.subtitle}>Entrar</Text>
+
+      <InputLine
+        icon={emailIcon}
+        placeholder="Digite seu Email"
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
       />
 
-      <TextInput
-        placeholder="Senha"
-        placeholderTextColor="#777"
-        secureTextEntry
-        style={styles.input}
+      <InputLine
+        icon={lockIcon}
+        placeholder="Digite sua Senha"
         value={password}
         onChangeText={setPassword}
+        secureTextEntry
       />
-      
-      {/* ESQUECI SENHA */}
-      
-      <TouchableOpacity onPress={() => router.push("/forgot-password")}>
-        <Text style={styles.forgot}>
-            Esqueci minha senha
-        </Text>
-      </TouchableOpacity>
-      {error ? (
-        <Text style={styles.error}>
-          {error}
-        </Text>
-      ) : null}
 
-      {/* LOGIN NORMAL */}
-      <TouchableOpacity
-        style={styles.button}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        {error ? <Text style={[styles.error, { textAlign: 'left', marginBottom: 12 }]}>{error}</Text> : <View />}
+        <TouchableOpacity onPress={() => router.push("/forgot-password")}>
+          <Text style={styles.forgotPassword}>Esqueceu a senha?</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Button
+        title="Acessar"
         onPress={handleLogin}
-      >
+        loading={loading}
+        variant="primary"
+      />
 
-        {loading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <Text style={styles.buttonText}>
-            Entrar
-          </Text>
-        )}
+      <Divider text="ou" />
 
-      </TouchableOpacity>
-
-      {/* LOGIN GOOGLE */}
-      <TouchableOpacity
-        style={styles.googleButton}
+      <Button
+        title="Entrar com Google"
         onPress={handleGoogleLogin}
-      >
+        loading={googleLoading}
+        variant="secondary"
+        icon={googleIcon}
+      />
 
-        {googleLoading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <Text style={styles.googleText}>
-            Continuar com Google
-          </Text>
-        )}
-
+      <TouchableOpacity onPress={() => router.push("/register")}>        
+        <Text style={styles.link}>Ainda não tem conta? Cadastre-se</Text>
       </TouchableOpacity>
-
-      {/* LINK CADASTRO */}
-      <TouchableOpacity
-        onPress={() => router.push("/register")}
-      >
-        <Text style={styles.link}>
-          Criar conta
-        </Text>
-      </TouchableOpacity>
-
-      {/* USUÁRIO MOCK */}
-      <Text style={styles.fakeUser}>
-        admin@ajax.com | 123456
-      </Text>
-
-    </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-
-  container: {
-    flex: 1,
-    backgroundColor: "#0A0A0A",
-    justifyContent: "center",
-    padding: 24,
-  },
-
-  title: {
-    color: "#FFFFFF",
-    fontSize: 42,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-
-  subtitle: {
-    color: "#1B5F7A",
-    textAlign: "center",
-    marginBottom: 40,
-    letterSpacing: 2,
-  },
-
-  input: {
-    backgroundColor: "#161616",
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
-    borderRadius: 12,
-    padding: 16,
-    color: "#FFFFFF",
-    marginBottom: 16,
-  },
-
-  button: {
-    backgroundColor: "#1B5F7A",
-    padding: 18,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 58,
-    marginTop: 8,
-  },
-
-  buttonText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-
-  googleButton: {
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: "#333",
-    padding: 18,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 58,
-    backgroundColor: "#161616",
-  },
-
-  googleText: {
-    color: "#FFFFFF",
-    fontWeight: "600",
-    fontSize: 16,
-  },
-
-  link: {
-    color: "#AAAAAA",
-    textAlign: "center",
-    marginTop: 24,
-  },
-
-  error: {
-    color: "#FF4D4D",
-    marginBottom: 10,
-    textAlign: "center",
-  },
-
-  fakeUser: {
-    color: "#555",
-    textAlign: "center",
-    marginTop: 40,
-    fontSize: 12,
-  },
-
-  forgot: {
-  color: "#888",
-  textAlign: "right",
-  marginBottom: 12,
-  },
-
-});

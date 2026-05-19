@@ -1,16 +1,93 @@
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
+  Image,
+  ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useState } from "react";
 import { router } from "expo-router";
 
+import { useTheme } from "@/hooks/useTheme";
+import { Colors } from "@/constants/theme";
+import Button from "../components/Button";
+import InputLine from "../components/InputLine";
+
+const emailIcon = require("../assets/images/email_icon.svg");
+const sunIcon = require("../assets/images/sun.svg");
+const moonIcon = require("../assets/images/moon.svg");
+
 export default function ForgotPassword() {
+
+  const { theme, toggleTheme } = useTheme();
+  const colors = Colors[theme];
+
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      justifyContent: "flex-start",
+      padding: 24,
+      backgroundColor: colors.background,
+    },
+    topBar: {
+      position: "absolute",
+      top: 50,
+      left: 20,
+      right: 20,
+      height: 48,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      zIndex: 10,
+    },
+    backButton: {
+      width: 48,
+      height: 48,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    backButtonText: {
+      fontSize: 28,
+      lineHeight: 28,
+      fontWeight: "600",
+    },
+    title: {
+      fontSize: 32,
+      fontWeight: "bold",
+      textAlign: "center",
+      marginTop: 150,
+      marginBottom: 16,
+      color: colors.text,
+    },
+    subtitle: {
+      fontSize: 16,
+      textAlign: "center",
+      marginBottom: 32,
+      color: colors.tint,
+      lineHeight: 24,
+    },
+    error: {
+      color: colors.error,
+      textAlign: "center",
+      marginBottom: 16,
+    },
+    actionContainer: {
+      marginTop: 12,
+    },
+    themeButton: {
+      width: 48,
+      height: 48,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    themeIcon: {
+      width: 24,
+      height: 24,
+    },
+  });
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -37,81 +114,55 @@ export default function ForgotPassword() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+        <View style={[styles.container, { backgroundColor: colors.background, width: "100%", maxWidth: 400, alignSelf: "center" }]}>
 
-      <Text style={styles.title}>Recuperar Senha</Text>
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => router.push('/login')} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Text style={[styles.backButtonText, { color: colors.tint }]}>←</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={toggleTheme}
+          style={styles.themeButton}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Image
+            source={theme === "light" ? moonIcon : sunIcon}
+            style={styles.themeIcon}
+            resizeMode="contain"
+          />
+        </TouchableOpacity>
+      </View>
+
+      <Text style={[styles.title, { color: colors.text }]}>Recuperar Senha</Text>
 
       <Text style={styles.subtitle}>
-        Digite seu email para receber o código
+        Enviaremos um código para o seu email cadastrado. Use-o para redefinir a senha.
       </Text>
 
-      <TextInput
+      <InputLine
+        icon={emailIcon}
         placeholder="Email"
-        placeholderTextColor="#777"
-        style={styles.input}
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
+        keyboardType="email-address"
       />
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <TouchableOpacity
-        style={styles.button}
-        onPress={handleSendCode}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <Text style={styles.buttonText}>Enviar código</Text>
-        )}
-      </TouchableOpacity>
-
-    </View>
+      <View style={styles.actionContainer}>
+        <Button
+          title="Enviar código"
+          onPress={handleSendCode}
+          loading={loading}
+          variant="primary"
+        />
+      </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0A0A0A",
-    justifyContent: "center",
-    padding: 24,
-  },
-  title: {
-    color: "#FFF",
-    fontSize: 32,
-    textAlign: "center",
-    fontWeight: "bold",
-  },
-  subtitle: {
-    color: "#1B5F7A",
-    textAlign: "center",
-    marginBottom: 40,
-  },
-  input: {
-    backgroundColor: "#161616",
-    borderWidth: 1,
-    borderColor: "#2A2A2A",
-    borderRadius: 12,
-    padding: 16,
-    color: "#FFF",
-    marginBottom: 16,
-  },
-  button: {
-    backgroundColor: "#1B5F7A",
-    padding: 18,
-    borderRadius: 12,
-    alignItems: "center",
-    minHeight: 58,
-  },
-  buttonText: {
-    color: "#FFF",
-    fontWeight: "bold",
-  },
-  error: {
-    color: "#FF4D4D",
-    textAlign: "center",
-    marginBottom: 10,
-  },
-});

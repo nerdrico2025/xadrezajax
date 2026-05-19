@@ -2,8 +2,14 @@ import { View, StyleSheet, Animated, Easing } from "react-native";
 import { useEffect, useRef } from "react";
 import { useRouter } from "expo-router";
 
+import { useTheme } from "@/hooks/useTheme";
+import { Colors } from "@/constants/theme";
+
 export default function Splash() {
   const router = useRouter();
+
+  const { theme } = useTheme();
+  const colors = Colors[theme];
 
   const opacity = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(0.8)).current;
@@ -34,7 +40,7 @@ export default function Splash() {
   }, []);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Animated.Image
         source={require("../assets/images/logo2.png")}
         style={[
@@ -53,7 +59,6 @@ export default function Splash() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0A0A0A",
     justifyContent: "center",
     alignItems: "center",
   },
