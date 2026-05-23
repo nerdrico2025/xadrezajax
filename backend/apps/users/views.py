@@ -55,6 +55,7 @@ class GoogleAuthView(APIView):
     POST /api/v1/auth/google/
     Recebe o id_token, valida, cria/recupera o usuário e retorna JWTs.
     """
+
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -86,6 +87,7 @@ class RegisterView(APIView):
     POST /api/v1/auth/register/
     Cadastro de novos usuários (UC02). Público.
     """
+
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -101,6 +103,7 @@ class PasswordResetRequestView(APIView):
     POST /api/v1/auth/password-reset/
     RF020, RF021, RF022 — solicita recuperação de senha via e-mail gerando um PIN.
     """
+
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -146,10 +149,12 @@ class PasswordResetConfirmView(APIView):
     POST /api/v1/auth/password-reset/confirm/
     RF023, RF024, RF025 — redefine a senha usando o PIN numérico.
     """
+
     permission_classes = [AllowAny]
 
     def post(self, request):
-        # A validação pode ser feita por serializer, mas extraindo direto para garantir compatibilidade imediata
+        # A validação pode ser feita por serializer,
+        # mas extraindo direto para garantir compatibilidade imediata
         email = request.data.get("email")
         code = request.data.get("codigo")
         new_password = request.data.get("new_password")
@@ -157,7 +162,7 @@ class PasswordResetConfirmView(APIView):
         if not all([email, code, new_password]):
             return Response(
                 {"detail": "E-mail, código e nova senha são obrigatórios."},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         user = User.objects.filter(email=email).first()
@@ -191,6 +196,7 @@ class LogoutView(APIView):
     POST /api/v1/auth/logout/
     UC006 — blacklist do refresh token no logout.
     """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -213,6 +219,7 @@ class ChessTokenObtainPairView(TokenObtainPairView):
     POST /api/v1/auth/login/
     Login com e-mail e senha, retorna access + refresh token (UC03).
     """
+
     serializer_class = ChessTokenObtainPairSerializer
     permission_classes = [AllowAny]
 
@@ -222,6 +229,7 @@ class ThemePreferenceView(APIView):
     PATCH /api/v1/auth/theme/
     Atualiza a preferência de tema do usuário autenticado.
     """
+
     permission_classes = [IsAuthenticated]
 
     def patch(self, request):
@@ -241,6 +249,7 @@ class CurrentUserView(APIView):
     GET /api/v1/auth/me/
     Retorna os dados do usuário autenticado.
     """
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):

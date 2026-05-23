@@ -52,10 +52,9 @@ class PasswordResetCode(models.Model):
     """
     Modelo para gerenciar os códigos numéricos de recuperação de senha.
     """
+
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="reset_codes"
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reset_codes"
     )
     code = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now_add=True)
