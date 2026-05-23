@@ -1,3 +1,7 @@
+import random
+from datetime import timedelta
+
+from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 from django.utils import timezone
@@ -42,3 +46,30 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email
+
+
+class PasswordResetCode(models.Model):
+    """
+    Modelo para gerenciar os códigos numéricos de recuperação de senha.
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="reset_codes"
+    )
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def is_valid(self):
+        # O código expira em 15 minutos
+        expiration_time = self.created_at + timedelta(minutes=15)
+        return timezone.now() <= expiration_time
+
+    @classmethod
+    def generate_code(cls, user):
+        # Invalida códigos anteriores gerados para este usuário
+        cls.objects.filter(user=user).delete()
+
+        # Gera PIN de 6 dígitos
+        pin = str(random.randint(100000, 999999))
+        return cls.objects.create(user=user, code=pin)

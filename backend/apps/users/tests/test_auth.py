@@ -1,16 +1,17 @@
 from unittest.mock import patch
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.urls import reverse
-from django.utils.encoding import force_bytes
-from django.utils.http import urlsafe_base64_encode
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
+# Importe o seu novo modelo. Ajuste o caminho se necessário (ex: 'users.models')
+from apps.users.models import PasswordResetCode
+
 User = get_user_model()
-password_reset_token_generator = PasswordResetTokenGenerator()
 
 REGISTER_URL = reverse("users:register")
 LOGIN_URL = reverse("users:login")
@@ -204,7 +205,7 @@ class CurrentUserEndpointTests(APITestCase):
 
 
 class PasswordResetTests(APITestCase):
-    """Cobertura dos fluxos de recuperação de senha."""
+    """Cobertura dos fluxos de recuperação de senha com código numérico."""
 
     def setUp(self):
         self.user = User.objects.create_user(
@@ -222,6 +223,8 @@ class PasswordResetTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         mock_send_mail.assert_called_once()
+        # Verifica se o código foi criado no banco
+        self.assertTrue(PasswordResetCode.objects.filter(user=self.user).exists())
 
     def test_password_reset_request_returns_400_for_unknown_email(self):
         response = self.client.post(
@@ -231,14 +234,14 @@ class PasswordResetTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_password_reset_confirm_with_valid_token(self):
-        uid = urlsafe_base64_encode(force_bytes(self.user.pk))
-        token = password_reset_token_generator.make_token(self.user)
+    def test_password_reset_confirm_with_valid_code(self):
+        reset_obj = PasswordResetCode.generate_code(self.user)
+
         response = self.client.post(
             PASSWORD_RESET_CONFIRM_URL,
             {
-                "uid": uid,
-                "token": token,
+                "email": "hikaru@chess.com",
+                "codigo": reset_obj.code,
                 "new_password": "SenhaNova@2026",
                 "password_confirm": "SenhaNova@2026",
             },
@@ -247,14 +250,18 @@ class PasswordResetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password("SenhaNova@2026"))
+        # Verifica se o código foi deletado após o uso
+        self.assertFalse(PasswordResetCode.objects.filter(id=reset_obj.id).exists())
 
-    def test_password_reset_confirm_returns_400_for_invalid_token(self):
-        uid = urlsafe_base64_encode(force_bytes(self.user.pk))
+    def test_password_reset_confirm_returns_400_for_invalid_code(self):
+        # Gera um código real para garantir que o erro é por estarmos enviando outro
+        PasswordResetCode.generate_code(self.user)
+
         response = self.client.post(
             PASSWORD_RESET_CONFIRM_URL,
             {
-                "uid": uid,
-                "token": "token-invalido",
+                "email": "hikaru@chess.com",
+                "codigo": "000000",  # Código que com certeza está errado
                 "new_password": "SenhaNova@2026",
                 "password_confirm": "SenhaNova@2026",
             },
@@ -262,21 +269,20 @@ class PasswordResetTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_password_reset_confirm_returns_400_for_expired_token(self):
-        from django.conf import settings  # Importe o settings caso não esteja no topo
+    def test_password_reset_confirm_returns_400_for_expired_code(self):
+        reset_obj = PasswordResetCode.generate_code(self.user)
 
-        uid = urlsafe_base64_encode(force_bytes(self.user.pk))
-
-        # Correção para o Django 6.0+: Passando o SECRET_KEY como o 'secret' exigido
-        expired_token = password_reset_token_generator._make_token_with_timestamp(
-            self.user, 0, settings.SECRET_KEY
+        # Manipulamos o banco de dados para forçar a expiração do código
+        # voltando a data de criação em 20 minutos
+        PasswordResetCode.objects.filter(id=reset_obj.id).update(
+            created_at=timezone.now() - timedelta(minutes=20)
         )
 
         response = self.client.post(
             PASSWORD_RESET_CONFIRM_URL,
             {
-                "uid": uid,
-                "token": expired_token,
+                "email": "hikaru@chess.com",
+                "codigo": reset_obj.code,
                 "new_password": "SenhaNova@2026",
                 "password_confirm": "SenhaNova@2026",
             },

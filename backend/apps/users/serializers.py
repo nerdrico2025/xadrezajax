@@ -70,22 +70,18 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
-    uid = serializers.CharField(required=False, allow_blank=False)
-    email = serializers.EmailField(required=False)
-    token = serializers.CharField(write_only=True)
-    new_password = serializers.CharField(write_only=True)
-    password_confirm = serializers.CharField(write_only=True)
+    email = serializers.EmailField(required=True)
+    codigo = serializers.CharField(write_only=True, required=True, max_length=6)
+    new_password = serializers.CharField(write_only=True, required=True)
+    password_confirm = serializers.CharField(write_only=True, required=True)
 
     def validate(self, attrs):
-        if not attrs.get("uid") and not attrs.get("email"):
-            raise serializers.ValidationError("É necessário informar uid ou email.")
         if attrs["new_password"] != attrs["password_confirm"]:
             raise serializers.ValidationError(
                 {"password_confirm": "As senhas não coincidem."}
             )
         validate_password(attrs["new_password"])
-        if attrs.get("email"):
-            attrs["email"] = attrs["email"].lower()
+        attrs["email"] = attrs["email"].lower()
         return attrs
 
 

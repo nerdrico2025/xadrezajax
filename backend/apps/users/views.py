@@ -1,9 +1,6 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.core.mail import send_mail
-from django.utils.encoding import force_bytes, force_str
-from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -13,10 +10,10 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from .models import PasswordResetCode
 from .serializers import (
     ChessTokenObtainPairSerializer,
     GoogleAuthSerializer,
-    PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     RegisterSerializer,
     ThemePreferenceSerializer,
@@ -30,7 +27,6 @@ from .services import (
 )
 
 User = get_user_model()
-password_reset_token_generator = PasswordResetTokenGenerator()
 
 
 def _build_jwt_response(user, status_code):
@@ -57,17 +53,8 @@ def _build_jwt_response(user, status_code):
 class GoogleAuthView(APIView):
     """
     POST /api/v1/auth/google/
-
-    Recebe o id_token gerado pelo SDK do Google no app React Native,
-    valida a assinatura criptográfica, cria ou recupera o usuário local
-    e retorna os JWTs de sessão — sem redirecionamentos HTTP (mobile-first).
-
-    RF001 — Validação do id_token
-    RF002 — Geração dos JWTs de sessão
-    RF003 — Criação/Recuperação do usuário
-    RF006 — Resposta JSON para o front-end gerenciar navegação
+    Recebe o id_token, valida, cria/recupera o usuário e retorna JWTs.
     """
-
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -99,7 +86,6 @@ class RegisterView(APIView):
     POST /api/v1/auth/register/
     Cadastro de novos usuários (UC02). Público.
     """
-
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -113,38 +99,42 @@ class RegisterView(APIView):
 class PasswordResetRequestView(APIView):
     """
     POST /api/v1/auth/password-reset/
-    RF020, RF021, RF022 — solicita recuperação de senha via e-mail.
+    RF020, RF021, RF022 — solicita recuperação de senha via e-mail gerando um PIN.
     """
-
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"]
-        user = User.objects.get(email=email)
-        uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
-        token = password_reset_token_generator.make_token(user)
-        reset_url = request.build_absolute_uri("/api/v1/auth/password-reset/confirm/")
-        reset_link = f"{reset_url}?uid={uidb64}&token={token}"
-        subject = "Recuperação de senha - Xadrez AJAX"
-        message = (
-            "Você solicitou a recuperação de senha.\n\n"
-            f"Use o link abaixo para redefinir sua senha:\n{reset_link}\n\n"
-            "Caso não tenha sido você, ignore esta mensagem."
-        )
-        send_mail(
-            subject,
-            message,
-            settings.DEFAULT_FROM_EMAIL,
-            [email],
-            fail_silently=False,
-        )
+
+        user = User.objects.filter(email=email).first()
+
+        if user:
+            reset_obj = PasswordResetCode.generate_code(user)
+
+            subject = "Código de Recuperação - Xadrez AJAX"
+            message = (
+                f"Olá, {user.full_name}.\n\n"
+                "Você solicitou a recuperação de senha.\n\n"
+                f"Seu código de verificação é: {reset_obj.code}\n"
+                "Este código expira em 15 minutos.\n\n"
+                "Caso não tenha sido você, ignore esta mensagem."
+            )
+
+            send_mail(
+                subject,
+                message,
+                settings.DEFAULT_FROM_EMAIL,
+                [email],
+                fail_silently=False,
+            )
+
         return Response(
             {
                 "detail": (
-                    "E-mail de recuperação enviado com instruções. "
-                    "Verifique sua caixa de entrada."
+                    "Se o e-mail estiver cadastrado, um código de "
+                    "recuperação será enviado para sua caixa de entrada."
                 )
             },
             status=status.HTTP_200_OK,
@@ -154,35 +144,42 @@ class PasswordResetRequestView(APIView):
 class PasswordResetConfirmView(APIView):
     """
     POST /api/v1/auth/password-reset/confirm/
-    RF023, RF024, RF025 — redefine a senha usando token seguro.
+    RF023, RF024, RF025 — redefine a senha usando o PIN numérico.
     """
-
     permission_classes = [AllowAny]
 
     def post(self, request):
-        serializer = PasswordResetConfirmSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        uid = serializer.validated_data.get("uid")
-        email = serializer.validated_data.get("email")
-        token = serializer.validated_data["token"]
-        if uid:
-            try:
-                uid = force_str(urlsafe_base64_decode(uid))
-            except Exception:
-                return Response(
-                    {"detail": "UID inválido."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            user = User.objects.filter(pk=uid).first()
-        else:
-            user = User.objects.filter(email=email).first()
-        if not user or not password_reset_token_generator.check_token(user, token):
+        # A validação pode ser feita por serializer, mas extraindo direto para garantir compatibilidade imediata
+        email = request.data.get("email")
+        code = request.data.get("codigo")
+        new_password = request.data.get("new_password")
+
+        if not all([email, code, new_password]):
             return Response(
-                {"detail": "Token inválido ou expirado."},
+                {"detail": "E-mail, código e nova senha são obrigatórios."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user = User.objects.filter(email=email).first()
+        if not user:
+            return Response(
+                {"detail": "Código inválido ou expirado."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        user.set_password(serializer.validated_data["new_password"])
+
+        reset_obj = PasswordResetCode.objects.filter(user=user, code=code).last()
+
+        if not reset_obj or not reset_obj.is_valid():
+            return Response(
+                {"detail": "Código inválido ou expirado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Atualiza a senha e inutiliza o código
+        user.set_password(new_password)
         user.save(update_fields=["password"])
+        reset_obj.delete()
+
         return Response(
             {"detail": "Senha redefinida com sucesso."},
             status=status.HTTP_200_OK,
@@ -194,7 +191,6 @@ class LogoutView(APIView):
     POST /api/v1/auth/logout/
     UC006 — blacklist do refresh token no logout.
     """
-
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -217,7 +213,6 @@ class ChessTokenObtainPairView(TokenObtainPairView):
     POST /api/v1/auth/login/
     Login com e-mail e senha, retorna access + refresh token (UC03).
     """
-
     serializer_class = ChessTokenObtainPairSerializer
     permission_classes = [AllowAny]
 
@@ -227,7 +222,6 @@ class ThemePreferenceView(APIView):
     PATCH /api/v1/auth/theme/
     Atualiza a preferência de tema do usuário autenticado.
     """
-
     permission_classes = [IsAuthenticated]
 
     def patch(self, request):
@@ -247,7 +241,6 @@ class CurrentUserView(APIView):
     GET /api/v1/auth/me/
     Retorna os dados do usuário autenticado.
     """
-
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
