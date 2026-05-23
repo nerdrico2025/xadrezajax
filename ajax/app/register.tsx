@@ -1,5 +1,4 @@
 import { Text, TouchableOpacity, StyleSheet } from "react-native";
-
 import { useState } from "react";
 import { router } from "expo-router";
 
@@ -10,6 +9,8 @@ import InputLine from "@/components/InputLine";
 import Divider from "@/components/Divider";
 import { Colors } from "@/constants/theme";
 
+const API_URL = "http://192.168.0.128:8000"; // 🔥 seu IP
+
 export default function Register() {
   const { theme } = useTheme();
   const colors = Colors[theme];
@@ -17,50 +18,115 @@ export default function Register() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState(""); // ✅ novo
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
+    console.log("🔥 CLICOU NO BOTÃO");
+
     setError("");
 
-    if (!name || !email || !password) {
+    // 🔍 DEBUG valores
+    console.log("📌 Dados:");
+    console.log("Nome:", name);
+    console.log("Email:", email);
+    console.log("Senha:", password);
+    console.log("Confirmar:", confirmPassword);
+
+    // ✅ validações
+    if (!name || !email || !password || !confirmPassword) {
+      console.log("❌ Falta campo");
       setError("Preencha todos os campos");
       return;
     }
 
-    if (password.length < 6) {
-      setError("Senha deve ter pelo menos 6 caracteres");
+    if (password.length < 8) {
+      console.log("❌ Senha curta");
+      setError("Senha deve ter pelo menos 8 caracteres");
       return;
     }
 
+    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+      console.log("❌ Senha sem letra ou número");
+      setError("Senha deve conter letras e números");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      console.log("❌ Senhas diferentes");
+      setError("As senhas não coincidem");
+      return;
+    }
+
+    console.log("✅ Passou validações");
+
     setLoading(true);
 
-    setTimeout(() => {
-      if (email === "admin@ajax.com") {
-        setLoading(false);
-        setError("Email já cadastrado");
+    try {
+      console.log("🚀 Enviando request...");
+
+      const response = await fetch(`${API_URL}/api/v1/auth/register/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          full_name: name,
+          email: email,
+          password: password,
+          password_confirm: confirmPassword,
+        }),
+      });
+
+      console.log("📡 STATUS:", response.status);
+
+      const data = await response.json();
+
+      console.log("📦 RESPONSE DATA:", data);
+
+      if (!response.ok) {
+        console.log("❌ Erro da API");
+
+        setError(
+          data?.non_field_errors?.[0] ||
+          data?.email?.[0] ||
+          data?.password?.[0] ||
+          "Erro ao cadastrar"
+        );
         return;
       }
 
+      console.log("✅ CADASTRO OK");
+
+      alert("Cadastro realizado com sucesso!");
+      router.replace("/login");
+
+    } catch (err) {
+      console.log("💥 ERRO DE CONEXÃO:", err);
+      setError("Erro de conexão com servidor");
+    } finally {
       setLoading(false);
-      router.replace("/home");
-    }, 2000);
-  };
+      console.log("🏁 FINALIZOU");
+    }
+    };
 
-  const handleGoogleRegister = () => {
-    setError("");
-    setGoogleLoading(true);
+    const handleGoogleRegister = () => {
+      setError("");
+      setGoogleLoading(true);
 
-    setTimeout(() => {
-      setGoogleLoading(false);
-      router.replace("/home");
-    }, 2000);
+      setTimeout(() => {
+        setGoogleLoading(false);
+        router.replace("/home");
+      }, 2000);
   };
 
   return (
     <AuthScreenLayout showLogo centered>
-      <Text style={[styles.subtitle, { color: colors.text }]}>Novo Usuário</Text>
+      <Text style={[styles.subtitle, { color: colors.text }]}>
+        Novo Usuário
+      </Text>
 
       <InputLine
         iconName="person-outline"
@@ -85,9 +151,27 @@ export default function Register() {
         secureTextEntry
       />
 
-      {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
+      {/* ✅ NOVO CAMPO */}
+      <InputLine
+        iconName="lock-closed-outline"
+        placeholder="Confirme sua Senha"
+        value={confirmPassword}
+        onChangeText={setConfirmPassword}
+        secureTextEntry
+      />
 
-      <Button title="Cadastrar" onPress={handleRegister} loading={loading} variant="primary" />
+      {error ? (
+        <Text style={[styles.error, { color: colors.error }]}>
+          {error}
+        </Text>
+      ) : null}
+
+      <Button
+        title="Cadastrar"
+        onPress={handleRegister}
+        loading={loading}
+        variant="primary"
+      />
 
       <Divider text="ou" />
 

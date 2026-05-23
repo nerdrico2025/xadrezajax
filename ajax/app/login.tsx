@@ -1,7 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
-
 import { useState } from "react";
 import { router } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useTheme } from "@/hooks/useTheme";
 import AuthScreenLayout from "@/components/AuthScreenLayout";
@@ -9,6 +9,8 @@ import Button from "@/components/Button";
 import InputLine from "@/components/InputLine";
 import Divider from "@/components/Divider";
 import { Colors } from "@/constants/theme";
+
+const API_URL = "http://192.168.0.128:8000";
 
 export default function Login() {
   const { theme } = useTheme();
@@ -20,7 +22,9 @@ export default function Login() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
+    console.log("🔥 LOGIN CLICADO");
+
     setError("");
 
     if (!email || !password) {
@@ -30,28 +34,39 @@ export default function Login() {
 
     setLoading(true);
 
-    setTimeout(() => {
-      const fakeEmail = "admin@ajax.com";
-      const fakePassword = "123456";
+    try {
+      const response = await fetch(`${API_URL}/api/v1/auth/login/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
+      });
 
-      if (email === fakeEmail && password === fakePassword) {
-        setLoading(false);
-        router.replace("/home");
-      } else {
-        setLoading(false);
-        setError("Email ou senha inválidos");
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data?.detail || "Email ou senha inválidos");
+        return;
       }
-    }, 2000);
-  };
 
-  const handleGoogleLogin = () => {
-    setError("");
-    setGoogleLoading(true);
+      // 🔐 SALVAR TOKEN
+      await AsyncStorage.setItem("accessToken", data.access);
+      await AsyncStorage.setItem("refreshToken", data.refresh);
 
-    setTimeout(() => {
-      setGoogleLoading(false);
+      console.log("✅ LOGIN OK");
+
       router.replace("/home");
-    }, 2000);
+
+    } catch (err) {
+      console.log("💥 ERRO:", err);
+      setError("Erro de conexão com servidor");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -74,26 +89,13 @@ export default function Login() {
         secureTextEntry
       />
 
-      <View style={styles.errorRow}>
-        {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : <View />}
-        <TouchableOpacity onPress={() => router.push("/forgot-password")}>
-          <Text style={[styles.forgotPassword, { color: colors.tabIconDefault }]}>
-            Esqueceu a senha?
-          </Text>
-        </TouchableOpacity>
-      </View>
+      {error ? (
+        <Text style={[styles.error, { color: colors.error }]}>{error}</Text>
+      ) : null}
 
-      <Button title="Acessar" onPress={handleLogin} loading={loading} variant="primary" />
+      <Button title="Acessar" onPress={handleLogin} loading={loading} />
 
       <Divider text="ou" />
-
-      <Button
-        title="Entrar com Google"
-        onPress={handleGoogleLogin}
-        loading={googleLoading}
-        variant="secondary"
-        iconName="logo-google"
-      />
 
       <TouchableOpacity onPress={() => router.push("/register")}>
         <Text style={[styles.link, { color: colors.tabIconDefault }]}>
@@ -108,28 +110,15 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 32,
     fontWeight: "bold",
-    textAlign: "left",
     marginBottom: 10,
   },
-  errorRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
   error: {
-    flex: 1,
-    marginRight: 8,
+    marginBottom: 10,
     fontWeight: "600",
-  },
-  forgotPassword: {
-    fontWeight: "600",
-    fontSize: 12,
   },
   link: {
     textAlign: "center",
-    marginTop: 24,
+    marginTop: 20,
     fontWeight: "600",
-    fontSize: 14,
   },
 });
