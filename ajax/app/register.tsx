@@ -9,7 +9,7 @@ import InputLine from "@/components/InputLine";
 import Divider from "@/components/Divider";
 import { Colors } from "@/constants/theme";
 
-const API_URL = "http://192.168.0.128:8000"; // 🔥 seu IP
+const API_URL = "http://192.168.0.128:8000";
 
 export default function Register() {
   const { theme } = useTheme();
@@ -18,13 +18,12 @@ export default function Register() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState(""); // ✅ novo
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleRegister = async () => {
-    console.log("🔥 CLICOU NO BOTÃO");
 
     setError("");
 
@@ -123,7 +122,7 @@ export default function Register() {
   };
 
   return (
-    <AuthScreenLayout showLogo centered>
+    <AuthScreenLayout showLogo>
       <Text style={[styles.subtitle, { color: colors.text }]}>
         Novo Usuário
       </Text>

@@ -23,7 +23,6 @@ export default function Login() {
   const [error, setError] = useState("");
 
   const handleLogin = async () => {
-    console.log("🔥 LOGIN CLICADO");
 
     setError("");
 
@@ -57,7 +56,6 @@ export default function Login() {
       await AsyncStorage.setItem("accessToken", data.access);
       await AsyncStorage.setItem("refreshToken", data.refresh);
 
-      console.log("✅ LOGIN OK");
 
       router.replace("/home");
 
@@ -70,7 +68,7 @@ export default function Login() {
   };
 
   return (
-    <AuthScreenLayout showLogo centered>
+    <AuthScreenLayout showLogo>
       <Text style={[styles.subtitle, { color: colors.text }]}>Entrar</Text>
 
       <InputLine
@@ -89,17 +87,43 @@ export default function Login() {
         secureTextEntry
       />
 
-      {error ? (
-        <Text style={[styles.error, { color: colors.error }]}>{error}</Text>
-      ) : null}
+      <View style={styles.rowBetween}>
+        {error ? (
+          <Text style={[styles.error, { color: colors.error }]}>
+            {error}
+          </Text>
+        ) : (
+          <View />
+        )}
 
+        <TouchableOpacity onPress={() => router.push("/forgot-password")}>
+          <Text style={[styles.forgot, { color: colors.tabIconDefault }]}>
+            Esqueceu a senha?
+          </Text>
+        </TouchableOpacity>
+      </View>
+      
       <Button title="Acessar" onPress={handleLogin} loading={loading} />
 
       <Divider text="ou" />
+      <Button
+        title="Entrar com Google"
+        onPress={() => {
+          setError("");
+          setGoogleLoading(true);
 
+          setTimeout(() => {
+            setGoogleLoading(false);
+            router.replace("/home");
+          }, 2000);
+        }}
+        loading={googleLoading}
+        variant="secondary"
+        iconName="logo-google"
+      />
       <TouchableOpacity onPress={() => router.push("/register")}>
         <Text style={[styles.link, { color: colors.tabIconDefault }]}>
-          Ainda não tem conta? Cadastre-se
+          Ainda não possui conta? Cadastre-se
         </Text>
       </TouchableOpacity>
     </AuthScreenLayout>
@@ -120,5 +144,16 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 20,
     fontWeight: "600",
+  },
+  rowBetween: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  
+  forgot: {
+    fontWeight: "600",
+    fontSize: 12,
   },
 });

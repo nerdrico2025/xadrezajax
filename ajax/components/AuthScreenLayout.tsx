@@ -1,6 +1,14 @@
 import { type ReactNode } from "react";
-import { View, StyleSheet, ScrollView } from "react-native";
+import {
+  View,
+  StyleSheet,
+  TouchableWithoutFeedback,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 
 import { useTheme } from "@/hooks/useTheme";
 import { useAuthLayout } from "@/hooks/useAuthLayout";
@@ -26,46 +34,64 @@ export default function AuthScreenLayout({
   const { maxWidth, logoSize, contentPadding, logoSpacing, topBarHeight } =
     useAuthLayout();
 
-  return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
+  const content = (
+    <View
+      style={[
+        styles.page,
+        {
+          backgroundColor: colors.background,
+          maxWidth,
+          paddingHorizontal: contentPadding,
+        },
+      ]}
+    >
+      <View style={[styles.topBar, { height: topBarHeight }]}>
+        {leftAction ?? <View style={styles.topBarSide} />}
+        <ThemeToggle />
+      </View>
+
+      <View
+        style={[
+          styles.body,
+          {
+            paddingBottom: contentPadding,
+            justifyContent: centered ? "center" : "flex-start",
+          },
+        ]}
       >
-        <View
-          style={[
-            styles.page,
-            {
-              backgroundColor: colors.background,
-              maxWidth,
-              paddingHorizontal: contentPadding,
-            },
-          ]}
-        >
-          <View style={[styles.topBar, { height: topBarHeight }]}>
-            {leftAction ?? <View style={styles.topBarSide} />}
-            <ThemeToggle />
+        {showLogo && (
+          <View style={[styles.logoSlot, { marginBottom: logoSpacing }]}>
+            <AppLogo theme={theme} size={logoSize} />
           </View>
+        )}
 
-          <View
-            style={[
-              styles.body,
-              {
-                paddingBottom: contentPadding,
-                justifyContent: centered ? "center" : "flex-start",
-              },
-            ]}
+        {children}
+      </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: colors.background }]}
+    >
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <KeyboardAwareScrollView
+            contentContainerStyle={styles.scrollContent}
+            enableOnAndroid
+            extraScrollHeight={140}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            keyboardOpeningTime={0}
+            enableAutomaticScroll
           >
-            {showLogo && (
-              <View style={[styles.logoSlot, { marginBottom: logoSpacing }]}>
-                <AppLogo theme={theme} size={logoSize} />
-              </View>
-            )}
-
-            {children}
-          </View>
-        </View>
-      </ScrollView>
+            {content}
+          </KeyboardAwareScrollView>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
