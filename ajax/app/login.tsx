@@ -52,7 +52,6 @@ export default function Login() {
         return;
       }
 
-      // 🔐 SALVAR TOKEN
       await AsyncStorage.setItem("accessToken", data.access);
       await AsyncStorage.setItem("refreshToken", data.refresh);
 
@@ -132,7 +131,7 @@ export default function Login() {
 
 const styles = StyleSheet.create({
   subtitle: {
-    fontSize: 32,
+    fontSize: 36,
     fontWeight: "bold",
     marginBottom: 10,
   },

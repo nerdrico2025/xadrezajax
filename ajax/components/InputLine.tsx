@@ -71,6 +71,19 @@ export default function InputLine({
         }
       : {};
 
+  const getIconStyle = () => {
+    if (iconName === "person-outline") {
+      return styles.personIconAdjust;
+    }
+    if (iconName === "mail-outline") {
+      return styles.emailIconAdjust;
+    }
+    if (iconName === "lock-closed-outline") {
+      return styles.lockIconAdjust;
+    }
+    return {};
+  };
+
   return (
     <View style={styles.wrapper}>
       <View
@@ -84,15 +97,17 @@ export default function InputLine({
         {iconComponent ? (
           <View style={styles.iconWrapper}>{iconComponent}</View>
         ) : iconName ? (
-          <Ionicons
-            name={iconName}
-            size={20}
-            color={colors.icon}
-            style={styles.icon}
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          />
+          <View style={[styles.iconContainer, getIconStyle()]}>
+            <Ionicons
+              name={iconName}
+              size={20}
+              color={colors.icon}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            />
+          </View>
         ) : null}
+        
         <TextInput
           placeholder={placeholder}
           placeholderTextColor={colors.icon}
@@ -123,7 +138,7 @@ export default function InputLine({
           >
             <Ionicons
               name={passwordVisible ? "eye-off-outline" : "eye-outline"}
-              size={22}
+              size={20}
               color={colors.icon}
             />
           </Pressable>
@@ -143,41 +158,57 @@ export default function InputLine({
 
 const styles = StyleSheet.create({
   wrapper: {
-    marginBottom: 16,
+    marginBottom: 8,
   },
   container: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
+    height: 36,
     paddingHorizontal: 0,
-    paddingVertical: 2,
+    position: "relative",
   },
   iconWrapper: {
     width: 20,
-    height: 20,
     marginRight: 12,
     justifyContent: "center",
     alignItems: "center",
   },
-  icon: {
+  iconContainer: {
+    width: 20,
     marginRight: 12,
-    marginBottom: 3,
+    alignItems: "center",
+    justifyContent: "center",
   },
+  personIconAdjust: {
+    top: 5,
+  },
+  emailIconAdjust: {
+    top: 8,
+  },
+  lockIconAdjust: {
+    top: 6,
+  },
+
   input: {
     flex: 1,
     fontSize: 16,
-    paddingRight: 4,
-    paddingVertical: 0,
-    textAlignVertical: "bottom",
+    paddingRight: 36,
+    marginTop: 19,
+    height: "100%",
+    margin: 0,
+    includeFontPadding: false,
   },
   visibilityToggle: {
+    position: "absolute",
+    right: 6,
     width: 32,
     height: 32,
-    marginBottom: 1,
-    alignItems: "center",
+    marginTop: 18,
+    alignItems: "flex-end",
     justifyContent: "center",
   },
   underline: {
     height: StyleSheet.hairlineWidth,
-    marginTop: 1,
+    marginTop: 4,
   },
 });

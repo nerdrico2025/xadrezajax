@@ -97,8 +97,6 @@ export default function Register() {
         return;
       }
 
-      console.log("✅ CADASTRO OK");
-
       alert("Cadastro realizado com sucesso!");
       router.replace("/login");
 
@@ -150,7 +148,6 @@ export default function Register() {
         secureTextEntry
       />
 
-      {/* ✅ NOVO CAMPO */}
       <InputLine
         iconName="lock-closed-outline"
         placeholder="Confirme sua Senha"
@@ -193,7 +190,7 @@ export default function Register() {
 
 const styles = StyleSheet.create({
   subtitle: {
-    fontSize: 32,
+    fontSize: 36,
     fontWeight: "bold",
     textAlign: "left",
     marginBottom: 10,
