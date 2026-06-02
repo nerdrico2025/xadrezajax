@@ -1,6 +1,7 @@
 # Python
 .venv/
 backend/venv/
+game/node_modules/
 __pycache__/
 *.pyc
 *.pyo
