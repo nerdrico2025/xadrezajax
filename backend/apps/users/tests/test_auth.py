@@ -1,4 +1,7 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -7,6 +10,10 @@ User = get_user_model()
 
 REGISTER_URL = reverse("users:register")
 LOGIN_URL = reverse("users:login")
+PASSWORD_RESET_URL = reverse("users:password-reset")
+PASSWORD_RESET_CONFIRM_URL = reverse("users:password-reset-confirm")
+ME_URL = reverse("users:me")
+GOOGLE_LOGIN_URL = reverse("users:google-login")
 
 
 def build_user_payload(**kwargs):
@@ -43,6 +50,15 @@ class RegisterSuccessTests(APITestCase):
     def test_register_creates_user_in_database(self):
         payload = build_user_payload()
         self.client.post(REGISTER_URL, payload, format="json")
+        self.assertTrue(User.objects.filter(email="magnus@chess.com").exists())
+
+    def test_register_accepts_payload_without_password_confirm(self):
+        payload = build_user_payload()
+        payload.pop("password_confirm")
+
+        response = self.client.post(REGISTER_URL, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(User.objects.filter(email="magnus@chess.com").exists())
 
     def test_email_is_normalized_to_lowercase(self):
@@ -159,3 +175,90 @@ class LoginFailureTests(APITestCase):
         payload = {"email": "hikaru@chess.com", "password": "SenhaErrada"}
         response = self.client.post(LOGIN_URL, payload, format="json")
         self.assertNotIn("access", response.data)
+
+
+class PasswordResetTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="reset@chess.com",
+            full_name="Reset User",
+            password="Xadrez@2024",
+        )
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_request_password_reset_returns_200_for_existing_email(self):
+        response = self.client.post(
+            PASSWORD_RESET_URL, {"email": self.user.email}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_password_reset_confirm_updates_password_and_allows_login(self):
+        self.client.post(PASSWORD_RESET_URL, {"email": self.user.email}, format="json")
+
+        reset_code = cache.get(f"password_reset:{self.user.email}")["code"]
+
+        response = self.client.post(
+            PASSWORD_RESET_CONFIRM_URL,
+            {
+                "email": self.user.email,
+                "codigo": reset_code,
+                "new_password": "NovaSenha@2026",
+                "password_confirm": "NovaSenha@2026",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("NovaSenha@2026"))
+
+        login_response = self.client.post(
+            LOGIN_URL,
+            {"email": self.user.email, "password": "NovaSenha@2026"},
+            format="json",
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+
+
+class AuthenticatedUserTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="me@chess.com",
+            full_name="Me User",
+            password="Xadrez@2024",
+        )
+
+    def test_me_returns_authenticated_user_payload(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(ME_URL)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["email"], self.user.email)
+        self.assertEqual(response.data["full_name"], self.user.full_name)
+
+
+class GoogleLoginTests(APITestCase):
+    @patch("apps.users.views.verify_google_id_token")
+    def test_google_login_returns_tokens_for_valid_payload(self, mock_verify):
+        mock_verify.return_value = {
+            "email": "google@chess.com",
+            "name": "Google User",
+        }
+
+        response = self.client.post(
+            GOOGLE_LOGIN_URL,
+            {"id_token": "token-valido"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access", response.data)
+        self.assertIn("refresh", response.data)
+        self.assertEqual(response.data["user"]["email"], "google@chess.com")
+        self.assertTrue(User.objects.filter(email="google@chess.com").exists())
+
+    def test_google_login_requires_id_token(self):
+        response = self.client.post(GOOGLE_LOGIN_URL, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
