@@ -204,7 +204,7 @@ class PasswordResetTests(APITestCase):
             PASSWORD_RESET_CONFIRM_URL,
             {
                 "email": self.user.email,
-                "codigo": reset_code,
+                "code": reset_code,
                 "new_password": "NovaSenha@2026",
                 "password_confirm": "NovaSenha@2026",
             },
