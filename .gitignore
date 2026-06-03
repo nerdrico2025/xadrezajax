@@ -1,0 +1,26 @@
+# Python
+.venv/
+backend/venv/
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+
+# Ambiente
+.env
+
+# Docker
+postgres_data/
+
+# Node / Expo
+node_modules/
+game/node_modules/
+ajax/node_modules/
+.expo/
