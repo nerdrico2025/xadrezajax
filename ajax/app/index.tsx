@@ -5,16 +5,15 @@ import { useRouter } from "expo-router";
 import { useTheme } from "@/hooks/useTheme";
 import { useResponsive } from "@/hooks/useResponsive";
 import { responsiveValue } from "@/utils/responsive";
-import { Images } from "@/constants/images";
+import { getSplashLogo, getLogoDisplaySize } from "@/constants/images";
 import { Colors } from "@/constants/theme";
 
 export default function Splash() {
   const router = useRouter();
-
   const { theme } = useTheme();
   const colors = Colors[theme];
-
   const { screenSize } = useResponsive();
+
   const opacity = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(0.8)).current;
 
@@ -24,6 +23,8 @@ export default function Splash() {
     large: 180,
     tablet: 220,
   });
+
+  const logoDisplaySize = getLogoDisplaySize(theme, logoSize, "splash");
 
   useEffect(() => {
     const animation = Animated.parallel([
@@ -52,19 +53,20 @@ export default function Splash() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Animated.Image
-        source={Images.logo2}
-        style={[
-          styles.logo,
-          {
-            width: logoSize,
-            height: logoSize,
-            opacity,
-            transform: [{ scale }],
-          },
-        ]}
-        resizeMode="contain"
-      />
+      <View style={[styles.logoSlot, { width: logoSize, height: logoSize }]}>
+        <Animated.Image
+          source={getSplashLogo(theme)}
+          style={[
+            {
+              width: logoDisplaySize,
+              height: logoDisplaySize,
+              opacity,
+              transform: [{ scale }],
+            },
+          ]}
+          resizeMode="contain"
+        />
+      </View>
     </View>
   );
 }
@@ -75,8 +77,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  logo: {
-    width: 200,
-    height: 200,
+  logoSlot: {
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
