@@ -1,5 +1,7 @@
 # Python
 .venv/
+backend/venv/
+
 __pycache__/
 *.pyc
 *.pyo
@@ -16,3 +18,9 @@ db.sqlite3
 
 # Docker
 postgres_data/
+
+# Node / Expo
+node_modules/
+game/node_modules/
+ajax/node_modules/
+.expo/
