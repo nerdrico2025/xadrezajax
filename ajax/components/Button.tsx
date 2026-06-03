@@ -104,10 +104,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minHeight: 52,
     borderWidth: 1,
+    marginVertical: 10,
   },
   text: {
     fontWeight: "bold",
-    fontSize: 16,
+    fontSize: 18,
   },
   content: {
     flexDirection: "row",
