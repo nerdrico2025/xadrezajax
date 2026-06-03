@@ -16,7 +16,8 @@ class RegisterSerializer(serializers.ModelSerializer):
     )
     password_confirm = serializers.CharField(
         write_only=True,
-        required=True,
+        required=False,
+        allow_blank=True,
         style={"input_type": "password"},
     )
 
@@ -32,16 +33,19 @@ class RegisterSerializer(serializers.ModelSerializer):
         return normalized
 
     def validate(self, attrs):
-        if attrs["password"] != attrs["password_confirm"]:
+        password_confirm = attrs.get("password_confirm")
+
+        if password_confirm is not None and password_confirm != attrs["password"]:
             raise serializers.ValidationError(
                 {"password_confirm": "As senhas não coincidem."}
             )
+
         # Roda todos os validators configurados em AUTH_PASSWORD_VALIDATORS
         validate_password(attrs["password"])
         return attrs
 
     def create(self, validated_data):
-        validated_data.pop("password_confirm")
+        validated_data.pop("password_confirm", None)
         return User.objects.create_user(**validated_data)
 
 
@@ -65,5 +69,47 @@ class ChessTokenObtainPairSerializer(TokenObtainPairSerializer):
             "id": self.user.id,
             "email": self.user.email,
             "full_name": self.user.full_name,
+            "date_joined": self.user.date_joined.isoformat(),
         }
         return data
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Valida o e-mail para requisição de nova senha."""
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        return value.lower()
+
+
+class PasswordResetVerifyCodeSerializer(serializers.Serializer):
+    """Valida os dados para verificar o código de recuperação."""
+
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6)
+
+    def validate_email(self, value):
+        return value.lower()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Valida os dados de confirmação para criação de nova senha."""
+
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6)
+    new_password = serializers.CharField(
+        write_only=True, required=True, style={"input_type": "password"}
+    )
+    password_confirm = serializers.CharField(
+        write_only=True, required=True, style={"input_type": "password"}
+    )
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError(
+                {"password_confirm": "As senhas não coincidem."}
+            )
+
+        validate_password(attrs["new_password"])
+        return attrs
