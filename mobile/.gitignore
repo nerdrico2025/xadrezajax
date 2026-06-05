@@ -1,0 +1,19 @@
+node_modules/
+.expo/
+expo-env.d.ts
+dist/
+package-lock.json
+
+# iOS / Android
+ios/
+android/
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+
+/mobile/node_modules/

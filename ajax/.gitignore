@@ -2,6 +2,7 @@
 
 # dependencies
 node_modules/
+package-lock.json
 
 # Expo
 .expo/
@@ -41,3 +42,6 @@ app-example
 # generated native folders
 /ios
 /android
+
+
+/mobile/node_modules/
