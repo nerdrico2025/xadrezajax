@@ -20,6 +20,8 @@ node-api/node_modules/
 mobile/node_modules/
 mobile/.expo/
 mobile/dist/
+ajax/node_modules/
+game/package-lock.json
 
 # ─────────────────────────────────────────
 # Ambiente
@@ -30,8 +32,3 @@ mobile/dist/
 # Docker / dados persistidos
 # ─────────────────────────────────────────
 postgres_data/
-
-# Node
-node-api/node_modules/
-game/package-lock.json
-mobile/node_modules/
