@@ -1,6 +1,7 @@
 import { View, StyleSheet, Alert, ActivityIndicator } from "react-native";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Chessboard from "react-native-chessboard";
+import type { ChessboardRef } from "react-native-chessboard";
 import { Chess } from "chess.js";
 
 import { getBestMove } from "@/services/game";
@@ -8,6 +9,7 @@ import { getBestMove } from "@/services/game";
 export default function GameScreen() {
   const [game, setGame] = useState(new Chess());
   const [loading, setLoading] = useState(false);
+  const chessboardRef = useRef<ChessboardRef>(null);
 
   const onMove = async (data: any) => {
     try {
@@ -28,7 +30,6 @@ export default function GameScreen() {
 
       if (!playerMove) return;
 
-      setGame(new Chess(currentGame.fen()));
       setLoading(true);
 
       const bestMove = await getBestMove(currentGame.fen());
@@ -39,11 +40,12 @@ export default function GameScreen() {
 
       if (!bestMove || bestMove.length < 4) {
         setLoading(false);
+        Alert.alert("Erro", "Não foi possível obter a jogada da IA. Tente novamente.");
         return;
       }
 
-      const from = bestMove.substring(0, 2);
-      const to = bestMove.substring(2, 4);
+      const from = bestMove.substring(0, 2) as any;
+      const to = bestMove.substring(2, 4) as any;
 
       const updatedGame = new Chess(currentGame.fen());
 
@@ -58,6 +60,8 @@ export default function GameScreen() {
         return;
       }
 
+      await chessboardRef.current?.move({ from, to });
+
       setGame(new Chess(updatedGame.fen()));
       setLoading(false);
     } catch (error) {
@@ -70,7 +74,7 @@ export default function GameScreen() {
     <View style={styles.container}>
       <View style={styles.boardWrapper}>
         <Chessboard
-          key={game.fen()}
+          ref={chessboardRef}
           fen={game.fen()}
           onMove={onMove}
         />
