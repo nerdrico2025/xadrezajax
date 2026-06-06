@@ -4,7 +4,7 @@ export const getBestMove = async (fen: string) => {
   try {
     console.log("📡 Enviando FEN:", fen);
 
-    const response = await fetch(`${NODE_URL}/move`, {
+    const response = await fetch(`${NODE_URL}/api/v1/game/move`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

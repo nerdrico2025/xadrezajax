@@ -1,0 +1,20 @@
+{
+  "name": "xadrez-node-api",
+  "version": "1.0.0",
+  "description": "Game engine API — Stockfish bridge",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

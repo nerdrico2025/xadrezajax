@@ -172,3 +172,15 @@ CORS_ALLOW_ALL_ORIGINS = True
 # CORS_ALLOWED_ORIGINS = [
 #    "http://localhost:8081",
 # ]
+
+# ========================
+# REDIS (cache / filas futuras)
+# ========================
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+    }
+}
