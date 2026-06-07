@@ -2,7 +2,7 @@ const { getBestMove } = require("../services/stockfish.service");
 
 async function move(req, res, next) {
   try {
-    const { fen } = req.body;
+    const fen = req.body?.fen;
 
     if (!fen || typeof fen !== "string") {
       return res.status(400).json({ error: "Campo 'fen' é obrigatório e deve ser uma string." });
