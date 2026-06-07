@@ -8,8 +8,7 @@ import Button from "@/components/Button";
 import InputLine from "@/components/InputLine";
 import Divider from "@/components/Divider";
 import { Colors } from "@/constants/theme";
-
-const API_URL = "http://192.168.0.128:8000";
+import { API_URL } from "@/services/api";
 
 export default function Register() {
   const { theme } = useTheme();
