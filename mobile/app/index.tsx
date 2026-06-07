@@ -1,6 +1,8 @@
 import { View, StyleSheet, Animated, Easing } from "react-native";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "expo-router";
+
+import { useAuth } from "@/context/AuthContext";
 
 import { useTheme } from "@/hooks/useTheme";
 import { useResponsive } from "@/hooks/useResponsive";
@@ -10,9 +12,11 @@ import { Colors } from "@/constants/theme";
 
 export default function Splash() {
   const router = useRouter();
+  const { token, loading } = useAuth();
   const { theme } = useTheme();
   const colors = Colors[theme];
   const { screenSize } = useResponsive();
+  const [animDone, setAnimDone] = useState(false);
 
   const opacity = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(0.8)).current;
@@ -26,6 +30,7 @@ export default function Splash() {
 
   const logoDisplaySize = getLogoDisplaySize(theme, logoSize, "splash");
 
+  // Efeito 1: animação + timer (roda uma vez, sem depender do auth)
   useEffect(() => {
     const animation = Animated.parallel([
       Animated.timing(opacity, {
@@ -44,12 +49,16 @@ export default function Splash() {
 
     animation.start();
 
-    const timer = setTimeout(() => {
-      router.replace("/login");
-    }, 2500);
-
+    const timer = setTimeout(() => setAnimDone(true), 2500);
     return () => clearTimeout(timer);
   }, []);
+
+  // Efeito 2: navega quando animação E leitura do token terminarem
+  useEffect(() => {
+    if (animDone && !loading) {
+      router.replace(token ? "/home" : "/login");
+    }
+  }, [animDone, loading, token]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
