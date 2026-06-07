@@ -1,0 +1,48 @@
+services:
+
+  # ─────────────────────────────────────────
+  # Banco isolado para testes — descartado ao final
+  # ─────────────────────────────────────────
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: xadrez_test
+      POSTGRES_USER: xadrez_test
+      POSTGRES_PASSWORD: xadrez_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xadrez_test -d xadrez_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─────────────────────────────────────────
+  # Testes Django
+  # ─────────────────────────────────────────
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    entrypoint: ["python", "-m", "pytest"]
+    command: ["apps/", "-v", "--cov=apps", "--cov-report=term-missing"]
+    environment:
+      DJANGO_SETTINGS_MODULE: core.test_settings
+      SECRET_KEY: test-secret-key-long-enough-for-jwt-hmac-sha256!
+      DEBUG: "True"
+      ALLOWED_HOSTS: "*"
+      DB_NAME: xadrez_test
+      DB_USER: xadrez_test
+      DB_PASSWORD: xadrez_test
+      DB_HOST: postgres-test
+      DB_PORT: "5432"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────
+  # Testes Node API (Stockfish mockado — sem binário necessário)
+  # ─────────────────────────────────────────
+  node-test:
+    build:
+      context: ./node-api
+      dockerfile: Dockerfile
+    command: npm test

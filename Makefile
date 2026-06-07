@@ -2,7 +2,7 @@
         logs-backend logs-node logs-mobile \
         shell-backend shell-node \
         migrate makemigrations createsuperuser \
-        test-backend clean ip setup
+        test test-backend test-node ci clean ip setup
 
 # ─────────────────────────────────────────
 # Configuração
@@ -83,8 +83,29 @@ makemigrations: ## Gera novas migrações
 createsuperuser: ## Cria superusuário no Django Admin
 	$(BACKEND) python manage.py createsuperuser
 
-test-backend: ## Roda a suite de testes do Django
-	$(BACKEND) python manage.py test
+ci: ## Suite completa em ambiente isolado (sem afetar o dev)
+	@echo "🏗️  Construindo imagens de teste..."
+	@docker compose -f docker-compose.test.yml build -q
+	@echo "\n🧪 Node API ────────────────────────────"
+	@docker compose -f docker-compose.test.yml run --rm node-test || \
+		(docker compose -f docker-compose.test.yml down -v --remove-orphans && exit 1)
+	@echo "\n🧪 Django ──────────────────────────────"
+	@docker compose -f docker-compose.test.yml run --rm backend-test || \
+		(docker compose -f docker-compose.test.yml down -v --remove-orphans && exit 1)
+	@echo "\n✅ Todos os testes passaram!"
+	@docker compose -f docker-compose.test.yml down -v --remove-orphans
+
+test: ## Roda testes nos containers de desenvolvimento (dev deve estar no ar)
+	@echo "\n🧪 Django ──────────────────────────────"
+	$(BACKEND) pytest apps/ --cov=apps --cov-report=term-missing -q
+	@echo "\n🧪 Node API ────────────────────────────"
+	$(NODE) npm test
+
+test-backend: ## Roda apenas os testes do Django com coverage
+	$(BACKEND) pytest apps/ --cov=apps --cov-report=term-missing
+
+test-node: ## Roda apenas os testes do Node API
+	$(NODE) npm test
 
 # ─────────────────────────────────────────
 # Limpeza
