@@ -29,6 +29,13 @@ game/package-lock.json
 .env
 
 # ─────────────────────────────────────────
+# Testes / cobertura
+# ─────────────────────────────────────────
+.coverage
+htmlcov/
+node-api/coverage/
+
+# ─────────────────────────────────────────
 # Docker / dados persistidos
 # ─────────────────────────────────────────
 postgres_data/
