@@ -167,11 +167,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ========================
 # CORS
 # ========================
-CORS_ALLOW_ALL_ORIGINS = True
+# Em dev (DEBUG=True) aceita qualquer origem — conveniente para testar no celular.
+# Em produção (DEBUG=False) só aceita as origens listadas em CORS_ALLOWED_ORIGINS no .env.
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 
-# CORS_ALLOWED_ORIGINS = [
-#    "http://localhost:8081",
-# ]
+if not DEBUG:
+    CORS_ALLOWED_ORIGINS = [
+        o.strip()
+        for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+        if o.strip()
+    ]
 
 # ========================
 # REDIS (cache / filas futuras)

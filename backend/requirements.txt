@@ -5,6 +5,7 @@ python-dotenv==1.0.1
 psycopg2-binary==2.9.9
 django-cors-headers==4.4.0
 redis==5.0.8
+gunicorn==23.0.0
 
 # ── testes ──
 pytest==8.3.5
