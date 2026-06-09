@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────
+# Upstream: apelidos internos para os containers
+# ─────────────────────────────────────────
+upstream django {
+    server backend:8000;
+}
+
+upstream nodeapi {
+    server node-api:3000;
+}
+
+# ─────────────────────────────────────────
+# HTTP → HTTPS redirect
+# Qualquer requisição na porta 80 é redirecionada para HTTPS.
+# Exceção: o desafio do Let's Encrypt precisa responder em HTTP.
+# ─────────────────────────────────────────
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ─────────────────────────────────────────
+# HTTPS principal
+# ─────────────────────────────────────────
+server {
+    listen 443 ssl;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    # Headers de segurança
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options    nosniff;
+    add_header X-Frame-Options           DENY;
+
+    # Limite de upload (imagens de perfil no futuro, por exemplo)
+    client_max_body_size 10M;
+
+    # Arquivos estáticos do Django (admin, DRF browsable API)
+    # O Django faz collectstatic → /app/staticfiles, Nginx serve direto sem passar pelo Python
+    location /static/ {
+        alias /app/staticfiles/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Node API — qualquer rota /api/v1/game/ vai para o Node/Stockfish
+    location /api/v1/game/ {
+        proxy_pass         http://nodeapi;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
+    # Django — tudo o mais: /api/v1/auth/, /admin/, /health/
+    location / {
+        proxy_pass         http://django;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+}

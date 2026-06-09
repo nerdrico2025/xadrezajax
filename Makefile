@@ -2,7 +2,8 @@
         logs-backend logs-node logs-mobile \
         shell-backend shell-node \
         migrate makemigrations createsuperuser \
-        test test-backend test-node ci clean ip setup
+        test test-backend test-node ci clean ip setup \
+        prod-init prod-up prod-down prod-logs prod-cert-renew
 
 # ─────────────────────────────────────────
 # Configuração
@@ -106,6 +107,47 @@ test-backend: ## Roda apenas os testes do Django com coverage
 
 test-node: ## Roda apenas os testes do Node API
 	$(NODE) npm test
+
+# ─────────────────────────────────────────
+# Produção
+# Pré-requisito: .env.prod preenchido e domínio apontando para o servidor
+# ─────────────────────────────────────────
+-include .env.prod
+export
+
+PROD_COMPOSE = docker compose -f docker-compose.prod.yml
+
+prod-init: ## Primeira inicialização: obtém certificado SSL e sobe produção
+	@test -f .env.prod || (echo "❌ Crie o .env.prod antes de continuar (cp .env.prod.example .env.prod)" && exit 1)
+	@echo "🏗️  Construindo imagens..."
+	$(PROD_COMPOSE) build
+	@echo "\n🚀 Subindo serviços (sem Nginx por enquanto)..."
+	$(PROD_COMPOSE) up -d postgres redis backend node-api
+	@echo "\n🔐 Obtendo certificado SSL para $(DOMAIN)..."
+	docker run --rm -p 80:80 \
+		-v /etc/letsencrypt:/etc/letsencrypt \
+		certbot/certbot certonly --standalone --agree-tos \
+		--non-interactive --email $(ADMIN_EMAIL) -d $(DOMAIN)
+	@echo "\n✅ Certificado obtido! Subindo Nginx..."
+	$(PROD_COMPOSE) up -d nginx
+	@echo "\n🎉 Produção no ar em https://$(DOMAIN)"
+
+prod-up: ## Sobe produção (certificado já existente)
+	$(PROD_COMPOSE) up -d --build
+
+prod-down: ## Para produção
+	$(PROD_COMPOSE) down
+
+prod-logs: ## Acompanha logs de produção
+	$(PROD_COMPOSE) logs -f
+
+prod-cert-renew: ## Renova o certificado SSL (rode antes de vencer — a cada 3 meses)
+	docker run --rm \
+		-v /etc/letsencrypt:/etc/letsencrypt \
+		-v certbot_www:/var/www/certbot \
+		certbot/certbot renew --quiet
+	$(PROD_COMPOSE) exec nginx nginx -s reload
+	@echo "✅ Certificado renovado e Nginx recarregado"
 
 # ─────────────────────────────────────────
 # Limpeza

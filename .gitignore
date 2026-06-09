@@ -27,6 +27,7 @@ game/package-lock.json
 # Ambiente
 # ─────────────────────────────────────────
 .env
+.env.prod
 
 # ─────────────────────────────────────────
 # Testes / cobertura
