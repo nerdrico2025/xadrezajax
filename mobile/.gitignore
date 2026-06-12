@@ -31,9 +31,11 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files — os .example são commitados, os .local nunca
 .env
 .env*.local
+# .env.development.local  → coberto por .env*.local
+# .env.production.local   → coberto por .env*.local
 
 # typescript
 *.tsbuildinfo

@@ -20,7 +20,7 @@ load_dotenv(env_path)
 SECRET_KEY = os.getenv("SECRET_KEY")
 
 if not SECRET_KEY:
-    raise Exception("SECRET_KEY não encontrada no .env")
+    raise Exception("SECRET_KEY não encontrada")
 
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
@@ -158,6 +158,7 @@ USE_TZ = True
 # STATIC
 # ========================
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # ========================
 # DEFAULT AUTO FIELD
