@@ -116,7 +116,7 @@ class MyProfileTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["email"], user.email)
         self.assertEqual(response.data["nickname"], "")  # Auto-created empty nickname
-        
+
         # Verify it was actually created in DB
         self.assertTrue(Profile.objects.filter(user=user).exists())
 
@@ -127,18 +127,20 @@ class MyProfileTests(APITestCase):
     @patch("apps.profiles.views.ProfileService.create_profile")
     def test_auto_creation_failure_returns_500(self, mock_create):
         mock_create.side_effect = Exception("Simulated creation error")
-        
+
         user = create_test_user()
         self.client.force_authenticate(user=user)
 
         response = self.client.get(PROFILE_ME_URL)
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
-        self.assertEqual(response.data["detail"], "Erro interno ao criar o perfil automaticamente.")
+        self.assertEqual(
+            response.data["detail"], "Erro interno ao criar o perfil automaticamente."
+        )
 
     @patch("apps.profiles.views.Profile.objects.select_related")
     def test_unexpected_database_error_returns_500(self, mock_select_related):
         mock_select_related.side_effect = Exception("Simulated DB connection error")
-        
+
         user = create_test_user()
         self.client.force_authenticate(user=user)
 
@@ -160,7 +162,7 @@ class UpdateProfileTests(APITestCase):
         response = self.client.put(PROFILE_ME_URL, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["nickname"], "NewName")
-        
+
         self.profile.refresh_from_db()
         self.assertEqual(self.profile.nickname, "NewName")
 
@@ -179,11 +181,13 @@ class UpdateProfileTests(APITestCase):
     @patch("apps.profiles.views.ProfileService.update_profile")
     def test_update_profile_unexpected_error_returns_500(self, mock_update):
         mock_update.side_effect = Exception("Simulated DB Update Error")
-        
+
         payload = {"nickname": "ValidName"}
         response = self.client.patch(PROFILE_ME_URL, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
-        self.assertEqual(response.data["detail"], "Ocorreu um erro interno ao salvar o perfil.")
+        self.assertEqual(
+            response.data["detail"], "Ocorreu um erro interno ao salvar o perfil."
+        )
 
     def test_update_nonexistent_profile_returns_404(self):
         self.profile.delete()

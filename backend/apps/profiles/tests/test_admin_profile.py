@@ -40,14 +40,18 @@ class AdminProfileTests(APITestCase):
         self.admin = create_admin_user()
         self.common_user = create_test_user(email="common@chess.com")
         self.profile = Profile.objects.create(user=self.common_user, nickname="Common")
-        self.promote_url = reverse("profiles:promote-admin", kwargs={"user_id": self.common_user.id})
+        self.promote_url = reverse(
+            "profiles:promote-admin", kwargs={"user_id": self.common_user.id}
+        )
 
     def test_post_promote_success_returns_201(self):
         self.client.force_authenticate(user=self.admin)
         response = self.client.post(self.promote_url)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data["detail"], "Usuário promovido a administrador com sucesso.")
-        
+        self.assertEqual(
+            response.data["detail"], "Usuário promovido a administrador com sucesso."
+        )
+
         self.common_user.refresh_from_db()
         self.assertTrue(self.common_user.is_staff)
         self.assertTrue(self.common_user.profile.is_admin)
@@ -55,7 +59,7 @@ class AdminProfileTests(APITestCase):
 
     def test_post_promote_idempotent_returns_200(self):
         self.client.force_authenticate(user=self.admin)
-        
+
         # Primeira vez
         response1 = self.client.post(self.promote_url)
         self.assertEqual(response1.status_code, status.HTTP_201_CREATED)
@@ -63,7 +67,10 @@ class AdminProfileTests(APITestCase):
         # Segunda vez
         response2 = self.client.post(self.promote_url)
         self.assertEqual(response2.status_code, status.HTTP_200_OK)
-        self.assertEqual(response2.data["detail"], "O usuário já possui privilégios de administrador.")
+        self.assertEqual(
+            response2.data["detail"],
+            "O usuário já possui privilégios de administrador.",
+        )
 
     def test_post_promote_forbidden_for_common_user(self):
         self.client.force_authenticate(user=self.common_user)
@@ -80,7 +87,9 @@ class AdminProfileTests(APITestCase):
     def test_post_handles_unexpected_error_returns_500(self, mock_get_or_create):
         mock_get_or_create.side_effect = Exception("Simulated DB Error")
         self.client.force_authenticate(user=self.admin)
-        
+
         response = self.client.post(self.promote_url)
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
-        self.assertEqual(response.data["detail"], "Ocorreu um erro interno ao promover o usuário.")
+        self.assertEqual(
+            response.data["detail"], "Ocorreu um erro interno ao promover o usuário."
+        )

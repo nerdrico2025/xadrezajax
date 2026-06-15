@@ -8,8 +8,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { router } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
+import * as Google from "expo-auth-session/providers/google";
 
 import { useTheme } from "@/hooks/useTheme";
 import { useResponsive } from "@/hooks/useResponsive";
@@ -20,9 +22,12 @@ import Button from "@/components/Button";
 import InputLine from "@/components/InputLine";
 import Divider from "@/components/Divider";
 import ThemeToggle from "@/components/ThemeToggle";
+import { loginUser, registerUser, loginWithGoogle } from "@/app/services/api";
+
+// Essencial para o Google fechar a janela do navegador no celular e voltar pro app
+WebBrowser.maybeCompleteAuthSession();
 
 export default function Register() {
-
   const { theme } = useTheme();
   const colors = Colors[theme];
   const { screenSize, maxWidth } = useResponsive();
@@ -57,7 +62,86 @@ export default function Register() {
 
   const [error, setError] = useState("");
 
-  const styles = StyleSheet.create({
+  // Configuração do Google Auth
+  const [, response, promptAsync] = Google.useIdTokenAuthRequest({
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID, // Mantemos como fallback para o Expo Go
+  });
+
+  // Fica escutando a resposta do Google após fechar o navegador
+  useEffect(() => {
+    if (response?.type === "success") {
+      const { id_token } = response.params;
+      if (id_token) {
+        processGoogleAuth(id_token);
+      }
+    } else if (response?.type === "error") {
+      setError("Erro ao se comunicar com o Google.");
+      setGoogleLoading(false);
+    }
+  }, [response]);
+
+  const processGoogleAuth = async (idToken: string) => {
+    setGoogleLoading(true);
+    setError("");
+    try {
+      await loginWithGoogle(idToken);
+      router.replace("/home");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao cadastrar com Google.");
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleRegister = async () => {
+    setError("");
+
+    if (!name || !email || !password) {
+      setError("Preencha todos os campos");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError("Por favor, insira um e-mail válido.");
+      return;
+    }
+
+    if (password.length < 8) {
+      setError("Senha deve ter pelo menos 8 caracteres");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      await registerUser({
+        email: email.trim().toLowerCase(),
+        full_name: name.trim(),
+        password,
+      });
+
+      try {
+        await loginUser(email.trim().toLowerCase(), password);
+        router.replace("/home");
+      } catch (loginErr) {
+        setError("Conta criada! Por favor, faça o login manualmente.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao cadastrar o usuário.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleRegister = () => {
+    setError("");
+    setGoogleLoading(true);
+    promptAsync(); // Abre a tela nativa do Google
+  };
+
+  const styles = useMemo(() => StyleSheet.create({
     container: {
       flex: 1,
       justifyContent: "center",
@@ -98,56 +182,7 @@ export default function Register() {
       justifyContent: "flex-end",
       alignItems: "center",
     },
-  });
-
-  const handleRegister = () => {
-
-    setError("");
-
-    // validação campos
-    if (!name || !email || !password) {
-      setError("Preencha todos os campos");
-      return;
-    }
-
-    // validação senha
-    if (password.length < 6) {
-      setError("Senha deve ter pelo menos 6 caracteres");
-      return;
-    }
-
-    setLoading(true);
-
-    // simulação backend
-    setTimeout(() => {
-
-      // email já existente fake
-      if (email === "admin@ajax.com") {
-
-        setLoading(false);
-        setError("Email já cadastrado");
-        return;
-      }
-
-      // sucesso
-      setLoading(false);
-      router.replace("/home");
-
-    }, 2000);
-  };
-
-  const handleGoogleRegister = () => {
-
-    setError("");
-    setGoogleLoading(true);
-
-    setTimeout(() => {
-
-      setGoogleLoading(false);
-      router.replace("/home");
-
-    }, 2000);
-  };
+  }), [colors, logoSize, contentPadding, logoSpacing]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
@@ -180,6 +215,7 @@ export default function Register() {
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
+        keyboardType="email-address"
       />
 
       <InputLine
@@ -217,4 +253,3 @@ export default function Register() {
     </SafeAreaView>
   );
 }
-

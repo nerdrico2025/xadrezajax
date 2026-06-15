@@ -8,8 +8,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { router } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
+import * as Google from "expo-auth-session/providers/google";
 
 import { useTheme } from "@/hooks/useTheme";
 import { useResponsive } from "@/hooks/useResponsive";
@@ -20,10 +22,12 @@ import InputLine from "@/components/InputLine";
 import Divider from "@/components/Divider";
 import ThemeToggle from "@/components/ThemeToggle";
 import { Colors } from "@/constants/theme";
+import { loginUser, loginWithGoogle } from "@/app/services/api";
 
+// Essencial para fechar a aba de auth
+WebBrowser.maybeCompleteAuthSession();
 
 export default function Login() {
-
   const { theme } = useTheme();
   const colors = Colors[theme];
   const { screenSize, maxWidth } = useResponsive();
@@ -57,7 +61,71 @@ export default function Login() {
 
   const [error, setError] = useState("");
 
-  const styles = StyleSheet.create({
+  // Configuração do Google Auth
+  const [, response, promptAsync] = Google.useIdTokenAuthRequest({
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID, // Mantemos como fallback para o Expo Go
+  });
+
+  // Fica escutando a resposta do Google após fechar o navegador
+  useEffect(() => {
+    if (response?.type === "success") {
+      const { id_token } = response.params;
+      if (id_token) {
+        processGoogleAuth(id_token);
+      }
+    } else if (response?.type === "error") {
+      setError("Erro ao se comunicar com o Google.");
+      setGoogleLoading(false);
+    }
+  }, [response]);
+
+  const processGoogleAuth = async (idToken: string) => {
+    setGoogleLoading(true);
+    setError("");
+    try {
+      await loginWithGoogle(idToken);
+      router.replace("/home");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao entrar com Google.");
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleLogin = async () => {
+    setError("");
+
+    if (!email || !password) {
+      setError("Preencha todos os campos");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError("Por favor, insira um e-mail válido.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      await loginUser(email.trim().toLowerCase(), password);
+      router.replace("/home");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao fazer login.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = () => {
+    setError("");
+    setGoogleLoading(true);
+    promptAsync(); // Abre a tela nativa do Google
+  };
+
+  const styles = useMemo(() => StyleSheet.create({
     container: {
       flex: 1,
       justifyContent: "center",
@@ -99,60 +167,13 @@ export default function Login() {
       fontWeight: "600",
       fontSize: 14,
     },
-    fakeUser: {
-      color: colors.secondary,
-      textAlign: "center",
-      marginTop: 40,
-      fontSize: 12,
-    },
     topBar: {
       position: "absolute",
       top: 50,
       right: 20,
       zIndex: 10,
     },
-  });
-
-  const handleLogin = () => {
-
-    setError("");
-
-    if (!email || !password) {
-      setError("Preencha todos os campos");
-      return;
-    }
-
-    setLoading(true);
-
-    setTimeout(() => {
-
-      const fakeEmail = "admin@ajax.com";
-      const fakePassword = "123456";
-
-      if (email === fakeEmail && password === fakePassword) {
-
-        setLoading(false);
-        router.replace("/home");
-
-      } else {
-
-        setLoading(false);
-        setError("Email ou senha inválidos");
-      }
-
-    }, 2000);
-  };
-
-  const handleGoogleLogin = () => {
-
-    setError("");
-    setGoogleLoading(true);
-
-    setTimeout(() => {
-      setGoogleLoading(false);
-      router.replace("/home");
-    }, 2000);
-  };
+  }), [colors, logoSize, contentPadding, logoSpacing]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
@@ -177,6 +198,7 @@ export default function Login() {
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
+        keyboardType="email-address"
       />
 
       <InputLine

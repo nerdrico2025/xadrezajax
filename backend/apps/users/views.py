@@ -144,7 +144,7 @@ class PasswordResetRequestView(APIView):
 
         user = User.objects.filter(email=email).first()
         code = generate_reset_code()
-        
+
         # Faz o hash do código para salvar no banco/cache de forma segura
         code_hash = hashlib.sha256(code.encode()).hexdigest()
 
@@ -163,7 +163,7 @@ class PasswordResetRequestView(APIView):
                 target=_send_reset_email, args=(email, user.full_name, code)
             ).start()
         else:
-            # Falsa prevenção de timing attack: insere no cache e dá um pequeno sleep 
+            # Falsa prevenção de timing attack: insere no cache e dá um pequeno sleep
             cache.set(
                 f"password_reset_dummy:{email}",
                 {

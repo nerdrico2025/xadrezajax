@@ -7,6 +7,7 @@ import { useResponsive } from "@/hooks/useResponsive";
 import { responsiveValue } from "@/utils/responsive";
 import { Images } from "@/constants/images";
 import { Colors } from "@/constants/theme";
+import { getRefreshToken } from "@/app/services/api";
 
 export default function Splash() {
   const router = useRouter();
@@ -43,11 +44,19 @@ export default function Splash() {
 
     animation.start();
 
-    const timer = setTimeout(() => {
-      router.replace("/login");
-    }, 2500);
+    const checkAuth = async () => {
+      // Garante um tempo mínimo de exibição da Splash Screen
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const token = await getRefreshToken();
+      if (token) {
+        router.replace("/home");
+      } else {
+        router.replace("/login");
+      }
+    };
 
-    return () => clearTimeout(timer);
+    checkAuth();
   }, []);
 
   return (

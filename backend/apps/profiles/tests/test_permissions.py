@@ -25,6 +25,7 @@ def create_test_user(**kwargs):
 # UC012 — WhoAmI (Identificar usuário autenticado)
 # ---------------------------------------------------------------------------
 
+
 class WhoAmITests(APITestCase):
     """UC012 - Testes do endpoint WhoAmI."""
 
@@ -91,6 +92,7 @@ class WhoAmITests(APITestCase):
 # UC012 — HasProfile (Perfil inexistente → redirecionamento UC007)
 # ---------------------------------------------------------------------------
 
+
 class HasProfilePermissionTests(APITestCase):
     """UC012 - Testes de HasProfile e redirecionamento ao UC007."""
 
@@ -116,6 +118,7 @@ class HasProfilePermissionTests(APITestCase):
 # UC012 — HasPlayerProfile (Acesso ao jogo)
 # ---------------------------------------------------------------------------
 
+
 class HasPlayerProfilePermissionTests(APITestCase):
     """UC012 - Testes de HasPlayerProfile."""
 
@@ -126,12 +129,15 @@ class HasPlayerProfilePermissionTests(APITestCase):
         self.client.force_authenticate(user=user)
         response = self.client.get(GAME_EXAMPLE_URL)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["detail"], "Acesso liberado! Você é um jogador autenticado.")
+        self.assertEqual(
+            response.data["detail"], "Acesso liberado! Você é um jogador autenticado."
+        )
 
 
 # ---------------------------------------------------------------------------
 # UC012 — HasAdminProfile (Acesso administrativo - via promote)
 # ---------------------------------------------------------------------------
+
 
 class HasAdminProfilePermissionTests(APITestCase):
     """UC012 - Testes de HasAdminProfile via rota de promoção."""

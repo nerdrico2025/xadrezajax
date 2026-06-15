@@ -60,7 +60,9 @@ class PlayerProfile(models.Model):
         related_name="player_profile",
         verbose_name="Perfil Base",
     )
-    rating = models.IntegerField(default=settings.DEFAULT_STARTING_ELO, verbose_name="Rating (Elo)")
+    rating = models.IntegerField(
+        default=settings.DEFAULT_STARTING_ELO, verbose_name="Rating (Elo)"
+    )
     games_played = models.IntegerField(default=0, verbose_name="Partidas Jogadas")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Atualizado em")

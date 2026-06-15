@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 # Helper: Extração segura de perfis associados ao usuário
 # ---------------------------------------------------------------------------
 
+
 def get_user_profile(user):
     """
     UC012 - Recuperar perfil do usuário de forma segura.
@@ -48,6 +49,7 @@ def get_user_profile(user):
 # ---------------------------------------------------------------------------
 # Permissão: Perfil base obrigatório
 # ---------------------------------------------------------------------------
+
 
 class HasProfile(BasePermission):
     """
@@ -79,6 +81,7 @@ class HasProfile(BasePermission):
 # ---------------------------------------------------------------------------
 # Permissão: PlayerProfile (Acesso ao jogo)
 # ---------------------------------------------------------------------------
+
 
 class HasPlayerProfile(BasePermission):
     """
@@ -112,6 +115,7 @@ class HasPlayerProfile(BasePermission):
 # ---------------------------------------------------------------------------
 # Permissão: AdminProfile (Acesso administrativo)
 # ---------------------------------------------------------------------------
+
 
 class HasAdminProfile(BasePermission):
     """
@@ -151,6 +155,7 @@ class HasAdminProfile(BasePermission):
 # Permissão composta: Multi-perfil (Jogador OU Admin)
 # ---------------------------------------------------------------------------
 
+
 class IsPlayerOrAdmin(BasePermission):
     """
     UC012 - Combinar permissões (multi-perfil).
@@ -162,7 +167,8 @@ class IsPlayerOrAdmin(BasePermission):
     Nota sobre composição no DRF:
     - permission_classes = [A, B]       → A AND B (ambas devem passar)
     - permission_classes = [A | B]      → A OR B  (DRF 3.9+, bitwise OR)
-    - IsPlayerOrAdmin                   → OR customizado (compatível com todas as versões)
+    - IsPlayerOrAdmin                   → OR customizado
+    (compatível com todas as versões)
     """
 
     message = "Acesso restrito a jogadores ou administradores."
@@ -178,9 +184,8 @@ class IsPlayerOrAdmin(BasePermission):
         try:
             is_player = profile.is_player
             is_admin = (
-                (request.user.is_staff or request.user.is_superuser)
-                and profile.is_admin
-            )
+                request.user.is_staff or request.user.is_superuser
+            ) and profile.is_admin
             return is_player or is_admin
         except Exception:
             logger.exception(

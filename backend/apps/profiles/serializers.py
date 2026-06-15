@@ -27,14 +27,17 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
     def validate_nickname(self, value):
         """Valida o apelido. Impede uso de nomes reservados ou ofensivos."""
         import re
+
         if not value:
             return value
-            
+
         # Lista básica de prefixos/nomes reservados
         reserved_pattern = r"^(admin|root|system|staff|moderator|support).*$"
-        
+
         if re.match(reserved_pattern, value.lower()):
-            raise serializers.ValidationError("Este apelido não é permitido ou é reservado.")
+            raise serializers.ValidationError(
+                "Este apelido não é permitido ou é reservado."
+            )
         return value
 
 

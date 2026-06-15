@@ -7,8 +7,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useState } from "react";
-import { router } from "expo-router";
+import { useState, useMemo } from "react";
+import { router, useLocalSearchParams } from "expo-router";
 
 import { useTheme } from "@/hooks/useTheme";
 import { useResponsive } from "@/hooks/useResponsive";
@@ -17,6 +17,7 @@ import Button from "@/components/Button";
 import InputLine from "@/components/InputLine";
 import ThemeToggle from "@/components/ThemeToggle";
 import { Colors } from "@/constants/theme";
+import { confirmPasswordReset } from "@/app/services/api";
 
 export default function ResetPassword() {
 
@@ -43,8 +44,11 @@ export default function ResetPassword() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const { email, codigo } = useLocalSearchParams<{ email?: string; codigo?: string }>();
+  const normalizedEmail = typeof email === "string" ? email : "";
+  const normalizedCodigo = typeof codigo === "string" ? codigo : "";
 
-  const styles = StyleSheet.create({
+  const styles = useMemo(() => StyleSheet.create({
     container: {
       flex: 1,
       justifyContent: "flex-start",
@@ -75,11 +79,15 @@ export default function ResetPassword() {
       textAlign: "center",
       marginBottom: 10,
     },
-  });
+  }), [colors, contentPadding, titleTopMargin]);
 
-  const handleReset = () => {
-
+  const handleReset = async () => {
     setError("");
+
+    if (!normalizedEmail || !normalizedCodigo) {
+      setError("Fluxo inválido. Volte e solicite um novo código.");
+      return;
+    }
 
     if (!password || !confirmPassword) {
       setError("Preencha todos os campos");
@@ -93,14 +101,20 @@ export default function ResetPassword() {
 
     setLoading(true);
 
-    setTimeout(() => {
+    try {
+      await confirmPasswordReset({
+        email: normalizedEmail,
+        codigo: normalizedCodigo,
+        new_password: password,
+        password_confirm: confirmPassword,
+      });
+
+      router.replace("/login");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao redefinir senha.");
+    } finally {
       setLoading(false);
-
-      alert("Senha redefinida com sucesso!");
-
-      router.replace("/home");
-
-    }, 1500);
+    }
   };
 
   return (

@@ -215,7 +215,8 @@ LOGGING = {
     "formatters": {
         "verbose": {
             "format": (
-                "[{asctime}] {levelname} {name} {module}.{funcName}:{lineno} — {message}"
+                "[{asctime}] {levelname} {name} {module}."
+                "{funcName}:{lineno} — {message}"
             ),
             "style": "{",
         },
@@ -237,4 +238,3 @@ LOGGING = {
 
 # Configurações de Regra de Negócio (Xadrez)
 DEFAULT_STARTING_ELO = 1200
-

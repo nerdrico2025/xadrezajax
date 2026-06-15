@@ -62,8 +62,8 @@ class PlayerProfileTests(APITestCase):
     def test_is_player_property(self):
         self.assertFalse(self.profile.is_player)
         PlayerProfile.objects.create(profile=self.profile)
-        
-        # Recarregar do banco não é estritamente necessário para cached properties, 
+
+        # Recarregar do banco não é estritamente necessário para cached properties,
         # mas como é um related_object (reverse OneToOne), recarregamos
         self.profile.refresh_from_db()
         self.assertTrue(self.profile.is_player)
@@ -73,4 +73,7 @@ class PlayerProfileTests(APITestCase):
         mock_get_or_create.side_effect = Exception("Simulated DB Error")
         response = self.client.post(PLAYER_PROFILE_URL)
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
-        self.assertEqual(response.data["detail"], "Ocorreu um erro interno ao habilitar o acesso ao jogo.")
+        self.assertEqual(
+            response.data["detail"],
+            "Ocorreu um erro interno ao habilitar o acesso ao jogo.",
+        )

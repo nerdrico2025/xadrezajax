@@ -7,7 +7,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { router } from "expo-router";
 
 import { useTheme } from "@/hooks/useTheme";
@@ -17,6 +17,7 @@ import { Colors } from "@/constants/theme";
 import Button from "@/components/Button";
 import InputLine from "@/components/InputLine";
 import ThemeToggle from "@/components/ThemeToggle";
+import { requestPasswordReset } from "@/app/services/api";
 
 export default function ForgotPassword() {
 
@@ -38,7 +39,7 @@ export default function ForgotPassword() {
     tablet: 180,
   });
 
-  const styles = StyleSheet.create({
+  const styles = useMemo(() => StyleSheet.create({
     container: {
       flex: 1,
       justifyContent: "flex-start",
@@ -90,14 +91,13 @@ export default function ForgotPassword() {
     actionContainer: {
       marginTop: 12,
     },
-  });
+  }), [colors, contentPadding, titleTopMargin]);
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSendCode = () => {
-
+  const handleSendCode = async () => {
     setError("");
 
     if (!email) {
@@ -107,13 +107,17 @@ export default function ForgotPassword() {
 
     setLoading(true);
 
-    setTimeout(() => {
+    try {
+      await requestPasswordReset(email.trim().toLowerCase());
+      router.push({
+        pathname: "/verify-code",
+        params: { email: email.trim().toLowerCase() },
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao solicitar código.");
+    } finally {
       setLoading(false);
-
-      // vai para verificação
-      router.push("/verify-code");
-
-    }, 1500);
+    }
   };
 
   return (

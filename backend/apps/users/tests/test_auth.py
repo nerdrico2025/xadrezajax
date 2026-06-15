@@ -196,7 +196,9 @@ class PasswordResetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     @patch("apps.users.views.threading.Thread")
-    def test_password_reset_confirm_updates_password_and_allows_login(self, mock_thread):
+    def test_password_reset_confirm_updates_password_and_allows_login(
+        self, mock_thread
+    ):
         self.client.post(PASSWORD_RESET_URL, {"email": self.user.email}, format="json")
 
         self.assertTrue(mock_thread.called)

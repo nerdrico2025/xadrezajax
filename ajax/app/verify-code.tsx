@@ -7,8 +7,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useState } from "react";
-import { router } from "expo-router";
+import { useState, useMemo } from "react";
+import { router, useLocalSearchParams } from "expo-router";
 
 import { useTheme } from "@/hooks/useTheme";
 import { useResponsive } from "@/hooks/useResponsive";
@@ -17,6 +17,7 @@ import Button from "@/components/Button";
 import InputLine from "@/components/InputLine";
 import ThemeToggle from "@/components/ThemeToggle";
 import { Colors } from "@/constants/theme";
+import { requestPasswordReset, verifyPasswordResetCode } from "@/app/services/api";
 
 export default function VerifyCode() {
 
@@ -41,8 +42,10 @@ export default function VerifyCode() {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const { email } = useLocalSearchParams<{ email?: string }>();
+  const normalizedEmail = typeof email === "string" ? email : "";
 
-  const styles = StyleSheet.create({
+  const styles = useMemo(() => StyleSheet.create({
     container: {
       flex: 1,
       justifyContent: "flex-start",
@@ -86,32 +89,54 @@ export default function VerifyCode() {
       color: colors.tint,
       fontWeight: "600",
     },
-  });
+  }), [colors, contentPadding, titleTopMargin]);
 
-  const handleVerify = () => {
-
+  const handleVerify = async () => {
     setError("");
 
-    if (!code) {
-      setError("Digite o código");
+    if (!normalizedEmail) {
+      setError("E-mail inválido. Volte e solicite um novo código.");
+      return;
+    }
+
+    if (!code || code.length !== 6) {
+      setError("Digite um código válido com 6 dígitos");
       return;
     }
 
     setLoading(true);
 
-    setTimeout(() => {
+    try {
+      await verifyPasswordResetCode(normalizedEmail, code.trim());
+      router.push({
+        pathname: "/reset-password",
+        params: { email: normalizedEmail, codigo: code.trim() },
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Código inválido ou expirado.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      const fakeCode = "123456";
+  const handleResend = async () => {
+    setError("");
 
-      if (code === fakeCode) {
-        setLoading(false);
-        router.push("/reset-password");
-      } else {
-        setLoading(false);
-        setError("Código inválido");
-      }
+    if (!normalizedEmail) {
+      setError("E-mail inválido. Volte e solicite um novo código.");
+      return;
+    }
 
-    }, 1500);
+    setLoading(true);
+
+    try {
+      await requestPasswordReset(normalizedEmail);
+      setError("Código reenviado com sucesso.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao reenviar código.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -146,7 +171,7 @@ export default function VerifyCode() {
         variant="primary"
       />
 
-      <TouchableOpacity onPress={() => alert("Código reenviado!")}>
+      <TouchableOpacity onPress={handleResend} disabled={loading}>
         <Text style={styles.resend}>
           Reenviar código
         </Text>

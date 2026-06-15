@@ -10,12 +10,14 @@ class ProfileAdmin(admin.ModelAdmin):
     readonly_fields = ["created_at", "updated_at"]
     raw_id_fields = ["user"]
 
+
 @admin.register(PlayerProfile)
 class PlayerProfileAdmin(admin.ModelAdmin):
     list_display = ["profile", "rating", "games_played", "created_at"]
     search_fields = ["profile__user__email", "profile__nickname"]
     readonly_fields = ["created_at", "updated_at"]
     raw_id_fields = ["profile"]
+
 
 @admin.register(AdminProfile)
 class AdminProfileAdmin(admin.ModelAdmin):
