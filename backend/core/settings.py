@@ -29,7 +29,7 @@ ALLOWED_HOSTS = [
     for host in os.getenv("ALLOWED_HOSTS", "").split(",")
     if host.strip()
 ]
-ALLOWED_HOSTS = ["[IP_ADDRESS]", "localhost", "127.0.0.1", ".ngrok-free.dev"]
+
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID") or os.getenv(
     "EXPO_PUBLIC_GOOGLE_CLIENT_ID", ""
 )
@@ -51,7 +51,6 @@ THIRD_PARTY_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
-    "corsheaders",
 ]
 
 LOCAL_APPS = [
@@ -75,21 +74,6 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "core.urls"
-
-CORS_ALLOW_ALL_ORIGINS = True
-
-CORS_ALLOW_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "dnt",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-    "ngrok-skip-browser-warning",
-]
 
 TEMPLATES = [
     {
@@ -145,33 +129,27 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # ========================
-# DRF + JWT
+# REDIS
 # ========================
-# Cache Config for Redis
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://127.0.0.1:6379/1",
+        "LOCATION": REDIS_URL,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },
     }
 }
 
-
-# Password validation
-# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
-
-
-AUTH_USER_MODEL = "users.User"
-
+# ========================
+# DRF + JWT
+# ========================
 REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "core.exceptions.custom_exception_handler",
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_THROTTLE_CLASSES": [
@@ -208,6 +186,7 @@ USE_TZ = True
 # STATIC
 # ========================
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # ========================
 # DEFAULT AUTO FIELD
@@ -217,18 +196,37 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ========================
 # CORS
 # ========================
-CORS_ALLOW_ALL_ORIGINS = True
+# Em dev (DEBUG=True) aceita qualquer origem — conveniente para testar no celular.
+# Em produção (DEBUG=False) só aceita as origens listadas em CORS_ALLOWED_ORIGINS no .env.
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 
-# CORS_ALLOWED_ORIGINS = [
-#    "http://localhost:8081",
-# ]
-STATIC_URL = "static/"
+if not DEBUG:
+    CORS_ALLOWED_ORIGINS = [
+        o.strip()
+        for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+        if o.strip()
+    ]
 
-# Email Settings
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+    "ngrok-skip-browser-warning",
+]
+
+# ========================
+# EMAIL (SendGrid)
+# ========================
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp.sendgrid.net"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = "apikey"  # Literalmente a palavra 'apikey'
+EMAIL_HOST_USER = "apikey"
 EMAIL_HOST_PASSWORD = os.getenv("SENDGRID_API_KEY", "")
 DEFAULT_FROM_EMAIL = "ricwesys@gmail.com"

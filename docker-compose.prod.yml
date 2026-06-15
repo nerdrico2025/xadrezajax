@@ -1,0 +1,98 @@
+services:
+
+  # ─────────────────────────────────────────
+  # Banco de dados
+  # ─────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    env_file: .env.prod
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - xadrez_network
+
+  # ─────────────────────────────────────────
+  # Cache
+  # ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: always
+    networks:
+      - xadrez_network
+
+  # ─────────────────────────────────────────
+  # Backend Django + Gunicorn
+  # ─────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    env_file: .env.prod
+    # Sobrescreve o CMD do Dockerfile (que usa runserver) para usar Gunicorn.
+    # --workers 4: 4 processos paralelos (regra: 2 × CPUs + 1)
+    # --timeout 120: mata worker que demorar mais de 2min (protege contra travamentos)
+    command: ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "120"]
+    volumes:
+      - static_files:/app/staticfiles
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - xadrez_network
+
+  # ─────────────────────────────────────────
+  # Node API (Stockfish)
+  # ─────────────────────────────────────────
+  node-api:
+    build:
+      context: ./node-api
+      dockerfile: Dockerfile
+    restart: always
+    env_file: .env.prod
+    networks:
+      - xadrez_network
+
+  # ─────────────────────────────────────────
+  # Nginx — porta de entrada única (80 + 443)
+  # Roteia por prefixo de URL para Django ou Node.
+  # ─────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
+      - ./nginx/docker-entrypoint.sh:/docker-entrypoint-custom.sh:ro
+      - static_files:/app/staticfiles:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    entrypoint: ["/docker-entrypoint-custom.sh"]
+    depends_on:
+      - backend
+      - node-api
+    networks:
+      - xadrez_network
+
+volumes:
+  postgres_data:
+  static_files:
+  certbot_www:
+
+networks:
+  xadrez_network:
+    driver: bridge

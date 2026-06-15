@@ -1,7 +1,6 @@
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { useState } from "react";
 import { router } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useTheme } from "@/hooks/useTheme";
 import AuthScreenLayout from "@/components/AuthScreenLayout";
@@ -9,12 +8,13 @@ import Button from "@/components/Button";
 import InputLine from "@/components/InputLine";
 import Divider from "@/components/Divider";
 import { Colors } from "@/constants/theme";
-
-const API_URL = "http://192.168.0.128:8000";
+import { useAuth } from "@/context/AuthContext";
+import { API_URL } from "@/services/api";
 
 export default function Login() {
   const { theme } = useTheme();
   const colors = Colors[theme];
+  const { signIn } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -52,10 +52,7 @@ export default function Login() {
         return;
       }
 
-      await AsyncStorage.setItem("accessToken", data.access);
-      await AsyncStorage.setItem("refreshToken", data.refresh);
-
-
+      await signIn(data.access, data.refresh);
       router.replace("/home");
 
     } catch (err) {

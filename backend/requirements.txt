@@ -1,15 +1,16 @@
-Django==5.0.7
-djangorestframework==3.15.2
-djangorestframework-simplejwt==5.3.1
-python-dotenv==1.0.1
-psycopg2-binary==2.9.9
 Django==6.0.4
-django-cors-headers==4.9.0
-django-redis==6.0.0
 djangorestframework==3.17.1
 djangorestframework-simplejwt==5.5.1
-google-auth==2.40.3
-psycopg2-binary==2.9.12
 python-dotenv==1.0.1
+psycopg2-binary==2.9.12
+django-cors-headers==4.9.0
+django-redis==6.0.0
+google-auth==2.40.3
 redis==8.0.0
 requests==2.32.3
+gunicorn==23.0.0
+
+# ── testes ──
+pytest==8.3.5
+pytest-django==4.9.0
+pytest-cov==6.1.0
