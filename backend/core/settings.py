@@ -58,6 +58,7 @@ THIRD_PARTY_APPS = [
 
 LOCAL_APPS = [
     "apps.users",
+    "apps.profiles",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -205,3 +206,35 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = "apikey"  # Literalmente a palavra 'apikey'
 EMAIL_HOST_PASSWORD = os.getenv("SENDGRID_API_KEY", "")
 DEFAULT_FROM_EMAIL = "ricwesys@gmail.com"
+
+# Logging Configuration (UC007)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": (
+                "[{asctime}] {levelname} {name} {module}.{funcName}:{lineno} — {message}"
+            ),
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "apps.profiles": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+    },
+}
+
+# Configurações de Regra de Negócio (Xadrez)
+DEFAULT_STARTING_ELO = 1200
+

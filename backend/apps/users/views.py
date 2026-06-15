@@ -10,8 +10,11 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.throttling import ScopedRateThrottle, AnonRateThrottle
 from rest_framework.response import Response
+import hashlib
+import time
+import requests
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -71,10 +74,16 @@ def verify_google_id_token(token_value):
     if not google_client_id:
         raise ValueError("GOOGLE_CLIENT_ID não configurado.")
 
+    session = requests.Session()
+    request_adapter = google_requests.Request(session=session)
+    session.request = lambda method, url, **kwargs: requests.Session.request(
+        session, method, url, timeout=10, **kwargs
+    )
+
     try:
         payload = id_token.verify_oauth2_token(
             token_value,
-            google_requests.Request(),
+            request_adapter,
             audience=google_client_id,
         )
     except ValueError as exc:
@@ -94,6 +103,7 @@ class RegisterView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle]
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -133,14 +143,17 @@ class PasswordResetRequestView(APIView):
         )
 
         user = User.objects.filter(email=email).first()
+        code = generate_reset_code()
+        
+        # Faz o hash do código para salvar no banco/cache de forma segura
+        code_hash = hashlib.sha256(code.encode()).hexdigest()
+
         if user is not None:
-            code = generate_reset_code()
             cache.set(
                 f"password_reset:{email}",
                 {
-                    "code": code,
+                    "code_hash": code_hash,
                     "user_id": user.id,
-                    "attempts": 0,
                 },
                 timeout=900,
             )
@@ -149,6 +162,17 @@ class PasswordResetRequestView(APIView):
             threading.Thread(
                 target=_send_reset_email, args=(email, user.full_name, code)
             ).start()
+        else:
+            # Falsa prevenção de timing attack: insere no cache e dá um pequeno sleep 
+            cache.set(
+                f"password_reset_dummy:{email}",
+                {
+                    "code_hash": code_hash,
+                    "user_id": 0,
+                },
+                timeout=900,
+            )
+            time.sleep(0.1)
 
         return Response({"detail": response_msg}, status=status.HTTP_200_OK)
 
@@ -168,6 +192,20 @@ class PasswordResetVerifyCodeView(APIView):
         email = serializer.validated_data["email"]
         code = serializer.validated_data["code"]
 
+        attempts_key = f"password_reset_attempts:{email}"
+        try:
+            attempts = cache.incr(attempts_key)
+        except ValueError:
+            cache.set(attempts_key, 1, timeout=900)
+            attempts = 1
+
+        if attempts > 5:
+            cache.delete(f"password_reset:{email}")
+            return Response(
+                {"detail": "Muitas tentativas falhas. Solicite um novo código."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         reset_data = cache.get(f"password_reset:{email}")
         if not reset_data:
             return Response(
@@ -175,20 +213,15 @@ class PasswordResetVerifyCodeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if reset_data.get("attempts", 0) >= 5:
-            cache.delete(f"password_reset:{email}")
-            return Response(
-                {"detail": "Muitas tentativas falhas. Solicite um novo código."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if reset_data.get("code") != code:
-            reset_data["attempts"] = reset_data.get("attempts", 0) + 1
-            cache.set(f"password_reset:{email}", reset_data, timeout=900)
+        code_hash = hashlib.sha256(code.encode()).hexdigest()
+        if reset_data.get("code_hash") != code_hash:
             return Response(
                 {"detail": "Código inválido ou expirado."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Se acertou o código, reseta as tentativas para não prejudicar na confirmação
+        cache.delete(attempts_key)
 
         return Response(
             {"detail": "Código válido."},
@@ -212,6 +245,20 @@ class PasswordResetConfirmView(APIView):
         code = serializer.validated_data["code"]
         new_password = serializer.validated_data["new_password"]
 
+        attempts_key = f"password_reset_attempts:{email}"
+        try:
+            attempts = cache.incr(attempts_key)
+        except ValueError:
+            cache.set(attempts_key, 1, timeout=900)
+            attempts = 1
+
+        if attempts > 5:
+            cache.delete(f"password_reset:{email}")
+            return Response(
+                {"detail": "Muitas tentativas falhas. Solicite um novo código."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         reset_data = cache.get(f"password_reset:{email}")
         if not reset_data:
             return Response(
@@ -219,16 +266,8 @@ class PasswordResetConfirmView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if reset_data.get("attempts", 0) >= 5:
-            cache.delete(f"password_reset:{email}")
-            return Response(
-                {"detail": "Muitas tentativas falhas. Solicite um novo código."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if reset_data.get("code") != code:
-            reset_data["attempts"] = reset_data.get("attempts", 0) + 1
-            cache.set(f"password_reset:{email}", reset_data, timeout=900)
+        code_hash = hashlib.sha256(code.encode()).hexdigest()
+        if reset_data.get("code_hash") != code_hash:
             return Response(
                 {"detail": "Código inválido ou expirado."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -245,6 +284,7 @@ class PasswordResetConfirmView(APIView):
         user.set_password(new_password)
         user.save(update_fields=["password"])
         cache.delete(f"password_reset:{email}")
+        cache.delete(attempts_key)
 
         return Response(
             {"detail": "Senha redefinida com sucesso."},
@@ -267,6 +307,7 @@ class GoogleLoginView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle]
 
     def post(self, request):
         id_token_value = request.data.get("id_token")
