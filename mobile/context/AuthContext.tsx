@@ -1,5 +1,8 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
+
+const ACCESS_TOKEN_KEY = "accessToken";
+const REFRESH_TOKEN_KEY = "refreshToken";
 
 type AuthContextType = {
   token: string | null;
@@ -15,20 +18,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    AsyncStorage.getItem("accessToken").then((stored) => {
+    SecureStore.getItemAsync(ACCESS_TOKEN_KEY).then((stored) => {
       setToken(stored);
       setLoading(false);
     });
   }, []);
 
   const signIn = async (access: string, refresh: string) => {
-    await AsyncStorage.setItem("accessToken", access);
-    await AsyncStorage.setItem("refreshToken", refresh);
+    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, access);
+    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refresh);
     setToken(access);
   };
 
   const signOut = async () => {
-    await AsyncStorage.multiRemove(["accessToken", "refreshToken"]);
+    await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
+    await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
     setToken(null);
   };
 
