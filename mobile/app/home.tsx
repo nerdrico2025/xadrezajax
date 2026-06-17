@@ -8,6 +8,7 @@ import { Colors } from "@/constants/theme";
 
 import GameScreen from "@/screen/game/GameScreen";
 import ProfileScreen from "@/screen/profile/ProfileScreen";
+import OfflineBanner from "@/components/OfflineBanner";
 
 export default function Home() {
   const { theme } = useTheme();
@@ -17,6 +18,7 @@ export default function Home() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <TopBar />
+      <OfflineBanner />
 
       <View style={styles.content}>
         {/* HOME */}
