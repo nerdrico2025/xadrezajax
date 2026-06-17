@@ -1,6 +1,7 @@
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
 import { useState } from "react";
 import { router } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 
 import { useTheme } from "@/hooks/useTheme";
 import AuthScreenLayout from "@/components/AuthScreenLayout";
@@ -10,11 +11,13 @@ import Divider from "@/components/Divider";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
 import { API_URL } from "@/services/api";
+import { useBiometric } from "@/hooks/useBiometric";
 
 export default function Login() {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const { signIn } = useAuth();
+  const { isAvailable, isEnabled, authenticate, enable } = useBiometric();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -53,6 +56,18 @@ export default function Login() {
       }
 
       await signIn(data.access, data.refresh);
+
+      if (isAvailable && !isEnabled) {
+        Alert.alert(
+          "Ativar biometria",
+          "Deseja usar digital ou Face ID para entrar nas próximas vezes?",
+          [
+            { text: "Agora não", style: "cancel" },
+            { text: "Ativar", onPress: enable },
+          ]
+        );
+      }
+
       router.replace("/home");
 
     } catch (err) {
@@ -60,6 +75,15 @@ export default function Login() {
       setError("Erro de conexão com servidor");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBiometricLogin = async () => {
+    const success = await authenticate();
+    if (success) {
+      router.replace("/home");
+    } else {
+      setError("Autenticação biométrica falhou");
     }
   };
 
@@ -100,6 +124,18 @@ export default function Login() {
       </View>
       
       <Button title="Acessar" onPress={handleLogin} loading={loading} />
+
+      {isAvailable && isEnabled && (
+        <TouchableOpacity
+          style={styles.biometricButton}
+          onPress={handleBiometricLogin}
+        >
+          <Ionicons name="finger-print" size={32} color={colors.primary} />
+          <Text style={[styles.biometricText, { color: colors.primary }]}>
+            Entrar com biometria
+          </Text>
+        </TouchableOpacity>
+      )}
 
       <Divider text="ou" />
       <Button
@@ -151,5 +187,14 @@ const styles = StyleSheet.create({
   forgot: {
     fontWeight: "600",
     fontSize: 12,
+  },
+  biometricButton: {
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+  },
+  biometricText: {
+    fontSize: 14,
+    fontWeight: "600",
   },
 });
