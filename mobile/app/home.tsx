@@ -7,6 +7,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 
 import GameScreen from "@/screen/game/GameScreen";
+import ProfileScreen from "@/screen/profile/ProfileScreen";
 
 export default function Home() {
   const { theme } = useTheme();
@@ -35,13 +36,7 @@ export default function Home() {
         )}
 
         {/* PERFIL */}
-        {activeTab === "profile" && (
-          <View style={styles.center}>
-            <Text style={[styles.screenTitle, { color: colors.text }]}>
-              Perfil
-            </Text>
-          </View>
-        )}
+        {activeTab === "profile" && <ProfileScreen />}
       </View>
 
       <BottomBar activeTab={activeTab} onTabPress={setActiveTab} />
