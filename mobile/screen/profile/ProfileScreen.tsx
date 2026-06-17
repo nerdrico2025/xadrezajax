@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -29,9 +29,9 @@ export default function ProfileScreen() {
     if (saved) setAvatarUri(saved);
   }, []);
 
-  useState(() => {
+  useEffect(() => {
     loadAvatar();
-  });
+  }, [loadAvatar]);
 
   const handlePickImage = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
