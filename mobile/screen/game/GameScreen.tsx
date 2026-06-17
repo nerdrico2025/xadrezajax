@@ -6,11 +6,13 @@ import { Chess } from "chess.js";
 import * as Haptics from "expo-haptics";
 
 import { getBestMove } from "@/services/game";
+import { useChessSound } from "@/hooks/useChessSound";
 
 export default function GameScreen() {
   const [game, setGame] = useState(new Chess());
   const [loading, setLoading] = useState(false);
   const chessboardRef = useRef<ChessboardRef>(null);
+  const { play } = useChessSound();
 
   const onMove = async (data: any) => {
     try {
@@ -32,9 +34,11 @@ export default function GameScreen() {
       if (!playerMove) return;
 
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      play(playerMove.captured ? "capture" : "move");
 
       if (currentGame.isCheckmate()) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        play("checkmate");
         return;
       }
 
@@ -72,10 +76,13 @@ export default function GameScreen() {
 
       if (updatedGame.isCheckmate()) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        play("checkmate");
       } else if (updatedGame.inCheck()) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        play("check");
       } else {
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        play(aiMove.captured ? "capture" : "move");
       }
 
       setGame(new Chess(updatedGame.fen()));
