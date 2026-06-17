@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useRef } from "react";
 import { AudioPlayer, createAudioPlayer } from "expo-audio";
 
-// Adicione os arquivos em mobile/assets/sounds/:
-// move.mp3      — movimento normal de peça
-// capture.mp3   — captura de peça
-// check.mp3     — xeque
-// checkmate.mp3 — xeque-mate
 const SOUNDS = {
-  move: require("../assets/sounds/move.mp3"),
-  capture: require("../assets/sounds/capture.mp3"),
-  check: require("../assets/sounds/check.mp3"),
-  checkmate: require("../assets/sounds/checkmate.mp3"),
+  move: require("../assets/sounds/Move.mp3"),
+  capture: require("../assets/sounds/Capture.mp3"),
+  check: require("../assets/sounds/GenericNotify.mp3"),
+  checkmate: require("../assets/sounds/Checkmate.mp3"),
+  gameStart: require("../assets/sounds/Confirmation.mp3"),
+  gameEnd: require("../assets/sounds/SocialNotify.mp3"),
+  error: require("../assets/sounds/Error.mp3"),
 } as const;
 
 type SoundKey = keyof typeof SOUNDS;

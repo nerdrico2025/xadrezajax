@@ -1,5 +1,5 @@
 import { View, StyleSheet, Alert, ActivityIndicator } from "react-native";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import Chessboard from "react-native-chessboard";
 import type { ChessboardRef } from "react-native-chessboard";
 import { Chess } from "chess.js";
@@ -13,6 +13,10 @@ export default function GameScreen() {
   const [loading, setLoading] = useState(false);
   const chessboardRef = useRef<ChessboardRef>(null);
   const { play } = useChessSound();
+
+  useEffect(() => {
+    play("gameStart");
+  }, []);
 
   const onMove = async (data: any) => {
     try {
@@ -77,6 +81,7 @@ export default function GameScreen() {
       if (updatedGame.isCheckmate()) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         play("checkmate");
+        play("gameEnd");
       } else if (updatedGame.inCheck()) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         play("check");
