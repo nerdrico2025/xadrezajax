@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import Chessboard from "react-native-chessboard";
 import type { ChessboardRef } from "react-native-chessboard";
 import { Chess } from "chess.js";
+import * as Haptics from "expo-haptics";
 
 import { getBestMove } from "@/services/game";
 
@@ -29,6 +30,13 @@ export default function GameScreen() {
       });
 
       if (!playerMove) return;
+
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+      if (currentGame.isCheckmate()) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return;
+      }
 
       setLoading(true);
 
@@ -61,6 +69,14 @@ export default function GameScreen() {
       }
 
       await chessboardRef.current?.move({ from, to });
+
+      if (updatedGame.isCheckmate()) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      } else if (updatedGame.inCheck()) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      } else {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
 
       setGame(new Chess(updatedGame.fen()));
       setLoading(false);
