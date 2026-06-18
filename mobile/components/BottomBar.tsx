@@ -27,9 +27,9 @@ const TABS: TabItem[] = [
   },
   {
     id: "profile",
-    label: "Perfil",
-    icon: "person-outline",
-    iconActive: "person",
+    label: "Menu",
+    icon: "menu-outline",
+    iconActive: "menu",
   },
 ];
 

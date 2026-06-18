@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import * as SecureStore from "expo-secure-store";
+import { getItem, setItem, removeItem } from "@/utils/storage";
 
 const ACCESS_TOKEN_KEY = "accessToken";
 const REFRESH_TOKEN_KEY = "refreshToken";
@@ -18,21 +18,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    SecureStore.getItemAsync(ACCESS_TOKEN_KEY).then((stored) => {
+    getItem(ACCESS_TOKEN_KEY).then((stored) => {
       setToken(stored);
       setLoading(false);
     });
   }, []);
 
   const signIn = async (access: string, refresh: string) => {
-    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, access);
-    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refresh);
+    await setItem(ACCESS_TOKEN_KEY, access);
+    await setItem(REFRESH_TOKEN_KEY, refresh);
     setToken(access);
   };
 
   const signOut = async () => {
-    await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-    await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+    await removeItem(ACCESS_TOKEN_KEY);
+    await removeItem(REFRESH_TOKEN_KEY);
     setToken(null);
   };
 

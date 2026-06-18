@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import * as SecureStore from "expo-secure-store";
+import { getItem, setItem } from "@/utils/storage";
 import { Ionicons } from "@expo/vector-icons";
 
 import { useTheme } from "@/hooks/useTheme";
@@ -25,7 +25,7 @@ export default function ProfileScreen() {
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
   const loadAvatar = useCallback(async () => {
-    const saved = await SecureStore.getItemAsync(AVATAR_KEY);
+    const saved = await getItem(AVATAR_KEY);
     if (saved) setAvatarUri(saved);
   }, []);
 
@@ -53,7 +53,7 @@ export default function ProfileScreen() {
 
     if (!result.canceled && result.assets[0]) {
       const uri = result.assets[0].uri;
-      await SecureStore.setItemAsync(AVATAR_KEY, uri);
+      await setItem(AVATAR_KEY, uri);
       setAvatarUri(uri);
     }
   }, []);
@@ -77,7 +77,7 @@ export default function ProfileScreen() {
 
     if (!result.canceled && result.assets[0]) {
       const uri = result.assets[0].uri;
-      await SecureStore.setItemAsync(AVATAR_KEY, uri);
+      await setItem(AVATAR_KEY, uri);
       setAvatarUri(uri);
     }
   }, []);

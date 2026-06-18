@@ -70,6 +70,20 @@ export default function AuthScreenLayout({
     </View>
   );
 
+  const scrollView = (
+    <KeyboardAwareScrollView
+      contentContainerStyle={styles.scrollContent}
+      enableOnAndroid
+      extraScrollHeight={140}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      keyboardOpeningTime={0}
+      enableAutomaticScroll
+    >
+      {content}
+    </KeyboardAwareScrollView>
+  );
+
   return (
     <SafeAreaView
       style={[styles.safeArea, { backgroundColor: colors.background }]}
@@ -78,19 +92,13 @@ export default function AuthScreenLayout({
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <KeyboardAwareScrollView
-            contentContainerStyle={styles.scrollContent}
-            enableOnAndroid
-            extraScrollHeight={140}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            keyboardOpeningTime={0}
-            enableAutomaticScroll
-          >
-            {content}
-          </KeyboardAwareScrollView>
-        </TouchableWithoutFeedback>
+        {Platform.OS === "web" ? (
+          scrollView
+        ) : (
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            {scrollView}
+          </TouchableWithoutFeedback>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
