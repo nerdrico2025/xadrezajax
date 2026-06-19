@@ -4,6 +4,8 @@ import { StyleSheet, Text, View } from "react-native";
 import TopBar from "@/components/TopBar";
 import BottomBar, { type BottomTab } from "@/components/BottomBar";
 import OfflineBanner from "@/components/OfflineBanner";
+import DifficultyModal, { type Difficulty } from "@/components/DifficultyModal";
+import ColorPickerModal, { type PlayerColor } from "@/components/ColorPickerModal";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 
@@ -18,9 +20,15 @@ type ActiveScreen = "home" | "play" | "profile";
 export default function Home() {
   const { theme } = useTheme();
   const colors = Colors[theme];
+
   const [activeTab, setActiveTab] = useState<BottomTab>("home");
   const [activeScreen, setActiveScreen] = useState<ActiveScreen>("home");
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
+  const [showDifficulty, setShowDifficulty] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [difficulty, setDifficulty] = useState<Difficulty>("medium");
+  const [playerColor, setPlayerColor] = useState<PlayerColor>("w");
+  const [gameKey, setGameKey] = useState(0);
 
   const handleCloseMenu = useCallback(() => setActiveMenu(null), []);
 
@@ -35,8 +43,24 @@ export default function Home() {
     }
   }, []);
 
+  const handleSelectDifficulty = useCallback((selected: Difficulty) => {
+    setDifficulty(selected);
+    setShowDifficulty(false);
+    setShowColorPicker(true);
+  }, []);
+
+  const handleSelectColor = useCallback((selected: PlayerColor) => {
+    setPlayerColor(selected);
+    setShowColorPicker(false);
+    setActiveScreen("play");
+    setGameKey((k) => k + 1);
+  }, []);
+
   const currentMenu = (() => {
-    if (activeMenu === "game") return gameMenu({ onQuickMatch: () => {} });
+    if (activeMenu === "game")
+      return gameMenu({
+        onQuickMatch: () => setShowDifficulty(true),
+      });
     if (activeMenu === "profile")
       return profileMenu({
         onProfile: () => setActiveScreen("profile"),
@@ -58,9 +82,14 @@ export default function Home() {
           </View>
         )}
 
-        {activeScreen === "play" && activeMenu === null && (
+        {activeScreen === "play" && (
           <View style={styles.gameContainer}>
-            <GameScreen />
+            <GameScreen
+              key={gameKey}
+              difficulty={difficulty}
+              playerColor={playerColor}
+              onLeave={() => setActiveScreen("home")}
+            />
           </View>
         )}
 
@@ -77,6 +106,18 @@ export default function Home() {
           onClose={handleCloseMenu}
         />
       )}
+
+      <DifficultyModal
+        visible={showDifficulty}
+        onSelect={handleSelectDifficulty}
+        onCancel={() => setShowDifficulty(false)}
+      />
+
+      <ColorPickerModal
+        visible={showColorPicker}
+        onSelect={handleSelectColor}
+        onCancel={() => setShowColorPicker(false)}
+      />
     </View>
   );
 }

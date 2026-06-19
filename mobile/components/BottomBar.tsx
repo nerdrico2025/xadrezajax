@@ -13,24 +13,15 @@ type IoniconsName = ComponentProps<typeof Ionicons>["name"];
 interface TabItem {
   id: BottomTab;
   label: string;
-  icon: IoniconsName;
-  iconActive: IoniconsName;
+  icon: IoniconsName | null;
+  iconActive: IoniconsName | null;
+  chess?: boolean;
 }
 
 const TABS: TabItem[] = [
   { id: "home", label: "Home", icon: "home-outline", iconActive: "home" },
-  {
-    id: "play",
-    label: "Jogar",
-    icon: "grid-outline",
-    iconActive: "grid",
-  },
-  {
-    id: "profile",
-    label: "Menu",
-    icon: "menu-outline",
-    iconActive: "menu",
-  },
+  { id: "play", label: "Jogar", icon: null, iconActive: null, chess: true },
+  { id: "profile", label: "Menu", icon: "menu-outline", iconActive: "menu" },
 ];
 
 interface BottomBarProps {
@@ -73,24 +64,18 @@ export default function BottomBar({
             accessibilityLabel={tab.label}
             accessibilityState={{ selected: isActive }}
           >
-            <Ionicons
-              name={isActive ? tab.iconActive : tab.icon}
-              size={24}
-              color={iconColor}
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-            />
-            <Text
-              style={[
-                styles.label,
-                {
-                  color: isActive ? colors.primary : colors.secondary,
-                  fontWeight: isActive ? "700" : "500",
-                },
-              ]}
-            >
-              {tab.label}
-            </Text>
+            {tab.chess ? (
+              <Text style={[styles.chessIcon, { color: iconColor }]}>♞</Text>
+            ) : (
+              <Ionicons
+                name={isActive ? tab.iconActive! : tab.icon!}
+                size={tab.id === "profile" ? 34 : 28}
+                color={iconColor}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              />
+            )}
+
             {isActive && (
               <View
                 style={[styles.indicator, { backgroundColor: colors.primary }]}
@@ -107,21 +92,21 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 8,
+    paddingTop: 10,
     paddingHorizontal: 8,
   },
   tab: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 6,
-    gap: 4,
+    paddingVertical: 8,
   },
   tabPressed: {
     opacity: 0.7,
   },
-  label: {
-    fontSize: 12,
+  chessIcon: {
+    fontSize: 36,
+    lineHeight: 40,
   },
   indicator: {
     position: "absolute",
