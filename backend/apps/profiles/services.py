@@ -42,11 +42,8 @@ def create_player_profile(profile):
     UC010 - Liberar acesso às funcionalidades de jogo.
     Cria a entidade PlayerProfile associada ao Profile, se não existir.
     """
-    if hasattr(profile, "player_profile"):
-        return profile.player_profile
-
-    player_profile = PlayerProfile.objects.create(profile=profile)
-    return player_profile
+    player_profile, created = PlayerProfile.objects.get_or_create(profile=profile)
+    return player_profile, created
 
 
 @transaction.atomic
@@ -60,14 +57,13 @@ def promote_to_admin(promoter, target_user):
 
     profile = target_user.profile
 
-    if hasattr(profile, "admin_profile"):
-        raise ValidationError("O usuário já é um administrador.")
+    admin_profile, created = AdminProfile.objects.get_or_create(
+        profile=profile, defaults={"promoted_by": promoter}
+    )
 
-    # Cria o perfil admin
-    admin_profile = AdminProfile.objects.create(profile=profile, promoted_by=promoter)
+    if created:
+        # Ativa is_staff no modelo do Django para permitir acesso ao django-admin
+        target_user.is_staff = True
+        target_user.save(update_fields=["is_staff"])
 
-    # Ativa is_staff no modelo do Django para permitir acesso ao django-admin
-    target_user.is_staff = True
-    target_user.save(update_fields=["is_staff"])
-
-    return admin_profile
+    return admin_profile, created

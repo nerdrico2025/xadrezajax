@@ -50,8 +50,24 @@ class MyProfileView(APIView):
 
     def get(self, request, *args, **kwargs):
         if not hasattr(request.user, "profile"):
-            services.create_profile(request.user)
-        profile = request.user.profile
+            try:
+                services.create_profile(request.user)
+            except DjangoValidationError as e:
+                return Response({"detail": list(e)}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception:
+                return Response(
+                    {"detail": "Erro interno ao criar o perfil automaticamente."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        try:
+            profile = request.user.profile
+        except Exception:
+            return Response(
+                {"detail": "Erro interno ao consultar o perfil."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
         serializer = ProfileResponseSerializer(profile)
         return Response(serializer.data)
 
@@ -76,7 +92,13 @@ class MyProfileView(APIView):
         serializer.is_valid(raise_exception=True)
 
         nickname = serializer.validated_data.get("nickname")
-        services.update_profile(profile, nickname=nickname)
+        try:
+            services.update_profile(profile, nickname=nickname)
+        except Exception:
+            return Response(
+                {"detail": "Ocorreu um erro interno ao salvar o perfil."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         response_serializer = ProfileResponseSerializer(profile)
         return Response(response_serializer.data)
@@ -95,7 +117,7 @@ class PlayerProfileView(APIView):
         if not request.user.profile.is_player:
             return Response(
                 {"detail": "Você ainda não possui um perfil de jogador."},
-                status=status.HTTP_403_FORBIDDEN,
+                status=status.HTTP_404_NOT_FOUND,
             )
         serializer = PlayerProfileSerializer(request.user.profile.player_profile)
         return Response(serializer.data)
@@ -103,9 +125,17 @@ class PlayerProfileView(APIView):
     def post(self, request, *args, **kwargs):
         # Se for chamado sob demanda (ex: botão "Quero Jogar")
         profile = request.user.profile
-        player_profile = services.create_player_profile(profile)
+        try:
+            player_profile, created = services.create_player_profile(profile)
+        except Exception:
+            return Response(
+                {"detail": "Ocorreu um erro interno ao habilitar o acesso ao jogo."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         serializer = PlayerProfileSerializer(player_profile)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        if created:
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class PromoteToAdminView(APIView):
@@ -120,13 +150,26 @@ class PromoteToAdminView(APIView):
         target_user = get_object_or_404(User, id=user_id)
 
         try:
-            services.promote_to_admin(promoter=request.user, target_user=target_user)
-            return Response(
-                {"detail": f"Usuário {target_user.email} promovido a Admin."},
-                status=status.HTTP_200_OK,
+            admin_profile, created = services.promote_to_admin(
+                promoter=request.user, target_user=target_user
             )
         except DjangoValidationError as e:
             return Response({"detail": list(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response(
+                {"detail": "Ocorreu um erro interno ao promover o usuário."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if created:
+            return Response(
+                {"detail": "Usuário promovido a administrador com sucesso."},
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(
+            {"detail": "O usuário já possui privilégios de administrador."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class WhoAmIView(APIView):
