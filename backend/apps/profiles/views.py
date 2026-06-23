@@ -12,6 +12,7 @@ from .serializers import (
     PlayerProfileSerializer,
 )
 from .permissions import HasProfile, HasPlayerProfile, HasAdminProfile
+from .models import Profile
 from . import services
 
 User = get_user_model()
@@ -81,16 +82,17 @@ class MyProfileView(APIView):
 
     def _update(self, request):
         try:
-            profile = request.user.profile
-        except Exception as e:
-            if "DoesNotExist" in type(e).__name__:
-                return Response(
-                    {"detail": "Perfil não encontrado."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+            profile = Profile.objects.filter(user=request.user).first()
+        except Exception:
             return Response(
                 {"detail": "Erro interno ao consultar o perfil."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if not profile:
+            return Response(
+                {"detail": "Perfil não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
             )
         serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -217,7 +219,7 @@ class ProtectedGameExampleView(APIView):
     def get(self, request, *args, **kwargs):
         return Response(
             {
-                "message": (
+                "detail": (
                     "Parabéns! Se você está lendo isso, você tem "
                     "um PlayerProfile e pode jogar."
                 )
