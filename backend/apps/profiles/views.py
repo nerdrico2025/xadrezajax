@@ -4,7 +4,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
-from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.exceptions import (
+    ValidationError as DjangoValidationError,
+    ObjectDoesNotExist,
+)
 from .serializers import (
     ProfileCreateSerializer,
     ProfileUpdateSerializer,
@@ -49,9 +52,11 @@ class MyProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        if not hasattr(request.user, "profile"):
+        try:
+            profile = request.user.profile
+        except ObjectDoesNotExist:
             try:
-                services.create_profile(request.user)
+                profile = services.create_profile(request.user)
             except DjangoValidationError as e:
                 return Response({"detail": list(e)}, status=status.HTTP_400_BAD_REQUEST)
             except Exception:
@@ -59,9 +64,6 @@ class MyProfileView(APIView):
                     {"detail": "Erro interno ao criar o perfil automaticamente."},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
-
-        try:
-            profile = request.user.profile
         except Exception:
             return Response(
                 {"detail": "Erro interno ao consultar o perfil."},
@@ -78,16 +80,18 @@ class MyProfileView(APIView):
         return self._update(request)
 
     def _update(self, request):
-        if not hasattr(request.user, "profile"):
+        try:
+            profile = request.user.profile
+        except ObjectDoesNotExist:
             return Response(
-                {
-                    "detail": (
-                        "Perfil não encontrado. " "Crie seu perfil antes de continuar."
-                    )
-                },
-                status=status.HTTP_403_FORBIDDEN,
+                {"detail": "Perfil não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
             )
-        profile = request.user.profile
+        except Exception:
+            return Response(
+                {"detail": "Erro interno ao consultar o perfil."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
 
