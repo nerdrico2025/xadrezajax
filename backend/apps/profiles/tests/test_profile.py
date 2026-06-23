@@ -85,7 +85,7 @@ class CreateProfileFailureTests(APITestCase):
         # Segunda criação — bloqueada
         response_2 = self.client.post(PROFILE_CREATE_URL, {}, format="json")
         self.assertEqual(response_2.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("já possui", response_2.data["detail"])
+        self.assertIn("já possui", response_2.data["detail"][0])
 
     def test_duplicate_profile_does_not_create_second_record(self):
         user = create_test_user()

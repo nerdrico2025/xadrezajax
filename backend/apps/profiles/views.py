@@ -46,9 +46,11 @@ class MyProfileView(APIView):
     UC009 - Lê e atualiza o próprio perfil.
     """
 
-    permission_classes = [IsAuthenticated, HasProfile]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
+        if not hasattr(request.user, "profile"):
+            services.create_profile(request.user)
         profile = request.user.profile
         serializer = ProfileResponseSerializer(profile)
         return Response(serializer.data)
@@ -60,6 +62,15 @@ class MyProfileView(APIView):
         return self._update(request)
 
     def _update(self, request):
+        if not hasattr(request.user, "profile"):
+            return Response(
+                {
+                    "detail": (
+                        "Perfil não encontrado. " "Crie seu perfil antes de continuar."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
         profile = request.user.profile
         serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
