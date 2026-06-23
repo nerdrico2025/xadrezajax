@@ -124,7 +124,7 @@ class MyProfileTests(APITestCase):
         response = self.client.get(PROFILE_ME_URL)
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    @patch("apps.profiles.views.ProfileService.create_profile")
+    @patch("apps.profiles.views.services.create_profile")
     def test_auto_creation_failure_returns_500(self, mock_create):
         mock_create.side_effect = Exception("Simulated creation error")
 
@@ -178,7 +178,7 @@ class UpdateProfileTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("nickname", response.data)
 
-    @patch("apps.profiles.views.ProfileService.update_profile")
+    @patch("apps.profiles.views.services.update_profile")
     def test_update_profile_unexpected_error_returns_500(self, mock_update):
         mock_update.side_effect = Exception("Simulated DB Update Error")
 

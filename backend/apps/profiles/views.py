@@ -4,10 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
-from django.core.exceptions import (
-    ValidationError as DjangoValidationError,
-    ObjectDoesNotExist,
-)
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .serializers import (
     ProfileCreateSerializer,
     ProfileUpdateSerializer,
@@ -54,21 +51,24 @@ class MyProfileView(APIView):
     def get(self, request, *args, **kwargs):
         try:
             profile = request.user.profile
-        except ObjectDoesNotExist:
-            try:
-                profile = services.create_profile(request.user)
-            except DjangoValidationError as e:
-                return Response({"detail": list(e)}, status=status.HTTP_400_BAD_REQUEST)
-            except Exception:
+        except Exception as e:
+            if "DoesNotExist" in type(e).__name__:
+                try:
+                    profile = services.create_profile(request.user)
+                except DjangoValidationError as exc:
+                    return Response(
+                        {"detail": list(exc)}, status=status.HTTP_400_BAD_REQUEST
+                    )
+                except Exception:
+                    return Response(
+                        {"detail": "Erro interno ao criar o perfil automaticamente."},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+            else:
                 return Response(
-                    {"detail": "Erro interno ao criar o perfil automaticamente."},
+                    {"detail": "Erro interno ao consultar o perfil."},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
-        except Exception:
-            return Response(
-                {"detail": "Erro interno ao consultar o perfil."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
 
         serializer = ProfileResponseSerializer(profile)
         return Response(serializer.data)
@@ -82,12 +82,12 @@ class MyProfileView(APIView):
     def _update(self, request):
         try:
             profile = request.user.profile
-        except ObjectDoesNotExist:
-            return Response(
-                {"detail": "Perfil não encontrado."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        except Exception:
+        except Exception as e:
+            if "DoesNotExist" in type(e).__name__:
+                return Response(
+                    {"detail": "Perfil não encontrado."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
             return Response(
                 {"detail": "Erro interno ao consultar o perfil."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
