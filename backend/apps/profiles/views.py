@@ -51,23 +51,25 @@ class MyProfileView(APIView):
 
     def get(self, request, *args, **kwargs):
         try:
-            profile = request.user.profile
-        except Exception as e:
-            if "DoesNotExist" in type(e).__name__:
-                try:
-                    profile = services.create_profile(request.user)
-                except DjangoValidationError as exc:
-                    return Response(
-                        {"detail": list(exc)}, status=status.HTTP_400_BAD_REQUEST
-                    )
-                except Exception:
-                    return Response(
-                        {"detail": "Erro interno ao criar o perfil automaticamente."},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    )
-            else:
+            profile = (
+                Profile.objects.select_related("user").filter(user=request.user).first()
+            )
+        except Exception:
+            return Response(
+                {"detail": "Erro interno ao consultar o perfil."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if not profile:
+            try:
+                profile = services.create_profile(request.user)
+            except DjangoValidationError as exc:
                 return Response(
-                    {"detail": "Erro interno ao consultar o perfil."},
+                    {"detail": list(exc)}, status=status.HTTP_400_BAD_REQUEST
+                )
+            except Exception:
+                return Response(
+                    {"detail": "Erro interno ao criar o perfil automaticamente."},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
@@ -217,11 +219,4 @@ class ProtectedGameExampleView(APIView):
     permission_classes = [IsAuthenticated, HasPlayerProfile]
 
     def get(self, request, *args, **kwargs):
-        return Response(
-            {
-                "detail": (
-                    "Parabéns! Se você está lendo isso, você tem "
-                    "um PlayerProfile e pode jogar."
-                )
-            }
-        )
+        return Response({"detail": "Acesso liberado! Você é um jogador autenticado."})
