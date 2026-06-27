@@ -19,19 +19,21 @@ interface TabItem {
 }
 
 const TABS: TabItem[] = [
-  { id: "home", label: "Home", icon: "home-outline", iconActive: "home" },
-  { id: "play", label: "Jogar", icon: null, iconActive: null, chess: true },
-  { id: "profile", label: "Menu", icon: "menu-outline", iconActive: "menu" },
+  { id: "home",    label: "Início", icon: "home-outline",  iconActive: "home" },
+  { id: "play",    label: "Jogar",  icon: null,            iconActive: null, chess: true },
+  { id: "profile", label: "Menu",   icon: "menu-outline",  iconActive: "menu" },
 ];
 
 interface BottomBarProps {
   activeTab?: BottomTab;
   onTabPress?: (tab: BottomTab) => void;
+  pendingFriendRequests?: number;
 }
 
 export default function BottomBar({
   activeTab = "home",
   onTabPress,
+  pendingFriendRequests = 0,
 }: BottomBarProps) {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
@@ -42,9 +44,9 @@ export default function BottomBar({
       style={[
         styles.container,
         {
-          paddingBottom: Math.max(insets.bottom, 8),
+          paddingBottom: insets.bottom + 8,
           backgroundColor: colors.background,
-          borderTopColor: theme === "dark" ? "#2A2D2E" : "#E8E8E8",
+          borderTopColor: colors.divider,
         },
       ]}
     >
@@ -64,23 +66,31 @@ export default function BottomBar({
             accessibilityLabel={tab.label}
             accessibilityState={{ selected: isActive }}
           >
-            {tab.chess ? (
-              <Text style={[styles.chessIcon, { color: iconColor }]}>♞</Text>
-            ) : (
-              <Ionicons
-                name={isActive ? tab.iconActive! : tab.icon!}
-                size={tab.id === "profile" ? 34 : 28}
-                color={iconColor}
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-              />
+            {isActive && (
+              <View style={[styles.indicator, { backgroundColor: colors.primary }]} />
             )}
 
-            {isActive && (
-              <View
-                style={[styles.indicator, { backgroundColor: colors.primary }]}
-              />
-            )}
+            <View style={styles.iconWrap}>
+              {tab.chess ? (
+                <Text style={[styles.chessIcon, { color: iconColor }]}>♞</Text>
+              ) : (
+                <Ionicons
+                  name={isActive ? tab.iconActive! : tab.icon!}
+                  size={24}
+                  color={iconColor}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                />
+              )}
+              {tab.id === "profile" && pendingFriendRequests > 0 && (
+                <View style={[styles.badge, { backgroundColor: colors.error }]}>
+                  <Text style={styles.badgeText}>
+                    {pendingFriendRequests > 9 ? "9+" : pendingFriendRequests}
+                  </Text>
+                </View>
+              )}
+            </View>
+
           </Pressable>
         );
       })}
@@ -114,5 +124,24 @@ const styles = StyleSheet.create({
     width: 28,
     height: 3,
     borderRadius: 2,
+  },
+  iconWrap: {
+    position: "relative",
+  },
+  badge: {
+    position: "absolute",
+    top: -4,
+    right: -8,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#fff",
   },
 });

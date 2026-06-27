@@ -16,6 +16,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '@/hooks/useTheme';
+import { Colors } from '@/constants/theme';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DRAG_CLOSE_THRESHOLD = 80;
@@ -35,11 +38,16 @@ type MenuBottomSheetProps = {
   title?: string;
 };
 
-const DragHandle = React.memo(() => (
-  <View style={styles.dragHandle} />
+const DragHandle = React.memo(({ color }: { color: string }) => (
+  <View style={[styles.dragHandle, { backgroundColor: color }]} />
 ));
 
-const MenuItemRow = React.memo(({ item, onClose }: { item: MenuItem; onClose: () => void }) => {
+const MenuItemRow = React.memo(({ item, onClose, textColor, bgPress }: {
+  item: MenuItem;
+  onClose: () => void;
+  textColor: string;
+  bgPress: string;
+}) => {
   const handlePress = useCallback(() => {
     onClose();
     item.onPress();
@@ -52,7 +60,7 @@ const MenuItemRow = React.memo(({ item, onClose }: { item: MenuItem; onClose: ()
       activeOpacity={0.65}
     >
       <View style={styles.menuItemIcon}>{item.icon}</View>
-      <Text style={styles.menuItemLabel}>{item.label}</Text>
+      <Text style={[styles.menuItemLabel, { color: textColor }]}>{item.label}</Text>
     </TouchableOpacity>
   );
 });
@@ -61,6 +69,9 @@ const MenuBottomSheet = React.memo(
   ({ visible, items, onClose, title }: MenuBottomSheetProps) => {
     const translateY = useSharedValue(SCREEN_HEIGHT);
     const overlayOpacity = useSharedValue(0);
+    const insets = useSafeAreaInsets();
+    const { theme } = useTheme();
+    const colors = Colors[theme];
 
     const open = useCallback(() => {
       overlayOpacity.value = withTiming(1, { duration: 320 });
@@ -115,12 +126,29 @@ const MenuBottomSheet = React.memo(
           </Animated.View>
 
           <GestureDetector gesture={panGesture}>
-            <Animated.View style={[styles.sheet, sheetStyle]}>
-              <DragHandle />
-              {title && <Text style={styles.title}>{title}</Text>}
+            <Animated.View
+              style={[
+                styles.sheet,
+                sheetStyle,
+                {
+                  backgroundColor: colors.card,
+                  paddingBottom: insets.bottom + 20,
+                },
+              ]}
+            >
+              <DragHandle color={colors.border} />
+              {title && (
+                <Text style={[styles.title, { color: colors.secondary }]}>{title}</Text>
+              )}
               <View style={styles.itemsContainer}>
                 {items.map((item) => (
-                  <MenuItemRow key={item.label} item={item} onClose={close} />
+                  <MenuItemRow
+                    key={item.label}
+                    item={item}
+                    onClose={close}
+                    textColor={colors.text}
+                    bgPress={colors.buttonSecondary}
+                  />
                 ))}
               </View>
             </Animated.View>
@@ -138,26 +166,22 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
   },
   sheet: {
-    backgroundColor: '#1E1E1E',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingBottom: 36,
     paddingHorizontal: 20,
     paddingTop: 12,
   },
   dragHandle: {
     alignSelf: 'center',
-    backgroundColor: '#444',
     borderRadius: 3,
     height: 4,
     marginBottom: 16,
     width: 40,
   },
   title: {
-    color: '#9BA1A6',
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 0.8,
@@ -181,7 +205,6 @@ const styles = StyleSheet.create({
     width: 28,
   },
   menuItemLabel: {
-    color: '#ECEDEE',
     fontSize: 16,
     fontWeight: '500',
   },
