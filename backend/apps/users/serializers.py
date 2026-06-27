@@ -1,7 +1,10 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.db import transaction
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
+from .models import Profile
 
 User = get_user_model()
 
@@ -65,13 +68,68 @@ class ChessTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data = super().validate(attrs)
+        profile = getattr(self.user, "profile", None)
         data["user"] = {
             "id": self.user.id,
             "email": self.user.email,
             "full_name": self.user.full_name,
             "date_joined": self.user.date_joined.isoformat(),
+            "username": profile.username if profile else None,
+            "rating": profile.rating if profile else 1200,
         }
         return data
+
+
+class ProfileSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(source="user.email", read_only=True)
+    full_name = serializers.CharField(source="user.full_name")
+    date_joined = serializers.DateTimeField(source="user.date_joined", read_only=True)
+    avatar = serializers.ImageField(required=False, allow_null=True)
+    friends_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Profile
+        fields = [
+            "email",
+            "full_name",
+            "username",
+            "avatar",
+            "bio",
+            "rating",
+            "games_played",
+            "wins",
+            "losses",
+            "draws",
+            "date_joined",
+            "friends_count",
+        ]
+        read_only_fields = ["email", "rating", "games_played", "wins", "losses", "draws", "date_joined", "friends_count"]
+
+    def get_friends_count(self, obj):
+        from django.db.models import Q
+        from .models import Friendship
+        return Friendship.objects.filter(
+            Q(requester=obj.user) | Q(receiver=obj.user),
+            status=Friendship.STATUS_ACCEPTED,
+        ).count()
+
+    def validate_username(self, value):
+        if not value:
+            return value
+        qs = Profile.objects.filter(username=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Este nome de usuário já está em uso.")
+        return value
+
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop("user", {})
+        with transaction.atomic():
+            if "full_name" in user_data:
+                instance.user.full_name = user_data["full_name"]
+                instance.user.save(update_fields=["full_name"])
+            return super().update(instance, validated_data)
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
