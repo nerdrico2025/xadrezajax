@@ -30,7 +30,10 @@ urlpatterns = [
     path("health/", health, name="health"),
     path("admin/", admin.site.urls),
     path("api/v1/auth/", include(("apps.users.urls", "users"), namespace="users")),
-    path("api/v1/puzzles/", include(("apps.puzzles.urls", "puzzles"), namespace="puzzles")),
+    path(
+        "api/v1/puzzles/",
+        include(("apps.puzzles.urls", "puzzles"), namespace="puzzles"),
+    ),
 ]
 
 if settings.DEBUG:

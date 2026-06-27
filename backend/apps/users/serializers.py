@@ -103,11 +103,21 @@ class ProfileSerializer(serializers.ModelSerializer):
             "date_joined",
             "friends_count",
         ]
-        read_only_fields = ["email", "rating", "games_played", "wins", "losses", "draws", "date_joined", "friends_count"]
+        read_only_fields = [
+            "email",
+            "rating",
+            "games_played",
+            "wins",
+            "losses",
+            "draws",
+            "date_joined",
+            "friends_count",
+        ]
 
     def get_friends_count(self, obj):
         from django.db.models import Q
         from .models import Friendship
+
         return Friendship.objects.filter(
             Q(requester=obj.user) | Q(receiver=obj.user),
             status=Friendship.STATUS_ACCEPTED,

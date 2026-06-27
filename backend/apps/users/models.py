@@ -38,11 +38,13 @@ class User(AbstractBaseUser, PermissionsMixin):
 
 
 class Profile(models.Model):
-    user = models.OneToOneField(
-        User, on_delete=models.CASCADE, related_name="profile"
-    )
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     username = models.CharField(
-        max_length=30, unique=True, null=True, blank=True, verbose_name="Nome de usuário"
+        max_length=30,
+        unique=True,
+        null=True,
+        blank=True,
+        verbose_name="Nome de usuário",
     )
     avatar = models.ImageField(
         upload_to=avatar_upload_path, null=True, blank=True, verbose_name="Avatar"
@@ -95,7 +97,9 @@ class GameHistory(models.Model):
         ordering = ["-played_at"]
 
     def __str__(self):
-        return f"{self.user.email} {self.result} ({self.mode}) — {self.played_at:%Y-%m-%d}"
+        return (
+            f"{self.user.email} {self.result} ({self.mode}) — {self.played_at:%Y-%m-%d}"
+        )
 
 
 class Friendship(models.Model):

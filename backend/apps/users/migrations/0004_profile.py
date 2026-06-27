@@ -9,27 +9,70 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('users', '0003_remove_user_theme_preference'),
+        ("users", "0003_remove_user_theme_preference"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='Profile',
+            name="Profile",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('username', models.CharField(blank=True, max_length=30, null=True, unique=True, verbose_name='Nome de usuário')),
-                ('avatar', models.ImageField(blank=True, null=True, upload_to=apps.users.models.avatar_upload_path, verbose_name='Avatar')),
-                ('bio', models.TextField(blank=True, default='', max_length=200, verbose_name='Bio')),
-                ('rating', models.IntegerField(default=1200, verbose_name='Rating ELO')),
-                ('games_played', models.IntegerField(default=0, verbose_name='Partidas jogadas')),
-                ('wins', models.IntegerField(default=0, verbose_name='Vitórias')),
-                ('losses', models.IntegerField(default=0, verbose_name='Derrotas')),
-                ('draws', models.IntegerField(default=0, verbose_name='Empates')),
-                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='profile', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "username",
+                    models.CharField(
+                        blank=True,
+                        max_length=30,
+                        null=True,
+                        unique=True,
+                        verbose_name="Nome de usuário",
+                    ),
+                ),
+                (
+                    "avatar",
+                    models.ImageField(
+                        blank=True,
+                        null=True,
+                        upload_to=apps.users.models.avatar_upload_path,
+                        verbose_name="Avatar",
+                    ),
+                ),
+                (
+                    "bio",
+                    models.TextField(
+                        blank=True, default="", max_length=200, verbose_name="Bio"
+                    ),
+                ),
+                (
+                    "rating",
+                    models.IntegerField(default=1200, verbose_name="Rating ELO"),
+                ),
+                (
+                    "games_played",
+                    models.IntegerField(default=0, verbose_name="Partidas jogadas"),
+                ),
+                ("wins", models.IntegerField(default=0, verbose_name="Vitórias")),
+                ("losses", models.IntegerField(default=0, verbose_name="Derrotas")),
+                ("draws", models.IntegerField(default=0, verbose_name="Empates")),
+                (
+                    "user",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="profile",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Perfil',
-                'verbose_name_plural': 'Perfis',
+                "verbose_name": "Perfil",
+                "verbose_name_plural": "Perfis",
             },
         ),
     ]

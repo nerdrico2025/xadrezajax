@@ -361,7 +361,9 @@ class GameResultView(APIView):
         secret = request.headers.get("X-Internal-Secret", "")
         expected = getattr(settings, "INTERNAL_API_SECRET", "")
         if not expected or secret != expected:
-            return Response({"detail": "Não autorizado."}, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"detail": "Não autorizado."}, status=status.HTTP_403_FORBIDDEN
+            )
 
         white_id = request.data.get("white_id")
         black_id = request.data.get("black_id")
@@ -369,13 +371,20 @@ class GameResultView(APIView):
         result = request.data.get("result")
 
         if not white_id or not black_id or result not in ("white", "black", "draw"):
-            return Response({"detail": "Dados inválidos."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Dados inválidos."}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             from .models import GameHistory, Profile
+
             with transaction.atomic():
-                white_profile = Profile.objects.select_for_update().get(user_id=white_id)
-                black_profile = Profile.objects.select_for_update().get(user_id=black_id)
+                white_profile = Profile.objects.select_for_update().get(
+                    user_id=white_id
+                )
+                black_profile = Profile.objects.select_for_update().get(
+                    user_id=black_id
+                )
 
                 exp_white = _expected_score(white_profile.rating, black_profile.rating)
                 exp_black = 1 - exp_white
@@ -397,34 +406,59 @@ class GameResultView(APIView):
                     black_profile.draws += 1
                     w_result = b_result = "draw"
 
-                white_profile.rating = _new_rating(white_profile.rating, exp_white, score_white, K_FACTOR)
-                black_profile.rating = _new_rating(black_profile.rating, exp_black, score_black, K_FACTOR)
+                white_profile.rating = _new_rating(
+                    white_profile.rating, exp_white, score_white, K_FACTOR
+                )
+                black_profile.rating = _new_rating(
+                    black_profile.rating, exp_black, score_black, K_FACTOR
+                )
                 white_profile.games_played += 1
                 black_profile.games_played += 1
 
-                white_profile.save(update_fields=["rating", "wins", "losses", "draws", "games_played"])
-                black_profile.save(update_fields=["rating", "wins", "losses", "draws", "games_played"])
+                white_profile.save(
+                    update_fields=["rating", "wins", "losses", "draws", "games_played"]
+                )
+                black_profile.save(
+                    update_fields=["rating", "wins", "losses", "draws", "games_played"]
+                )
 
-                w_name = getattr(black_profile, "username", None) or black_profile.user.full_name
-                b_name = getattr(white_profile, "username", None) or white_profile.user.full_name
-                GameHistory.objects.create(
-                    user=white_profile.user, opponent_name=w_name,
-                    result=w_result, mode=GameHistory.MODE_ONLINE,
-                    rating_before=w_before, rating_after=white_profile.rating,
+                w_name = (
+                    getattr(black_profile, "username", None)
+                    or black_profile.user.full_name
+                )
+                b_name = (
+                    getattr(white_profile, "username", None)
+                    or white_profile.user.full_name
                 )
                 GameHistory.objects.create(
-                    user=black_profile.user, opponent_name=b_name,
-                    result=b_result, mode=GameHistory.MODE_ONLINE,
-                    rating_before=b_before, rating_after=black_profile.rating,
+                    user=white_profile.user,
+                    opponent_name=w_name,
+                    result=w_result,
+                    mode=GameHistory.MODE_ONLINE,
+                    rating_before=w_before,
+                    rating_after=white_profile.rating,
+                )
+                GameHistory.objects.create(
+                    user=black_profile.user,
+                    opponent_name=b_name,
+                    result=b_result,
+                    mode=GameHistory.MODE_ONLINE,
+                    rating_before=b_before,
+                    rating_after=black_profile.rating,
                 )
 
         except Profile.DoesNotExist:
-            return Response({"detail": "Perfil não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Perfil não encontrado."}, status=status.HTTP_404_NOT_FOUND
+            )
 
-        return Response({
-            "white": {"rating": white_profile.rating},
-            "black": {"rating": black_profile.rating},
-        }, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "white": {"rating": white_profile.rating},
+                "black": {"rating": black_profile.rating},
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class AiGameResultView(APIView):
@@ -441,11 +475,18 @@ class AiGameResultView(APIView):
         difficulty = request.data.get("difficulty", "medium")
 
         if result not in ("win", "loss", "draw"):
-            return Response({"detail": "result deve ser 'win', 'loss' ou 'draw'."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "result deve ser 'win', 'loss' ou 'draw'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if difficulty not in AI_RATING:
-            return Response({"detail": "difficulty deve ser 'easy', 'medium' ou 'hard'."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "difficulty deve ser 'easy', 'medium' ou 'hard'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         from .models import GameHistory, Profile
+
         try:
             with transaction.atomic():
                 profile = Profile.objects.select_for_update().get(user=request.user)
@@ -460,11 +501,19 @@ class AiGameResultView(APIView):
                 else:
                     score, profile.draws = 0.5, profile.draws + 1
 
-                profile.rating = _new_rating(profile.rating, expected, score, K_FACTOR_AI)
+                profile.rating = _new_rating(
+                    profile.rating, expected, score, K_FACTOR_AI
+                )
                 profile.games_played += 1
-                profile.save(update_fields=["rating", "wins", "losses", "draws", "games_played"])
+                profile.save(
+                    update_fields=["rating", "wins", "losses", "draws", "games_played"]
+                )
 
-                difficulty_label = {"easy": "IA Fácil", "medium": "IA Médio", "hard": "IA Difícil"}
+                difficulty_label = {
+                    "easy": "IA Fácil",
+                    "medium": "IA Médio",
+                    "hard": "IA Difícil",
+                }
                 GameHistory.objects.create(
                     user=request.user,
                     opponent_name=difficulty_label[difficulty],
@@ -474,7 +523,9 @@ class AiGameResultView(APIView):
                     rating_after=profile.rating,
                 )
         except Profile.DoesNotExist:
-            return Response({"detail": "Perfil não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Perfil não encontrado."}, status=status.HTTP_404_NOT_FOUND
+            )
 
         return Response({"rating": profile.rating}, status=status.HTTP_200_OK)
 
@@ -489,10 +540,11 @@ class GameHistoryView(APIView):
 
     def get(self, request):
         from .models import GameHistory
+
         limit = min(int(request.query_params.get("limit", 20)), 100)
         offset = int(request.query_params.get("offset", 0))
 
-        qs = GameHistory.objects.filter(user=request.user)[offset:offset + limit]
+        qs = GameHistory.objects.filter(user=request.user)[offset : offset + limit]
         data = [
             {
                 "id": g.id,
@@ -520,6 +572,7 @@ class LeaderboardView(APIView):
 
     def get(self, request):
         from .models import Profile
+
         limit = min(int(request.query_params.get("limit", 50)), 100)
 
         profiles = (
@@ -544,11 +597,13 @@ class LeaderboardView(APIView):
 
 # ─── Account management ───────────────────────────────────────────────────────
 
+
 class ChangePasswordView(APIView):
     """
     POST /api/v1/auth/password/change/
     Troca a senha do usuário autenticado. Exige senha atual + nova senha.
     """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -569,13 +624,16 @@ class ChangePasswordView(APIView):
 
         try:
             from django.contrib.auth.password_validation import validate_password
+
             validate_password(new_password, request.user)
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         request.user.set_password(new_password)
         request.user.save(update_fields=["password"])
-        return Response({"detail": "Senha alterada com sucesso."}, status=status.HTTP_200_OK)
+        return Response(
+            {"detail": "Senha alterada com sucesso."}, status=status.HTTP_200_OK
+        )
 
 
 class DeleteAccountView(APIView):
@@ -584,6 +642,7 @@ class DeleteAccountView(APIView):
     Exclui permanentemente a conta do usuário autenticado.
     Requer confirmação com senha.
     """
+
     permission_classes = [IsAuthenticated]
 
     def delete(self, request):
@@ -605,6 +664,7 @@ class DeleteAccountView(APIView):
 
 
 # ─── Friends ──────────────────────────────────────────────────────────────────
+
 
 def _get_online_status(user_ids):
     """Returns dict {user_id: bool} from Redis `online:{id}` keys set by node-api."""
@@ -636,6 +696,7 @@ class FriendListView(APIView):
     GET /api/v1/auth/friends/
     Lista amigos aceitos + status online.
     """
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -653,20 +714,27 @@ class FriendListView(APIView):
             friend = f.receiver if f.requester_id == user.id else f.requester
             profile = getattr(friend, "profile", None)
             friend_ids.append(friend.id)
-            friend_rows.append({
-                "friendship_id": f.id,
-                "id": friend.id,
-                "full_name": friend.full_name,
-                "username": getattr(profile, "username", None),
-                "avatar": _friend_avatar_url(request, profile),
-                "rating": getattr(profile, "rating", 1200),
-            })
+            friend_rows.append(
+                {
+                    "friendship_id": f.id,
+                    "id": friend.id,
+                    "full_name": friend.full_name,
+                    "username": getattr(profile, "username", None),
+                    "avatar": _friend_avatar_url(request, profile),
+                    "rating": getattr(profile, "rating", 1200),
+                }
+            )
 
         online = _get_online_status(friend_ids)
         for row in friend_rows:
             row["is_online"] = online.get(row["id"], False)
 
-        friend_rows.sort(key=lambda r: (not r["is_online"], (r["username"] or r["full_name"]).lower()))
+        friend_rows.sort(
+            key=lambda r: (
+                not r["is_online"],
+                (r["username"] or r["full_name"]).lower(),
+            )
+        )
         return Response(friend_rows)
 
 
@@ -675,6 +743,7 @@ class SendFriendRequestView(APIView):
     POST /api/v1/auth/friends/request/
     Envia pedido de amizade pelo username do alvo.
     """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -682,29 +751,50 @@ class SendFriendRequestView(APIView):
 
         username = request.data.get("username", "").strip()
         if not username:
-            return Response({"detail": "username é obrigatório."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "username é obrigatório."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
-            target_profile = Profile.objects.select_related("user").get(username=username)
+            target_profile = Profile.objects.select_related("user").get(
+                username=username
+            )
         except Profile.DoesNotExist:
-            return Response({"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Usuário não encontrado."}, status=status.HTTP_404_NOT_FOUND
+            )
 
         target_user = target_profile.user
         if target_user == request.user:
-            return Response({"detail": "Você não pode se adicionar como amigo."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Você não pode se adicionar como amigo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         existing = Friendship.objects.filter(
-            Q(requester=request.user, receiver=target_user) |
-            Q(requester=target_user, receiver=request.user)
+            Q(requester=request.user, receiver=target_user)
+            | Q(requester=target_user, receiver=request.user)
         ).first()
 
         if existing:
             if existing.status == Friendship.STATUS_ACCEPTED:
-                return Response({"detail": "Vocês já são amigos."}, status=status.HTTP_400_BAD_REQUEST)
-            return Response({"detail": "Pedido já enviado ou recebido."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"detail": "Vocês já são amigos."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {"detail": "Pedido já enviado ou recebido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        friendship = Friendship.objects.create(requester=request.user, receiver=target_user)
-        return Response({"detail": "Pedido enviado.", "id": friendship.id}, status=status.HTTP_201_CREATED)
+        friendship = Friendship.objects.create(
+            requester=request.user, receiver=target_user
+        )
+        return Response(
+            {"detail": "Pedido enviado.", "id": friendship.id},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class PendingRequestsView(APIView):
@@ -712,6 +802,7 @@ class PendingRequestsView(APIView):
     GET /api/v1/auth/friends/requests/
     Lista pedidos de amizade recebidos e pendentes.
     """
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -726,14 +817,16 @@ class PendingRequestsView(APIView):
         for f in pending:
             req = f.requester
             profile = getattr(req, "profile", None)
-            data.append({
-                "id": f.id,
-                "requester_id": req.id,
-                "username": getattr(profile, "username", None),
-                "full_name": req.full_name,
-                "avatar": _friend_avatar_url(request, profile),
-                "created_at": f.created_at.isoformat(),
-            })
+            data.append(
+                {
+                    "id": f.id,
+                    "requester_id": req.id,
+                    "username": getattr(profile, "username", None),
+                    "full_name": req.full_name,
+                    "avatar": _friend_avatar_url(request, profile),
+                    "created_at": f.created_at.isoformat(),
+                }
+            )
 
         return Response(data)
 
@@ -743,15 +836,20 @@ class FriendRequestActionView(APIView):
     POST   /api/v1/auth/friends/{id}/  → aceitar pedido recebido
     DELETE /api/v1/auth/friends/{id}/  → rejeitar ou remover amizade
     """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         from .models import Friendship
 
         try:
-            friendship = Friendship.objects.get(id=pk, receiver=request.user, status=Friendship.STATUS_PENDING)
+            friendship = Friendship.objects.get(
+                id=pk, receiver=request.user, status=Friendship.STATUS_PENDING
+            )
         except Friendship.DoesNotExist:
-            return Response({"detail": "Pedido não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Pedido não encontrado."}, status=status.HTTP_404_NOT_FOUND
+            )
 
         friendship.status = Friendship.STATUS_ACCEPTED
         friendship.save(update_fields=["status"])
@@ -766,7 +864,9 @@ class FriendRequestActionView(APIView):
                 id=pk,
             )
         except Friendship.DoesNotExist:
-            return Response({"detail": "Amizade não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Amizade não encontrada."}, status=status.HTTP_404_NOT_FOUND
+            )
 
         friendship.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
