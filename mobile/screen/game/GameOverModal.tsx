@@ -10,7 +10,8 @@ export type GameEndReason =
   | "threefold"
   | "insufficient"
   | "draw"
-  | "resign";
+  | "resign"
+  | "timeout";
 
 export type GameResult = {
   outcome: GameOutcome;
@@ -33,6 +34,7 @@ const REASON_LABEL: Record<GameEndReason, string> = {
   insufficient: "Material insuficiente",
   draw: "Regra dos 50 lances",
   resign: "Abandono",
+  timeout: "Tempo esgotado",
 };
 
 interface GameOverModalProps {

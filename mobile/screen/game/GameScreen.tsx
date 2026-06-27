@@ -9,19 +9,26 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
 import { getBestMove } from "@/services/game";
+import { reportAiResult } from "@/services/profile";
+import { saveGame, clearSavedGame, type SavedAiGame } from "@/utils/savedGame";
 import { useChessSound } from "@/hooks/useChessSound";
+import { useChessClock } from "@/hooks/useChessClock";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
+import { useAuth } from "@/context/AuthContext";
 import GameOverModal, { type GameResult } from "./GameOverModal";
 import CapturedPieces from "./CapturedPieces";
 import ConfirmModal from "@/components/ConfirmModal";
+import ChessClock from "@/components/ChessClock";
 import type { Difficulty } from "@/components/DifficultyModal";
-import type { PlayerColor } from "@/components/ColorPickerModal";
+import type { PlayerColor, TimeControl } from "@/components/ColorPickerModal";
 
 interface GameScreenProps {
   onLeave?: () => void;
   difficulty?: Difficulty;
   playerColor?: PlayerColor;
+  timeControl?: TimeControl;
+  savedGame?: SavedAiGame;
 }
 
 function detectGameOver(game: Chess, playerColor: PlayerColor): GameResult | null {
@@ -40,29 +47,59 @@ export default function GameScreen({
   onLeave,
   difficulty = "medium",
   playerColor = "w",
+  timeControl = null,
+  savedGame,
 }: GameScreenProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
+  const { token: authToken } = useAuth();
   const isFlipped = playerColor === "b";
   const [squareSize, setSquareSize] = useState(0);
 
-  const [game, setGame] = useState(new Chess());
-  const [playerCaptures, setPlayerCaptures] = useState<string[]>([]);
-  const [aiCaptures, setAiCaptures] = useState<string[]>([]);
+  const [game, setGame] = useState(() => savedGame ? new Chess(savedGame.fen) : new Chess());
+  const [playerCaptures, setPlayerCaptures] = useState<string[]>(savedGame?.playerCaptures ?? []);
+  const [aiCaptures, setAiCaptures] = useState<string[]>(savedGame?.aiCaptures ?? []);
   const [loading, setLoading] = useState(false);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
-  const [moveCount, setMoveCount] = useState(0);
+  const [moveCount, setMoveCount] = useState(savedGame?.moveCount ?? 0);
   const chessboardRef = useRef<ChessboardRef>(null);
   const { play } = useChessSound();
 
+  const aiColor = playerColor === "w" ? "b" : "w";
   const isGameActive = moveCount > 0 && !gameResult;
+
+  const [clockTimedOut, setClockTimedOut] = useState<"w" | "b" | null>(null);
+  const clock = useChessClock(timeControl, setClockTimedOut);
+
+  // Ref always holds latest capture/count values so async callbacks can read them
+  const capturesRef = useRef({ playerCaptures, aiCaptures, moveCount });
+  useEffect(() => { capturesRef.current = { playerCaptures, aiCaptures, moveCount }; });
+
+  const doSave = useCallback((fen: string, pc: string[], ac: string[], mc: number) => {
+    if (timeControl !== null) return;
+    saveGame({ fen, playerCaptures: pc, aiCaptures: ac, moveCount: mc, difficulty, playerColor }).catch(() => {});
+  }, [timeControl, difficulty, playerColor]);
+
+  const finishGame = useCallback((result: GameResult) => {
+    clock.pause();
+    clearSavedGame().catch(() => {});
+    setGameResult(result);
+    if (authToken) {
+      reportAiResult(authToken, result.outcome, difficulty).catch(() => {});
+    }
+  }, [authToken, difficulty, clock]);
+
+  useEffect(() => {
+    if (!clockTimedOut || gameResult) return;
+    const outcome = clockTimedOut === playerColor ? "loss" : "win";
+    finishGame({ outcome, reason: "timeout" });
+  }, [clockTimedOut]);
 
   const PIECE_VALUE: Record<string, number> = { q: 9, r: 5, b: 3, n: 3, p: 1 };
   const playerMaterial = playerCaptures.reduce((s, p) => s + (PIECE_VALUE[p] ?? 0), 0);
   const aiMaterial = aiCaptures.reduce((s, p) => s + (PIECE_VALUE[p] ?? 0), 0);
   const playerAdvantage = playerMaterial - aiMaterial;
-  const aiColor = playerColor === "w" ? "b" : "w";
 
   const makeAIMove = useCallback(async (currentGame: Chess) => {
     setLoading(true);
@@ -83,14 +120,15 @@ export default function GameScreen({
 
     await chessboardRef.current?.move({ from, to });
 
-    if (aiMove.captured) {
-      setAiCaptures((prev) => [...prev, aiMove.captured!]);
-    }
+    const newAiCaptures = aiMove.captured
+      ? [...capturesRef.current.aiCaptures, aiMove.captured]
+      : capturesRef.current.aiCaptures;
+    if (aiMove.captured) setAiCaptures(newAiCaptures);
 
     const result = detectGameOver(updated, playerColor);
     if (result) {
       setGame(updated);
-      setGameResult(result);
+      finishGame(result);
       setLoading(false);
       if (result.outcome === "loss") {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -110,28 +148,38 @@ export default function GameScreen({
 
     setGame(new Chess(updated.fen()));
     setLoading(false);
-  }, [difficulty, play, playerColor]);
+    clock.switchTurn(playerColor);
+
+    // Save after AI move (player's turn next — stable restore point)
+    doSave(updated.fen(), capturesRef.current.playerCaptures, newAiCaptures, capturesRef.current.moveCount);
+  }, [difficulty, play, playerColor, clock, doSave]);
 
   useEffect(() => {
-    play("gameStart");
-    if (playerColor === "b") {
-      makeAIMove(new Chess());
+    if (savedGame) {
+      const restored = new Chess(savedGame.fen);
+      if (restored.turn() === aiColor) makeAIMove(restored);
+    } else {
+      play("gameStart");
+      if (playerColor === "b") makeAIMove(new Chess());
     }
   }, []);
 
   const handleNewGame = useCallback(async () => {
+    clearSavedGame().catch(() => {});
     const fresh = new Chess();
     setGame(fresh);
     setPlayerCaptures([]);
     setAiCaptures([]);
     setGameResult(null);
     setMoveCount(0);
+    setClockTimedOut(null);
+    clock.reset();
     await chessboardRef.current?.resetBoard();
     play("gameStart");
     if (playerColor === "b") {
       makeAIMove(fresh);
     }
-  }, [play, playerColor, makeAIMove]);
+  }, [play, playerColor, makeAIMove, clock]);
 
   const handleResign = useCallback(() => {
     setShowResignConfirm(true);
@@ -154,17 +202,23 @@ export default function GameScreen({
 
       if (!playerMove) return;
 
-      if (playerMove.captured) {
-        setPlayerCaptures((prev) => [...prev, playerMove.captured!]);
-      }
-      setMoveCount((c) => c + 1);
+      const newPlayerCaptures = playerMove.captured
+        ? [...playerCaptures, playerMove.captured]
+        : playerCaptures;
+      const newMoveCount = moveCount + 1;
+      if (playerMove.captured) setPlayerCaptures(newPlayerCaptures);
+      setMoveCount(newMoveCount);
+      clock.switchTurn(aiColor);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       play(playerMove.captured ? "capture" : "move");
+
+      // Save immediately after player's move (AI's turn) — fallback if user exits before AI responds
+      doSave(currentGame.fen(), newPlayerCaptures, aiCaptures, newMoveCount);
 
       const resultAfterPlayer = detectGameOver(currentGame, playerColor);
       if (resultAfterPlayer) {
         setGame(currentGame);
-        setGameResult(resultAfterPlayer);
+        finishGame(resultAfterPlayer);
         if (resultAfterPlayer.outcome === "win") {
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           play("checkmate");
@@ -186,6 +240,16 @@ export default function GameScreen({
         <Pressable style={styles.headerButton} onPress={handleNewGame} hitSlop={8}>
           <Ionicons name="refresh-outline" size={22} color={colors.text} />
         </Pressable>
+
+        {timeControl !== null && (
+          <ChessClock
+            whiteMs={clock.whiteMs}
+            blackMs={clock.blackMs}
+            active={clock.active}
+            myColor={playerColor}
+            colors={colors}
+          />
+        )}
 
         <Pressable
           style={styles.headerButton}
@@ -255,7 +319,7 @@ export default function GameScreen({
         destructive
         onConfirm={() => {
           setShowResignConfirm(false);
-          setGameResult({ outcome: "loss", reason: "resign" });
+          finishGame({ outcome: "loss", reason: "resign" });
         }}
         onCancel={() => setShowResignConfirm(false)}
       />
@@ -282,6 +346,8 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
   },
   boardWrapper: {},
   boardFlipped: {
