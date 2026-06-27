@@ -55,7 +55,7 @@ export default function Login() {
         return;
       }
 
-      await signIn(data.access, data.refresh);
+      await signIn(data.access, data.refresh, data.user);
 
       if (isAvailable && !isEnabled) {
         Alert.alert(

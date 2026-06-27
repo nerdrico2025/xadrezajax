@@ -1,8 +1,10 @@
 import { View, StyleSheet, Animated, Easing } from "react-native";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "expo-router";
+import * as LocalAuthentication from "expo-local-authentication";
 
 import { useAuth } from "@/context/AuthContext";
+import { getItem } from "@/utils/storage";
 
 import { useTheme } from "@/hooks/useTheme";
 import { useResponsive } from "@/hooks/useResponsive";
@@ -55,9 +57,36 @@ export default function Splash() {
 
   // Efeito 2: navega quando animação E leitura do token terminarem
   useEffect(() => {
-    if (animDone && !loading) {
-      router.replace(token ? "/home" : "/login");
+    if (!animDone || loading) return;
+
+    if (!token) {
+      router.replace("/login");
+      return;
     }
+
+    // Tem sessão ativa — verifica biometria diretamente (sem depender do hook async)
+    (async () => {
+      const enabled = await getItem("biometricEnabled");
+      if (enabled !== "true") {
+        router.replace("/home");
+        return;
+      }
+
+      const compatible = await LocalAuthentication.hasHardwareAsync();
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!compatible || !enrolled) {
+        router.replace("/home");
+        return;
+      }
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: "Confirme sua identidade para entrar",
+        cancelLabel: "Cancelar",
+        fallbackLabel: "Usar senha",
+      });
+
+      router.replace(result.success ? "/home" : "/login");
+    })();
   }, [animDone, loading, token]);
 
   return (

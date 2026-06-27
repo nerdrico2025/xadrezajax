@@ -1,5 +1,4 @@
 import React from 'react';
-import { Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { MenuItem } from '../components/MenuBottomSheet';
 
@@ -13,6 +12,8 @@ export type MenuConfig = {
 
 export const gameMenu = (handlers: {
   onQuickMatch: () => void;
+  onQuickOnline: () => void;
+  onPrivateRoom: () => void;
 }): MenuConfig => ({
   title: 'Jogar',
   items: [
@@ -22,42 +23,45 @@ export const gameMenu = (handlers: {
       onPress: handlers.onQuickMatch,
     },
     {
-      label: 'Jogar com amigo',
-      icon: <Ionicons name="people" size={ICON_SIZE} color={ICON_COLOR} />,
-      onPress: () => Alert.alert('Em breve', 'Esta funcionalidade está sendo desenvolvida.'),
+      label: 'Partida Rápida',
+      icon: <Ionicons name="flash-outline" size={ICON_SIZE} color={ICON_COLOR} />,
+      onPress: handlers.onQuickOnline,
     },
     {
-      label: 'Quebra-cabeça',
-      icon: <Ionicons name="grid" size={ICON_SIZE} color={ICON_COLOR} />,
-      onPress: () => Alert.alert('Em breve', 'Esta funcionalidade está sendo desenvolvida.'),
+      label: 'Jogar com Amigos',
+      icon: <Ionicons name="people-outline" size={ICON_SIZE} color={ICON_COLOR} />,
+      onPress: handlers.onPrivateRoom,
     },
   ],
 });
 
 export const profileMenu = (handlers: {
   onProfile: () => void;
+  onLeaderboard: () => void;
+  onSubscription: () => void;
+  onSettings: () => void;
 }): MenuConfig => ({
   title: 'Menu',
   items: [
     {
       label: 'Perfil',
-      icon: <Ionicons name="person" size={ICON_SIZE} color={ICON_COLOR} />,
+      icon: <Ionicons name="person-outline" size={ICON_SIZE} color={ICON_COLOR} />,
       onPress: handlers.onProfile,
     },
     {
-      label: 'Jogo',
-      icon: <Ionicons name="game-controller" size={ICON_SIZE} color={ICON_COLOR} />,
-      onPress: () => Alert.alert('Em breve', 'Esta funcionalidade está sendo desenvolvida.'),
+      label: 'Classificação',
+      icon: <Ionicons name="trophy-outline" size={ICON_SIZE} color={ICON_COLOR} />,
+      onPress: handlers.onLeaderboard,
     },
     {
-      label: 'Assinatura',
-      icon: <Ionicons name="star" size={ICON_SIZE} color={ICON_COLOR} />,
-      onPress: () => Alert.alert('Em breve', 'Esta funcionalidade está sendo desenvolvida.'),
+      label: 'Premium',
+      icon: <Ionicons name="star-outline" size={ICON_SIZE} color={ICON_COLOR} />,
+      onPress: handlers.onSubscription,
     },
     {
       label: 'Configurações',
       icon: <Ionicons name="settings-outline" size={ICON_SIZE} color={ICON_COLOR} />,
-      onPress: () => Alert.alert('Em breve', 'Esta funcionalidade está sendo desenvolvida.'),
+      onPress: handlers.onSettings,
     },
   ],
 });
