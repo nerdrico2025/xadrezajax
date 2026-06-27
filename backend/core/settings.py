@@ -113,7 +113,10 @@ AUTH_USER_MODEL = "users.User"
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+        "NAME": (
+            "django.contrib.auth.password_validation"
+            ".UserAttributeSimilarityValidator"
+        ),
     },
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
@@ -205,7 +208,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # CORS
 # ========================
 # Em dev (DEBUG=True) aceita qualquer origem — conveniente para testar no celular.
-# Em produção (DEBUG=False) só aceita as origens listadas em CORS_ALLOWED_ORIGINS no .env.
+# Em produção só aceita as origens listadas em CORS_ALLOWED_ORIGINS no .env.
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 
 if not DEBUG:
