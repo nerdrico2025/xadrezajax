@@ -1,56 +1,84 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
 import { Platform } from 'react-native';
-
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
 
 const primaryColor = '#1B5F7A';
 
 export const Colors = {
   light: {
+    // Texto e fundo
     text: '#0D0D0D',
-    background: '#fff',
-    tint: '#0a7ea4',
-    icon: '#687076',
-    tabIconDefault: '#0d0d0d',
-    tabIconSelected: '#0a7ea4',
-    error: '#FF4D4D',
-    link: '#0a7ea4',
-    primary: primaryColor,
-    secondary: '#555',
+    background: '#F8F9FA',
+    card: '#FFFFFF',
 
-    // 🔥 BOTÕES
+    // Primária e destaque
+    primary: primaryColor,
+    primaryText: '#FFFFFF',
+
+    // Secundária (textos de apoio, placeholders)
+    secondary: '#6B7280',
+
+    // Ícones
+    icon: '#6B7280',
+    tabIconDefault: '#9CA3AF',
+    tabIconSelected: primaryColor,
+
+    // Botões
     buttonPrimary: primaryColor,
     buttonPrimaryText: '#FFFFFF',
+    buttonSecondary: '#E5E7EB',
+    buttonSecondaryText: '#1F2937',
 
-    buttonSecondary: '#D7D7D7',
-    buttonSecondaryText: '#0D0D0D',
-    buttonBorder: 'transparent',
+    // Bordas e divisores
+    divider: '#E5E7EB',
+    border: '#D1D5DB',
+    buttonBorder: '#D1D5DB',
+
+    // Estados
+    error: '#EF4444',
+    success: '#22C55E',
+    warning: '#F59E0B',
+
+    // Misc
+    tint: primaryColor,
+    link: primaryColor,
   },
 
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: '#fff',
-    icon: '#9BA1A6',
-    tabIconDefault: '#f5f5f5',
-    tabIconSelected: '#0a7ea4',
-    error: '#FF4D4D',
-    link: '#0a7ea4',
-    primary: primaryColor,
-    secondary: '#555',
+    // Texto e fundo
+    text: '#F1F5F9',
+    background: '#0F1117',
+    card: '#1E2130',
 
-    // 🔥 BOTÕES (AGORA MUDA NO DARK)
-    buttonPrimary: '#0a7ea4',
-    buttonPrimaryText: '#ffffff',
+    // Primária e destaque
+    primary: '#2E86AB',
+    primaryText: '#FFFFFF',
 
-    buttonSecondary: '#D7D7D7',
-    buttonSecondaryText: '#0d0d0d',
-    buttonBorder: 'transparent',
+    // Secundária (textos de apoio — legível no fundo escuro)
+    secondary: '#94A3B8',
+
+    // Ícones
+    icon: '#64748B',
+    tabIconDefault: '#64748B',
+    tabIconSelected: '#2E86AB',
+
+    // Botões
+    buttonPrimary: '#2E86AB',
+    buttonPrimaryText: '#FFFFFF',
+    buttonSecondary: '#2A2F3E',
+    buttonSecondaryText: '#F1F5F9',
+
+    // Bordas e divisores
+    divider: '#2A2F3E',
+    border: '#374151',
+    buttonBorder: '#374151',
+
+    // Estados
+    error: '#F87171',
+    success: '#4ADE80',
+    warning: '#FCD34D',
+
+    // Misc
+    tint: '#2E86AB',
+    link: '#60A5FA',
   },
 };
 
