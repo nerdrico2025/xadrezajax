@@ -1,6 +1,5 @@
 from django.db import migrations
 
-
 PUZZLES = [
     {
         "title": "Mate de Retaguarda",
