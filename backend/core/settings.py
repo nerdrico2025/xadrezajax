@@ -25,9 +25,7 @@ if not SECRET_KEY:
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
 ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.getenv("ALLOWED_HOSTS", "").split(",")
-    if host.strip()
+    host.strip() for host in os.getenv("ALLOWED_HOSTS", "").split(",") if host.strip()
 ]
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID") or os.getenv(
@@ -55,6 +53,7 @@ THIRD_PARTY_APPS = [
 
 LOCAL_APPS = [
     "apps.users",
+    "apps.puzzles",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -114,7 +113,7 @@ AUTH_USER_MODEL = "users.User"
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",  # noqa: E501
     },
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
@@ -152,6 +151,11 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_PARSER_CLASSES": [
+        "rest_framework.parsers.JSONParser",
+        "rest_framework.parsers.MultiPartParser",
+        "rest_framework.parsers.FormParser",
+    ],
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.ScopedRateThrottle",
@@ -169,9 +173,7 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
-    "AUTH_TOKEN_CLASSES": (
-        "rest_framework_simplejwt.tokens.AccessToken",
-    ),
+    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
 }
 
 # ========================
@@ -189,6 +191,12 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # ========================
+# MEDIA (avatars)
+# ========================
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+# ========================
 # DEFAULT AUTO FIELD
 # ========================
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -197,14 +205,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # CORS
 # ========================
 # Em dev (DEBUG=True) aceita qualquer origem — conveniente para testar no celular.
-# Em produção (DEBUG=False) só aceita as origens listadas em CORS_ALLOWED_ORIGINS no .env.
+# Em produção só aceita as origens listadas em CORS_ALLOWED_ORIGINS no .env.
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 
 if not DEBUG:
     CORS_ALLOWED_ORIGINS = [
-        o.strip()
-        for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
-        if o.strip()
+        o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
     ]
 
 CORS_ALLOW_HEADERS = [
@@ -219,6 +225,11 @@ CORS_ALLOW_HEADERS = [
     "x-requested-with",
     "ngrok-skip-browser-warning",
 ]
+
+# ========================
+# INTERNAL API SECRET (node-api → backend)
+# ========================
+INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 
 # ========================
 # EMAIL (SendGrid)

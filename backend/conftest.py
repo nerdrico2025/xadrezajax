@@ -1,5 +1,4 @@
 import django
-from django.test.utils import override_settings
 
 # Aplica SECRET_KEY longa globalmente para evitar InsecureKeyLengthWarning
 # do PyJWT ao gerar tokens. Funciona tanto para testes pytest quanto unittest.

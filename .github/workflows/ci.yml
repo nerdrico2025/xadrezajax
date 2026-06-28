@@ -23,7 +23,7 @@ jobs:
           cache: "pip"
 
       - name: Instalar ferramentas de lint
-        run: pip install flake8 black
+        run: pip install "black==25.11.0" flake8
 
       - name: Black — verificação de formatação
         run: black --check --diff backend/

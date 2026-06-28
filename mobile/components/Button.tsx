@@ -8,6 +8,7 @@ import {
   Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 
 import { useTheme } from "../hooks/useTheme";
 import { Colors } from "../constants/theme";
@@ -35,6 +36,7 @@ export default function Button({
   const scale = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Animated.spring(scale, {
       toValue: 0.96,
       useNativeDriver: true,
