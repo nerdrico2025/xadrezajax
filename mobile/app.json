@@ -4,7 +4,7 @@
     "slug": "ajax",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/logo_ajax.png",
+    "icon": "./assets/images/icon_new.png",
     "scheme": "ajax",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -16,8 +16,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/logo_ajax.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/images/icon_new.png",
+        "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -42,13 +42,13 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/logo_ajax.png",
+          "image": "./assets/images/splash_light.png",
           "imageWidth": 300,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
           "dark": {
-            "image": "./assets/images/logo_ajax.png",
-            "backgroundColor": "#111111"
+            "image": "./assets/images/splash_dark.png",
+            "backgroundColor": "#000000"
           }
         }
       ],
