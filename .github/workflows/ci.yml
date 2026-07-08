@@ -95,10 +95,10 @@ jobs:
         run: python manage.py test --verbosity=2
 
   # ─────────────────────────────────────────
-  # Lint — Node API (ESLint)
+  # Lint + Testes — Node API (ESLint + Jest)
   # ─────────────────────────────────────────
   lint-node:
-    name: Lint Node API
+    name: Lint & Tests Node API (ESLint + Jest)
     runs-on: ubuntu-latest
 
     steps:
@@ -113,6 +113,14 @@ jobs:
       - name: Instalar dependências
         working-directory: node-api
         run: npm ci
+
+      - name: ESLint — análise estática
+        working-directory: node-api
+        run: npm run lint
+
+      - name: Rodar testes
+        working-directory: node-api
+        run: npm test
 
   # ─────────────────────────────────────────
   # Build Docker — verifica que as imagens constroem
