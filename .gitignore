@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────
+# Python / Django
+# ─────────────────────────────────────────
+.venv/
+backend/venv/
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+local_settings.py
+db.sqlite3
+*.log
+backend/staticfiles/
+staticfiles/
+
+# ─────────────────────────────────────────
+# Node
+# ─────────────────────────────────────────
+node_modules/
+node-api/node_modules/
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+ajax/node_modules/
+game/node_modules/
+game/package-lock.json
+.expo/
+expo-env.d.ts
+
+# ─────────────────────────────────────────
+# Ambiente
+# ─────────────────────────────────────────
+.env
+.env.prod
+mobile/.env*.local
+
+# ─────────────────────────────────────────
+# Testes / cobertura
+# ─────────────────────────────────────────
+.coverage
+backend/.coverage
+htmlcov/
+node-api/coverage/
+
+# ─────────────────────────────────────────
+# Docker / dados persistidos
+# ─────────────────────────────────────────
+postgres_data/
