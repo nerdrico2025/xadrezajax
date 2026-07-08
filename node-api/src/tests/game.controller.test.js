@@ -4,6 +4,7 @@ const app = require("../../src/app");
 // Mocka o serviço do Stockfish para não precisar do binário nos testes
 jest.mock("../services/stockfish.service", () => ({
   getBestMove: jest.fn(),
+  DEPTH_BY_DIFFICULTY: { easy: 2, medium: 8, hard: 18 },
 }));
 
 const { getBestMove } = require("../services/stockfish.service");
@@ -35,7 +36,7 @@ describe("POST /api/v1/game/move", () => {
       .post("/api/v1/game/move")
       .send({ fen: VALID_FEN });
 
-    expect(getBestMove).toHaveBeenCalledWith(VALID_FEN);
+    expect(getBestMove).toHaveBeenCalledWith(VALID_FEN, 8);
     expect(getBestMove).toHaveBeenCalledTimes(1);
   });
 
