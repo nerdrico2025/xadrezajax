@@ -17,6 +17,9 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://django.ajaxclube.com.br",
         "EXPO_PUBLIC_NODE_URL": "https://node.ajaxclube.com.br",
