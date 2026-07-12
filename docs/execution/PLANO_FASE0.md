@@ -177,3 +177,10 @@ Todas as branches partem de `main` (trunk pós-0.5) e são mescladas em sequênc
 - **Builds EAS e "pagamentos em produção"**: exigem credenciais de loja/EAS e chaves reais — ficarão como pendência documentada no changelog (código pronto, deploy manual seu).
 - **Sem Docker local**: validação backend via Python 3.12 + Postgres 16 locais (mesmas versões do CI); imagens Docker validam no CI do GitHub.
 - **Crash-free ≥ 99% e conclusão de onboarding ≥ 80%**: métricas pós-lançamento, impossíveis de aferir agora; instrumentação de analytics deixa os eventos prontos.
+
+## 5. Infra EAS / builds Android (2026-07-12)
+
+- **Projeto EAS antigo abandonado**: `8cc9fb2b-05b3-486b-a9a4-17a002115177` pertencia à conta de um ex-integrante do time, sem acesso disponível.
+- **Novo projeto**: `xadrez-ajax` / `a1335737-8154-4680-a930-bb209071c8a2`, confirmado sob a Organização "Clube de Xadrez AJAX". `app.json` reapontado (projectId + `updates.url`); slug alinhado de `ajax` → `xadrez-ajax` (exigência do EAS).
+- **Canal de OTA updates reiniciado nesta data** — aceitável, nunca foi usado em produção.
+- **Primeiro build de preview gerado com sucesso** (`.apk`, perfil `preview` com `buildType: apk`): build `0fdb0e50-b6bf-4f32-999b-ff0a63d63b0c`, keystore gerado e gerenciado pelo EAS, ~19 min de fila+build.
