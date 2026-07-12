@@ -1,0 +1,187 @@
+diff --git a/node_modules/react-native-chessboard/lib/typescript/components/piece/index.d.ts b/node_modules/react-native-chessboard/lib/typescript/components/piece/index.d.ts
+index a93964c..9b084ff 100644
+--- a/node_modules/react-native-chessboard/lib/typescript/components/piece/index.d.ts
++++ b/node_modules/react-native-chessboard/lib/typescript/components/piece/index.d.ts
+@@ -1,4 +1,4 @@
+-import type { Move, Square } from 'chess.js';
++import type { Move, PieceType as PromotionPieceType, Square } from 'chess.js';
+ import React from 'react';
+ import type { PieceType, Vector } from '../../types';
+ declare type PieceProps = {
+@@ -8,7 +8,7 @@ declare type PieceProps = {
+     size: number;
+ };
+ export declare type ChessPieceRef = {
+-    moveTo: (square: Square) => Promise<Move | undefined>;
++    moveTo: (square: Square, promotionPiece?: PromotionPieceType) => Promise<Move | undefined>;
+     enable: (activate: boolean) => void;
+ };
+ declare const Piece: React.MemoExoticComponent<React.ForwardRefExoticComponent<PieceProps & React.RefAttributes<ChessPieceRef>>>;
+diff --git a/node_modules/react-native-chessboard/lib/typescript/context/board-refs-context/index.d.ts b/node_modules/react-native-chessboard/lib/typescript/context/board-refs-context/index.d.ts
+index 601d1d5..2125573 100644
+--- a/node_modules/react-native-chessboard/lib/typescript/context/board-refs-context/index.d.ts
++++ b/node_modules/react-native-chessboard/lib/typescript/context/board-refs-context/index.d.ts
+@@ -1,4 +1,4 @@
+-import type { Move, Square } from 'chess.js';
++import type { Move, PieceType, Square } from 'chess.js';
+ import React from 'react';
+ import { ChessboardState } from '../../helpers/get-chessboard-state';
+ import type { ChessPieceRef } from '../../components/piece';
+@@ -9,6 +9,7 @@ export declare type ChessboardRef = {
+     move: (_: {
+         from: Square;
+         to: Square;
++        promotion?: PieceType;
+     }) => Promise<Move | undefined> | undefined;
+     highlight: (_: {
+         square: Square;
+diff --git a/node_modules/react-native-chessboard/src/components/piece/index.tsx b/node_modules/react-native-chessboard/src/components/piece/index.tsx
+index bbbd539..10be227 100644
+--- a/node_modules/react-native-chessboard/src/components/piece/index.tsx
++++ b/node_modules/react-native-chessboard/src/components/piece/index.tsx
+@@ -1,4 +1,4 @@
+-import type { Move, Square } from 'chess.js';
++import type { Move, PieceType as PromotionPieceType, Square } from 'chess.js';
+ import React, { useCallback, useImperativeHandle } from 'react';
+ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+ import Animated, {
+@@ -26,7 +26,10 @@ type PieceProps = {
+ };
+ 
+ export type ChessPieceRef = {
+-  moveTo: (square: Square) => Promise<Move | undefined>;
++  moveTo: (
++    square: Square,
++    promotionPiece?: PromotionPieceType
++  ) => Promise<Move | undefined>;
+   enable: (activate: boolean) => void;
+ };
+ 
+@@ -70,14 +73,14 @@ const Piece = React.memo(
+       );
+ 
+       const wrappedOnMoveForJSThread = useCallback(
+-        ({ move }: { move: Move }) => {
+-          onMove(move.from, move.to);
++        ({ move, promotionPiece }: { move: Move; promotionPiece?: PromotionPieceType }) => {
++          onMove(move.from, move.to, promotionPiece);
+         },
+         [onMove]
+       );
+ 
+       const moveTo = useCallback(
+-        (from: Square, to: Square) => {
++        (from: Square, to: Square, promotionPiece?: PromotionPieceType) => {
+           return new Promise<Move | undefined>((resolve) => {
+             const move = validateMove(from, to);
+             const { x, y } = toTranslation(move ? move.to : from);
+@@ -92,7 +95,7 @@ const Piece = React.memo(
+                 offsetY.value = translateY.value;
+                 isGestureActive.value = false;
+                 if (move) {
+-                  runOnJS(wrappedOnMoveForJSThread)({ move });
++                  runOnJS(wrappedOnMoveForJSThread)({ move, promotionPiece });
+                   // Ideally I must call the resolve method
+                   // inside the "wrappedOnMoveForJSThread" after
+                   // the "onMove" function.
+@@ -131,8 +134,8 @@ const Piece = React.memo(
+         ref,
+         () => {
+           return {
+-            moveTo: (to: Square) => {
+-              return moveTo(square, to);
++            moveTo: (to: Square, promotionPiece?: PromotionPieceType) => {
++              return moveTo(square, to, promotionPiece);
+             },
+             enable: (active: boolean) => {
+               pieceEnabled.value = active;
+diff --git a/node_modules/react-native-chessboard/src/context/board-operations-context/index.tsx b/node_modules/react-native-chessboard/src/context/board-operations-context/index.tsx
+index 2fc9565..a7c4eae 100644
+--- a/node_modules/react-native-chessboard/src/context/board-operations-context/index.tsx
++++ b/node_modules/react-native-chessboard/src/context/board-operations-context/index.tsx
+@@ -19,7 +19,7 @@ import { useChessboardProps } from '../props-context/hooks';
+ 
+ type BoardOperationsContextType = {
+   selectableSquares: Animated.SharedValue<Square[]>;
+-  onMove: (from: Square, to: Square) => void;
++  onMove: (from: Square, to: Square, promotionPiece?: PieceType) => void;
+   onSelectPiece: (square: Square) => void;
+   moveTo: (to: Square) => void;
+   isPromoting: (from: Square, to: Square) => boolean;
+@@ -148,7 +148,7 @@ const BoardOperationsContextProviderComponent = React.forwardRef<
+   );
+ 
+   const onMove = useCallback(
+-    (from: Square, to: Square) => {
++    (from: Square, to: Square, promotionPiece?: PieceType) => {
+       selectableSquares.value = [];
+       selectedSquare.value = null;
+       const lastMove = { from, to };
+@@ -162,6 +162,13 @@ const BoardOperationsContextProviderComponent = React.forwardRef<
+         return;
+       }
+ 
++      // Programmatic moves (engine/opponent) already know the promotion
++      // piece — applying it directly keeps the dialog for human moves only.
++      if (promotionPiece) {
++        moveProgrammatically(from, to, promotionPiece);
++        return;
++      }
++
+       pieceRefs?.current?.[to]?.current?.enable(false);
+       showPromotionDialog({
+         type: chess.turn(),
+@@ -187,19 +194,11 @@ const BoardOperationsContextProviderComponent = React.forwardRef<
+     (square: Square) => {
+       selectedSquare.value = square;
+ 
+-      const validSquares = (chess.moves({
+-        square,
+-      }) ?? []) as Square[];
+-
+-      // eslint-disable-next-line no-shadow
+-      selectableSquares.value = validSquares.map((square) => {
+-        const splittedSquare = square.split('x');
+-        if (splittedSquare.length === 0) {
+-          return square;
+-        }
+-
+-        return splittedSquare[splittedSquare.length - 1] as Square;
+-      });
++      // Verbose moves carry exact destination squares — SAN strings don't
++      // cover castling ("O-O"/"O-O-O" never map to g1/c1).
++      selectableSquares.value = (
++        chess.moves({ square, verbose: true }) ?? []
++      ).map((move) => move.to);
+     },
+     [chess, selectableSquares, selectedSquare]
+   );
+diff --git a/node_modules/react-native-chessboard/src/context/board-refs-context/index.tsx b/node_modules/react-native-chessboard/src/context/board-refs-context/index.tsx
+index 3966cd9..67a71ef 100644
+--- a/node_modules/react-native-chessboard/src/context/board-refs-context/index.tsx
++++ b/node_modules/react-native-chessboard/src/context/board-refs-context/index.tsx
+@@ -1,4 +1,4 @@
+-import type { Move, Square } from 'chess.js';
++import type { Move, PieceType, Square } from 'chess.js';
+ import React, {
+   createContext,
+   useCallback,
+@@ -29,6 +29,7 @@ export type ChessboardRef = {
+   move: (_: {
+     from: Square;
+     to: Square;
++    promotion?: PieceType;
+   }) => Promise<Move | undefined> | undefined;
+   highlight: (_: { square: Square; color?: string }) => void;
+   resetAllHighlightedSquares: () => void;
+@@ -75,8 +76,8 @@ const BoardRefsContextProviderComponent = React.forwardRef<
+   useImperativeHandle(
+     ref,
+     () => ({
+-      move: ({ from, to }) => {
+-        return pieceRefs?.current?.[from].current?.moveTo?.(to);
++      move: ({ from, to, promotion }) => {
++        return pieceRefs?.current?.[from].current?.moveTo?.(to, promotion);
+       },
+       highlight: ({ square, color }) => {
+         squareRefs.current?.[square].current.highlight({
