@@ -123,6 +123,38 @@ jobs:
         run: npm test
 
   # ─────────────────────────────────────────
+  # Lint + Typecheck + Testes — Mobile (Expo)
+  # ─────────────────────────────────────────
+  test-mobile:
+    name: Lint, Typecheck & Tests Mobile (Expo + Jest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Instalar dependências (aplica patch-package no postinstall)
+        working-directory: mobile
+        run: npm ci
+
+      - name: ESLint — análise estática
+        working-directory: mobile
+        run: npm run lint
+
+      - name: TypeScript — verificação de tipos
+        working-directory: mobile
+        run: npx tsc --noEmit
+
+      - name: Rodar testes
+        working-directory: mobile
+        run: npm test
+
+  # ─────────────────────────────────────────
   # Build Docker — verifica que as imagens constroem
   # ─────────────────────────────────────────
   build-docker:
