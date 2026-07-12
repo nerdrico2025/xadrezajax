@@ -184,3 +184,9 @@ Todas as branches partem de `main` (trunk pós-0.5) e são mescladas em sequênc
 - **Novo projeto**: `xadrez-ajax` / `a1335737-8154-4680-a930-bb209071c8a2`, confirmado sob a Organização "Clube de Xadrez AJAX". `app.json` reapontado (projectId + `updates.url`); slug alinhado de `ajax` → `xadrez-ajax` (exigência do EAS).
 - **Canal de OTA updates reiniciado nesta data** — aceitável, nunca foi usado em produção.
 - **Primeiro build de preview gerado com sucesso** (`.apk`, perfil `preview` com `buildType: apk`): build `0fdb0e50-b6bf-4f32-999b-ff0a63d63b0c`, keystore gerado e gerenciado pelo EAS, ~19 min de fila+build.
+
+## 6. Fix de jogadas especiais + CI mobile (2026-07-12)
+
+- **Fix mergeado em `main`** (PR #65): roque no tap-to-move (bug de mapeamento SAN na `react-native-chessboard@0.1.2`, corrigido via patch-package) e promoção com escolha de peça respeitada nos dois fluxos (vs IA e online); en passant já funcionava e ganhou teste de regressão. 13 testes novos (jest-expo).
+- **CI de mobile adicionado** (job `test-mobile`: npm ci + ESLint + tsc + Jest) — primeiro job de mobile do pipeline, verde na estreia; `main` pós-merge 5/5 checks.
+- **Novo build de preview com o fix incluído**: build `b6e55fff-5d22-483a-b471-7203b7f90514` (commit d4718d4, ~17 min) — substitui o `0fdb0e50` anterior, que era pré-fix.
