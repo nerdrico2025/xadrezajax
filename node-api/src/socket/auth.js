@@ -21,7 +21,7 @@ function verifySocketToken(socket, next) {
 
     socket.userId = payload.user_id;
     next();
-  } catch (err) {
+  } catch {
     next(new Error("Token inválido ou expirado"));
   }
 }

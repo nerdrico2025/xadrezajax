@@ -1,6 +1,8 @@
 /**
  * Integration test — connects to the running server on port 3000
- * Run: docker exec xadrez_node node /app/src/tests/socket-matchmaking.test.js
+ * Run: docker exec xadrez_node node /app/src/tests/socket-matchmaking.integration.js
+ * (não é uma suíte jest: script standalone que exige o servidor no ar;
+ * requer socket.io-client instalado — devDependency)
  */
 const { io: ioc } = require("socket.io-client");
 const jwt = require("jsonwebtoken");
