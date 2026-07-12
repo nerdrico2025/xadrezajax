@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "ajax",
-    "slug": "ajax",
+    "slug": "xadrez-ajax",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon_new.png",
@@ -28,7 +28,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "updates": {
-      "url": "https://u.expo.dev/8cc9fb2b-05b3-486b-a9a4-17a002115177",
+      "url": "https://u.expo.dev/a1335737-8154-4680-a930-bb209071c8a2",
       "enabled": true,
       "checkAutomatically": "NEVER",
       "fallbackToCacheTimeout": 0
@@ -62,7 +62,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "8cc9fb2b-05b3-486b-a9a4-17a002115177"
+        "projectId": "a1335737-8154-4680-a930-bb209071c8a2"
       }
     }
   }
