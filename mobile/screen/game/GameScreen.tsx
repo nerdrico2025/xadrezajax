@@ -9,6 +9,7 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
 import { getBestMove } from "@/services/game";
+import { parseUciMove } from "@/utils/chessSpecialMoves";
 import { reportAiResult } from "@/services/profile";
 import { saveGame, clearSavedGame, type SavedAiGame } from "@/utils/savedGame";
 import { useChessSound } from "@/hooks/useChessSound";
@@ -106,19 +107,20 @@ export default function GameScreen({
     const bestMove = await getBestMove(currentGame.fen(), difficulty);
     await new Promise((resolve) => setTimeout(resolve, 300 + Math.random() * 400));
 
-    if (!bestMove || bestMove.length < 4) {
+    const parsed = parseUciMove(bestMove);
+    if (!parsed) {
       setLoading(false);
       return;
     }
 
-    const from = bestMove.substring(0, 2) as any;
-    const to = bestMove.substring(2, 4) as any;
+    const from = parsed.from as any;
+    const to = parsed.to as any;
 
     const updated = new Chess(currentGame.fen());
-    const aiMove = updated.move({ from, to, promotion: "q" });
+    const aiMove = updated.move({ from, to, promotion: parsed.promotion ?? "q" });
     if (!aiMove) { setLoading(false); return; }
 
-    await chessboardRef.current?.move({ from, to });
+    await chessboardRef.current?.move({ from, to, promotion: aiMove.promotion as any });
 
     const newAiCaptures = aiMove.captured
       ? [...capturesRef.current.aiCaptures, aiMove.captured]
@@ -194,10 +196,12 @@ export default function GameScreen({
       if (!move) return;
 
       const currentGame = new Chess(game.fen());
+      // move.promotion carrega a peça escolhida no diálogo de promoção do
+      // tabuleiro — "q" fixo divergiria do que o jogador viu na tela.
       const playerMove = currentGame.move({
         from: move.from,
         to: move.to,
-        promotion: "q",
+        promotion: move.promotion ?? "q",
       });
 
       if (!playerMove) return;

@@ -23,6 +23,7 @@ import ChessClock from "@/components/ChessClock";
 import CapturedPieces from "./CapturedPieces";
 import ConfirmModal from "@/components/ConfirmModal";
 import type { OnlineGame, GameColor } from "@/hooks/useGameSocket";
+import { derivePromotion } from "@/utils/chessSpecialMoves";
 import type { GameResult } from "./GameOverModal";
 import GameOverModal from "./GameOverModal";
 
@@ -131,9 +132,18 @@ export default function OnlineGameScreen({
     }
 
     if (opponentJustMoved && game.lastMove) {
+      // O servidor só envia { from, to } — em promoções, a peça escolhida
+      // pelo oponente é deduzida do FEN para o tabuleiro não abrir o
+      // diálogo de promoção localmente.
       chessboardRef.current?.move({
         from: game.lastMove.from as any,
         to: game.lastMove.to as any,
+        promotion: derivePromotion(
+          localFen,
+          game.fen,
+          game.lastMove.from,
+          game.lastMove.to
+        ) as any,
       });
       if (game.check) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -174,7 +184,12 @@ export default function OnlineGameScreen({
       setMovePending(true);
       if (movePendingTimeout.current) clearTimeout(movePendingTimeout.current);
       movePendingTimeout.current = setTimeout(() => setMovePending(false), 8000);
-      onMakeMove(move.from, move.to, isPromotion ? "q" : undefined);
+      // move.promotion vem do diálogo de promoção do tabuleiro
+      onMakeMove(
+        move.from,
+        move.to,
+        move.promotion ?? (isPromotion ? "q" : undefined)
+      );
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       play("move");
     },

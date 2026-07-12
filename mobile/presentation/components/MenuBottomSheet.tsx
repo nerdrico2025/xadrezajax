@@ -41,6 +41,7 @@ type MenuBottomSheetProps = {
 const DragHandle = React.memo(({ color }: { color: string }) => (
   <View style={[styles.dragHandle, { backgroundColor: color }]} />
 ));
+DragHandle.displayName = "DragHandle";
 
 const MenuItemRow = React.memo(({ item, onClose, textColor, bgPress }: {
   item: MenuItem;
@@ -64,6 +65,7 @@ const MenuItemRow = React.memo(({ item, onClose, textColor, bgPress }: {
     </TouchableOpacity>
   );
 });
+MenuItemRow.displayName = "MenuItemRow";
 
 const MenuBottomSheet = React.memo(
   ({ visible, items, onClose, title }: MenuBottomSheetProps) => {
@@ -209,5 +211,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 });
+
+MenuBottomSheet.displayName = "MenuBottomSheet";
 
 export default MenuBottomSheet;
