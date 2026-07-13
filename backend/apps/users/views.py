@@ -624,11 +624,32 @@ class AiGameResultView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        from apps.payments.access import FREE_DAILY_GAME_LIMIT, can_play_game
+
         from .models import GameHistory, Profile
 
         try:
             with transaction.atomic():
                 profile = Profile.objects.select_for_update().get(user=request.user)
+
+                # Gating do plano Grátis (RF-MON-05, item 0.1): 5 partidas/dia
+                # (IA + online somadas). Plano pago (trialing/active) é
+                # ilimitado. A trava real é aqui no backend — a UI só reflete.
+                allowed, remaining = can_play_game(profile)
+                if not allowed:
+                    return Response(
+                        {
+                            "detail": (
+                                "Limite diário do plano Grátis atingido "
+                                f"({FREE_DAILY_GAME_LIMIT} partidas/dia). "
+                                "Assine o Premium para jogar sem limites."
+                            ),
+                            "code": "daily_limit_reached",
+                            "remaining_games_today": remaining,
+                        },
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
                 if unrated:
                     # Partida sem relógio não mexe no rating: leitura sem
                     # lock/criação, só para histórico e resposta.

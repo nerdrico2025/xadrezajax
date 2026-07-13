@@ -28,6 +28,20 @@ ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("ALLOWED_HOSTS", "").split(",") if host.strip()
 ]
 
+# ========================
+# STRIPE (item 0.1 — assinaturas)
+# Sem crash de boot se ausentes: as views validam e retornam erro claro.
+# STRIPE_WEBHOOK_SECRET só passa a existir depois de cadastrar o endpoint
+# de webhook no Dashboard do Stripe.
+# ========================
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET") or None
+STRIPE_PRICE_IDS = {
+    "monthly": os.getenv("STRIPE_PRICE_ID_MENSAL", ""),
+    "annual": os.getenv("STRIPE_PRICE_ID_ANUAL", ""),
+}
+
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID") or os.getenv(
     "EXPO_PUBLIC_GOOGLE_CLIENT_ID", ""
 )
@@ -54,6 +68,7 @@ THIRD_PARTY_APPS = [
 LOCAL_APPS = [
     "apps.users",
     "apps.puzzles",
+    "apps.payments",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
