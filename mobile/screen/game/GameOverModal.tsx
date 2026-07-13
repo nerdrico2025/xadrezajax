@@ -18,11 +18,13 @@ export type GameResult = {
   reason: GameEndReason;
 };
 
+// Vitória usa colors.accent (Dourado AJAX, RF-VISUAL-01) — resolvido no
+// render porque o token vem do tema.
 const OUTCOME_CONFIG: Record<
   GameOutcome,
-  { icon: string; color: string; title: string }
+  { icon: string; color: string | null; title: string }
 > = {
-  win: { icon: "trophy", color: "#F5A623", title: "Você venceu!" },
+  win: { icon: "trophy", color: null, title: "Você venceu!" },
   loss: { icon: "sad-outline", color: "#E53935", title: "IA venceu!" },
   draw: { icon: "remove-circle-outline", color: "#9BA1A6", title: "Empate!" },
 };
@@ -62,7 +64,7 @@ export default function GameOverModal({
           <Ionicons
             name={config.icon as any}
             size={64}
-            color={config.color}
+            color={config.color ?? colors.accent}
             style={styles.icon}
           />
 

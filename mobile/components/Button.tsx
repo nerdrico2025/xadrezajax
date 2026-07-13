@@ -19,7 +19,8 @@ type Props = {
   title: string;
   onPress: () => void;
   loading?: boolean;
-  variant?: "primary" | "secondary";
+  // "accent": CTAs de conversão (assinar, upgrade) — Dourado AJAX (RF-VISUAL-01)
+  variant?: "primary" | "secondary" | "accent";
   iconName?: IoniconsName;
 };
 
@@ -50,10 +51,24 @@ export default function Button({
     }).start();
   };
 
-  const isPrimary = variant === "primary";
-  const textColor = isPrimary
-    ? colors.buttonPrimaryText
-    : colors.buttonSecondaryText;
+  const palette = {
+    primary: {
+      background: colors.buttonPrimary,
+      text: colors.buttonPrimaryText,
+      border: "transparent",
+    },
+    secondary: {
+      background: colors.buttonSecondary,
+      text: colors.buttonSecondaryText,
+      border: colors.buttonBorder,
+    },
+    accent: {
+      background: colors.accent,
+      text: colors.accentText,
+      border: "transparent",
+    },
+  }[variant];
+  const textColor = palette.text;
 
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
@@ -61,10 +76,8 @@ export default function Button({
         style={[
           styles.button,
           {
-            backgroundColor: isPrimary
-              ? colors.buttonPrimary
-              : colors.buttonSecondary,
-            borderColor: isPrimary ? "transparent" : colors.buttonBorder,
+            backgroundColor: palette.background,
+            borderColor: palette.border,
           },
         ]}
         onPress={onPress}

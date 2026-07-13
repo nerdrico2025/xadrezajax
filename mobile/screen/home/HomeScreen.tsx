@@ -41,6 +41,13 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom }: Pr
     return "Boa noite";
   };
 
+  // Rating Glicko-2 da modalidade padrão (blitz); "~" sinaliza o período
+  // provisório (primeiras 20 partidas). Fallback: espelho legado user.rating.
+  const blitzRating = profile?.ratings?.blitz ?? {
+    rating: user?.rating ?? 1500,
+    provisional: true,
+  };
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
@@ -57,10 +64,22 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom }: Pr
             {user?.full_name?.split(" ")[0] ?? user?.username ?? "Jogador"} ♟
           </Text>
         </View>
-        <View style={[styles.ratingBadge, { backgroundColor: colors.primary + "22", borderColor: colors.primary + "44" }]}>
-          <Ionicons name="trophy-outline" size={14} color={colors.primary} />
-          <Text style={[styles.ratingText, { color: colors.primary }]}>
-            {user?.rating ?? 1200}
+        <View
+          style={[
+            styles.ratingBadge,
+            { backgroundColor: colors.accent + "22", borderColor: colors.accent + "55" },
+          ]}
+          accessibilityLabel={
+            blitzRating.provisional
+              ? `Rating blitz ${blitzRating.rating}, ainda em calibração`
+              : `Rating blitz ${blitzRating.rating}`
+          }
+        >
+          <Ionicons name="trophy-outline" size={14} color={colors.accent} />
+          {/* Número em colors.text: dourado como texto reprova contraste AA
+              no tema claro (2.17:1) — dourado fica no fundo/borda/ícone */}
+          <Text style={[styles.ratingText, { color: colors.text }]}>
+            {blitzRating.provisional ? `~${blitzRating.rating}` : blitzRating.rating}
           </Text>
         </View>
       </View>
@@ -133,7 +152,7 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom }: Pr
         android_ripple={{ color: colors.primary + "20" }}
       >
         <View style={styles.cardLeft}>
-          <Text style={[styles.cardPiece, { color: "#F59E0B" }]}>♕</Text>
+          <Text style={[styles.cardPiece, { color: colors.accent }]}>♕</Text>
           <View>
             <Text style={[styles.cardTitle, { color: colors.text }]}>Classificação</Text>
             <Text style={[styles.cardSub, { color: colors.secondary }]}>Top jogadores do servidor</Text>

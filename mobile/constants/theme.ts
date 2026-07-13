@@ -2,6 +2,12 @@ import { Platform } from 'react-native';
 
 const primaryColor = '#1B5F7A';
 
+// Dourado AJAX (RF-VISUAL-01) — cor de marca fixa entre temas, reservada a
+// destaque/status/conversão. Não usar como cor de texto sobre fundo claro
+// (contraste 2.17:1); para texto sobre dourado, usar accentText (8.5:1).
+const accentColor = '#C9A84C';
+const accentTextColor = '#0D0D0D';
+
 export const Colors = {
   light: {
     // Texto e fundo
@@ -12,6 +18,8 @@ export const Colors = {
     // Primária e destaque
     primary: primaryColor,
     primaryText: '#FFFFFF',
+    accent: accentColor,
+    accentText: accentTextColor,
 
     // Secundária (textos de apoio, placeholders)
     secondary: '#6B7280',
@@ -51,6 +59,8 @@ export const Colors = {
     // Primária e destaque
     primary: '#2E86AB',
     primaryText: '#FFFFFF',
+    accent: accentColor,
+    accentText: accentTextColor,
 
     // Secundária (textos de apoio — legível no fundo escuro)
     secondary: '#94A3B8',
