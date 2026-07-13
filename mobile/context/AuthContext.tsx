@@ -12,6 +12,9 @@ export type AuthUser = {
   date_joined: string;
   username: string | null;
   rating: number;
+  // Opcional: sessões salvas antes desta versão não têm o campo — undefined
+  // conta como concluído (só contas novas, com payload novo, caem no gate).
+  onboarding_completed?: boolean;
 };
 
 type AuthContextType = {

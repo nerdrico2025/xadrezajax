@@ -9,10 +9,12 @@ import InputLine from "@/components/InputLine";
 import Divider from "@/components/Divider";
 import { Colors } from "@/constants/theme";
 import { API_URL } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Register() {
   const { theme } = useTheme();
   const colors = Colors[theme];
+  const { signIn } = useAuth();
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -94,6 +96,29 @@ export default function Register() {
           "Erro ao cadastrar"
         );
         return;
+      }
+
+      // Auto-login pós-cadastro (meta do PRD: <90s do fim do cadastro ao
+      // primeiro lance, zero campos extras — sem redigitar credenciais).
+      // Conta nova sempre cai no onboarding em 3 toques (item 0.4).
+      try {
+        const loginResponse = await fetch(`${API_URL}/api/v1/auth/login/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const loginData = await loginResponse.json();
+        if (loginResponse.ok) {
+          await signIn(loginData.access, loginData.refresh, loginData.user);
+          router.replace(
+            loginData.user?.onboarding_completed === false
+              ? "/onboarding"
+              : "/home"
+          );
+          return;
+        }
+      } catch {
+        // auto-login falhou — segue o fluxo antigo via tela de login
       }
 
       alert("Cadastro realizado com sucesso!");

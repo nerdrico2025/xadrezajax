@@ -21,7 +21,7 @@ const PUBLIC_ROUTES = [
 ];
 
 function RouteGuard() {
-  const { token, loading } = useAuth();
+  const { token, user, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -33,8 +33,22 @@ function RouteGuard() {
 
     if (!token && !isPublic) {
       router.replace("/login");
+      return;
     }
-  }, [token, loading, segments]);
+
+    // Gate do onboarding (item 0.4): conta nova que ainda não respondeu às
+    // 3 perguntas cai na tela de onboarding, venha de onde vier (login,
+    // biometria, splash). `=== false` de propósito: sessões antigas sem o
+    // campo (undefined) contam como concluídas — grandfathered.
+    if (
+      token &&
+      user?.onboarding_completed === false &&
+      current !== "onboarding" &&
+      !isPublic
+    ) {
+      router.replace("/onboarding");
+    }
+  }, [token, user, loading, segments]);
 
   return null;
 }
