@@ -68,7 +68,11 @@ export default function Login() {
         );
       }
 
-      router.replace("/home");
+      // Conta nova vai direto para o onboarding em 3 toques (item 0.4);
+      // o RouteGuard do _layout cobre os demais caminhos de entrada.
+      router.replace(
+        data.user?.onboarding_completed === false ? "/onboarding" : "/home"
+      );
 
     } catch (err) {
       console.log("💥 ERRO:", err);

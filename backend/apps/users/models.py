@@ -51,6 +51,12 @@ class Profile(models.Model):
     )
     bio = models.TextField(max_length=200, blank=True, default="", verbose_name="Bio")
     rating = models.IntegerField(default=1200, verbose_name="Rating ELO")
+    # Null = ainda não passou pelo onboarding (RF do item 0.4). Contas
+    # anteriores à feature são grandfathered pela migration 0010 (preenchida
+    # com a data do deploy) — só contas novas caem no fluxo.
+    onboarding_completed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Onboarding concluído em"
+    )
     games_played = models.IntegerField(default=0, verbose_name="Partidas jogadas")
     wins = models.IntegerField(default=0, verbose_name="Vitórias")
     losses = models.IntegerField(default=0, verbose_name="Derrotas")

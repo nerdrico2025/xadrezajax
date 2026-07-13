@@ -35,7 +35,7 @@ A auditoria confirmou: **apenas o item 0.5 foi iniciado** (hoje ✅ concluído �
 | 0.3 Glicko-2 (+0.6-B) | ✅ Código completo — ver §8 | `feature/rating-glicko2` |
 | 0.1 Assinaturas+PIX (+0.6-C) | ⬜ | — |
 | 0.2 Puzzles mobile (+0.6-D) | ⬜ | — |
-| 0.4 Onboarding | ⬜ | — |
+| 0.4 Onboarding | ✅ Código completo — ver §9 (antecipado; 0.1/0.2 seguem pendentes) | `feature/onboarding-3-toques` |
 
 ---
 
@@ -211,3 +211,13 @@ Executado conforme o desenho do §2 (item 0.3), na branch `feature/rating-glicko
 - **0.6-A/0.6-B**: token `accent`/`accentText` no `theme.ts` (fixo #C9A84C), vitória do `GameOverModal`, coroa da Home e variante `accent` no `Button`; badge de rating da Home em dourado consumindo `ratings.blitz` com indicador `~` de provisório. **Achado WCAG**: dourado sobre fundo claro = 2.17:1 → no tema claro o dourado é preenchimento/realce, nunca cor de texto (validado por teste automatizado em `mobile/constants/__tests__/theme.test.ts`). Validação visual do dourado: direto no aparelho pelo fundador, no próximo build.
 
 **Pendência não-bloqueante (decisão do PM 2026-07-12, ajuste futuro):** partidas **sem relógio** (vs IA "Sem limite" e salas privadas) **não deveriam contar para o rating rateado** — hoje entram como "rápido" (`time_control null → rapid`). O ajuste futuro é não ratear essas partidas (backend ignora atualização de `ModalityRating`/espelho para `time_control null`, mantendo wins/losses/draws e histórico; revisar também o node-api/salas privadas). Registrado aqui para não se perder; não bloqueia o merge do 0.3.
+
+## 9. Item 0.4 fechado — Onboarding em 3 toques (2026-07-13)
+
+Executado antes de 0.1/0.2 (decisão do PM), na branch `feature/onboarding-3-toques`:
+
+- **Backend**: `Profile.onboarding_completed_at` (migration 0009) + **grandfathering na 0010** (todos os perfis existentes preenchidos com a data do deploy — só contas novas passam pelo fluxo; reversível). Endpoint idempotente `POST /api/v1/auth/onboarding/`: pontuação simples documentada (exp 0/1/2 + mate 0/2 + freq 0/1/2 → ≤1 beginner · 2–4 intermediate · ≥5 advanced), seed de `ModalityRating` por nível (800/1200/1600, RD 350/vol 0.06 — mesma escala do 0.3, `get_or_create` não sobrescreve rating conquistado), espelho blitz sincronizado. Payload de login/Google ganhou `onboarding_completed` para o gate.
+- **Mobile**: rota `app/onboarding.tsx` → `screen/onboarding/OnboardingScreen.tsx` — 3 perguntas de 1 toque (experiência / reconhecer mate em 1 entre 3 diagramas estáticos do `react-native-chessboard` com `gestureEnabled=false` / frequência), progresso e destaques em `colors.accent`, e ao concluir cai **direto numa partida vs IA** na dificuldade do nível (sem Home, sem tela de parabéns; de brancas, sem relógio). Gate central no `RouteGuard` do `_layout.tsx` (`onboarding_completed === false` → `/onboarding`; sessões antigas sem o campo contam como concluídas).
+- **Auto-login pós-cadastro**: o register não devolvia tokens e mandava redigitar credenciais no login — quebrava a meta de <90s/zero formulários. O mobile agora encadeia o login com as credenciais recém-digitadas e navega direto ao onboarding (fallback: fluxo antigo via /login se o auto-login falhar).
+- **Instrumentação**: `services/analytics.ts` (buffer local em memória, interface estável p/ provedor futuro) com `onboarding_started` / `onboarding_completed` (nível) / `first_game_started`.
+- **Testes**: backend 11 novos (níveis, seed por nível, idempotência, grandfathering, rating conquistado preservado, payload de login); mobile 7 novos (diagramas validados com chess.js — exatamente um tem mate em 1 —, buffer de analytics, fluxo completo da tela com aceite/erro/retry/já-onboardado).

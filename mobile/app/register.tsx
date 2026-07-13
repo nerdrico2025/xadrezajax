@@ -9,10 +9,12 @@ import InputLine from "@/components/InputLine";
 import Divider from "@/components/Divider";
 import { Colors } from "@/constants/theme";
 import { API_URL } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Register() {
   const { theme } = useTheme();
   const colors = Colors[theme];
+  const { signIn } = useAuth();
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -92,6 +94,40 @@ export default function Register() {
           data?.email?.[0] ||
           data?.password?.[0] ||
           "Erro ao cadastrar"
+        );
+        return;
+      }
+
+      // Auto-login pós-cadastro (meta do PRD: <90s do fim do cadastro ao
+      // primeiro lance, zero campos extras — sem redigitar credenciais).
+      // A senha vem do state do formulário e é reenviada nesta chamada
+      // imediata, única vez — nada dela é persistido (signIn guarda só
+      // tokens + user). Conta nova sempre cai no onboarding (item 0.4).
+      let autoLoginData: any = null;
+      try {
+        const loginResponse = await fetch(`${API_URL}/api/v1/auth/login/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        if (loginResponse.ok) {
+          autoLoginData = await loginResponse.json();
+        }
+      } catch {
+        // auto-login falhou — segue o fluxo antigo via tela de login
+      }
+
+      // Senha sai do state assim que a chamada imediata termina,
+      // com sucesso ou falha — não fica acessível no componente.
+      setPassword("");
+      setConfirmPassword("");
+
+      if (autoLoginData) {
+        await signIn(autoLoginData.access, autoLoginData.refresh, autoLoginData.user);
+        router.replace(
+          autoLoginData.user?.onboarding_completed === false
+            ? "/onboarding"
+            : "/home"
         );
         return;
       }

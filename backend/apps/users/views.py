@@ -3,6 +3,7 @@ import secrets
 import threading
 
 from django.conf import settings
+from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
@@ -54,6 +55,12 @@ def build_auth_response(user):
             "date_joined": user.date_joined.isoformat(),
             "username": profile.username if profile else None,
             "rating": profile.rating if profile else 1200,
+            # Gate do onboarding em 3 toques (item 0.4): contas antigas foram
+            # grandfathered pela migration 0010, então isso só é False para
+            # contas novas que ainda não responderam às 3 perguntas.
+            "onboarding_completed": (
+                profile.onboarding_completed_at is not None if profile else True
+            ),
         },
     }
 
@@ -674,6 +681,122 @@ class AiGameResultView(APIView):
                 "deviation": round(modality_rating.deviation),
                 "provisional": modality_rating.is_provisional,
                 "modality": modality,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+# ─── Onboarding em 3 toques (item 0.4) ────────────────────────────────────────
+
+# Seed de rating por nível — mesma escala do AI_RATING (easy/medium/hard),
+# com deviation 350 / volatility 0.06 (defaults do Glicko-2, iguais ao seed
+# uniforme das migrations do item 0.3). O RD alto faz o rating convergir
+# rápido nas primeiras partidas mesmo se o nível autodeclarado errar.
+ONBOARDING_SEED_RATING = {"beginner": 800, "intermediate": 1200, "advanced": 1600}
+
+# Pontuação simples e documentada: cada resposta soma pontos e a soma decide
+# o nível. Experiência prévia e reconhecer o mate pesam mais que a frequência
+# desejada (que mede intenção, não habilidade).
+#   experiência: nunca=0 · casual=1 · frequente=2
+#   mate em 1 reconhecido: não=0 · sim=2
+#   frequência desejada: casual=0 · semanal=1 · diária=2
+# Soma 0–1 → beginner · 2–4 → intermediate · 5–6 → advanced
+EXPERIENCE_SCORES = {"never": 0, "casual": 1, "frequent": 2}
+FREQUENCY_SCORES = {"casual": 0, "weekly": 1, "daily": 2}
+
+
+def _onboarding_level(experience, found_mate, frequency):
+    score = (
+        EXPERIENCE_SCORES[experience]
+        + (2 if found_mate else 0)
+        + FREQUENCY_SCORES[frequency]
+    )
+    if score <= 1:
+        return "beginner"
+    if score <= 4:
+        return "intermediate"
+    return "advanced"
+
+
+class OnboardingView(APIView):
+    """
+    POST /api/v1/auth/onboarding/
+    Recebe as 3 respostas do onboarding (experience, found_mate, frequency),
+    calcula o nível, semeia os ModalityRating iniciais e marca o perfil como
+    onboardado. Idempotente: se onboarding_completed_at já está preenchido
+    (inclusive contas grandfathered pela migration 0010), retorna 200 com o
+    estado atual, sem reprocessar.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from .models import Profile
+
+        experience = request.data.get("experience")
+        found_mate = request.data.get("found_mate")
+        frequency = request.data.get("frequency")
+
+        with transaction.atomic():
+            profile = Profile.objects.select_for_update().get(user=request.user)
+
+            if profile.onboarding_completed_at is not None:
+                blitz = _modality_rating_snapshot(
+                    profile, ModalityRating.MODALITY_BLITZ
+                )
+                return Response(
+                    {
+                        "already_completed": True,
+                        "level": None,
+                        "rating": round(blitz.rating),
+                        "provisional": blitz.is_provisional,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            if (
+                experience not in EXPERIENCE_SCORES
+                or frequency not in FREQUENCY_SCORES
+                or not isinstance(found_mate, bool)
+            ):
+                return Response(
+                    {
+                        "detail": (
+                            "Payload inválido: experience (never/casual/frequent), "
+                            "found_mate (bool) e frequency (casual/weekly/daily) "
+                            "são obrigatórios."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            level = _onboarding_level(experience, found_mate, frequency)
+            seed = ONBOARDING_SEED_RATING[level]
+
+            blitz_rating = None
+            for modality, _ in ModalityRating.MODALITY_CHOICES:
+                # get_or_create: se o perfil já tem rating na modalidade (caso
+                # raro de quem jogou antes de onboardar), não sobrescreve —
+                # rating conquistado vale mais que o seed autodeclarado.
+                rating, _created = ModalityRating.objects.get_or_create(
+                    profile=profile,
+                    modality=modality,
+                    defaults={"rating": float(seed)},
+                )
+                if modality == ModalityRating.MODALITY_BLITZ:
+                    blitz_rating = rating
+
+            # Espelho legado segue o blitz (mesma regra do _sync_rating_mirror)
+            profile.rating = round(blitz_rating.rating)
+            profile.onboarding_completed_at = timezone.now()
+            profile.save(update_fields=["rating", "onboarding_completed_at"])
+
+        return Response(
+            {
+                "already_completed": False,
+                "level": level,
+                "rating": round(blitz_rating.rating),
+                "provisional": blitz_rating.is_provisional,
             },
             status=status.HTTP_200_OK,
         )

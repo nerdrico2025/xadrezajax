@@ -76,6 +76,11 @@ class ChessTokenObtainPairSerializer(TokenObtainPairSerializer):
             "date_joined": self.user.date_joined.isoformat(),
             "username": profile.username if profile else None,
             "rating": profile.rating if profile else 1200,
+            # Gate do onboarding em 3 toques (item 0.4) — mesmo contrato do
+            # build_auth_response do login com Google.
+            "onboarding_completed": (
+                profile.onboarding_completed_at is not None if profile else True
+            ),
         }
         return data
 
