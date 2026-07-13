@@ -44,6 +44,9 @@ export type State = {
   status: SocketStatus;
   game: OnlineGame | null;
   error: string | null;
+  // Código de erro mapeável pela UI (ex.: daily_limit_reached → tela de
+  // upgrade), quando o servidor envia um junto da mensagem
+  errorCode: string | null;
   roomCode: string | null;
   opponentDisconnected: boolean;
   friendInvitation: FriendInvitation | null;
@@ -57,7 +60,7 @@ export type Action =
   | { type: "CONNECTED" }
   | { type: "DISCONNECTED" }
   | { type: "RECONNECTING" }
-  | { type: "ERROR"; error: string }
+  | { type: "ERROR"; error: string; errorCode?: string | null }
   | { type: "QUEUED" }
   | { type: "QUEUE_LEFT" }
   | { type: "ROOM_CREATED"; code: string }
@@ -81,6 +84,7 @@ export const initialState: State = {
   status: "idle",
   game: null,
   error: null,
+  errorCode: null,
   roomCode: null,
   opponentDisconnected: false,
   friendInvitation: null,
@@ -109,7 +113,12 @@ export function gameSocketReducer(state: State, action: Action): State {
     case "RECONNECTING":
       return { ...state, status: "reconnecting" };
     case "ERROR":
-      return { ...state, status: "error", error: action.error };
+      return {
+        ...state,
+        status: "error",
+        error: action.error,
+        errorCode: action.errorCode ?? null,
+      };
     case "QUEUED":
       return { ...state, status: "queued" };
     case "QUEUE_LEFT":

@@ -10,6 +10,7 @@ redis==8.0.0
 requests==2.32.3
 gunicorn==23.0.0
 Pillow==11.2.1
+stripe==15.3.0
 
 # ── testes ──
 pytest==8.3.5

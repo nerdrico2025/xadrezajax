@@ -34,6 +34,10 @@ urlpatterns = [
         "api/v1/puzzles/",
         include(("apps.puzzles.urls", "puzzles"), namespace="puzzles"),
     ),
+    path(
+        "api/v1/payments/",
+        include(("apps.payments.urls", "payments"), namespace="payments"),
+    ),
 ]
 
 if settings.DEBUG:

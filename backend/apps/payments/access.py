@@ -1,0 +1,41 @@
+"""
+Gating de acesso por plano (RF-MON-05, item 0.1).
+
+Helpers genéricos para qualquer feature limitada por plano — o item 0.2
+(puzzles) deve reaproveitar `has_paid_access` em vez de duplicar a lógica
+de "é plano pago?". A trava de partidas fica aqui e é consultada pela rota
+de resultado de partida existente (apps.users.views.AiGameResultView).
+"""
+
+from django.utils import timezone
+
+# Decisão do PM (2026-07-07): 5 partidas/dia no plano Grátis, somando
+# IA + online (ambas geram GameHistory).
+FREE_DAILY_GAME_LIMIT = 5
+
+
+def has_paid_access(profile):
+    """True se o perfil tem assinatura em status pago (trialing/active).
+
+    Perfil sem registro de Subscription é plano Grátis por definição —
+    a ausência de linha nunca é erro.
+    """
+    subscription = getattr(profile, "subscription", None)
+    return bool(subscription and subscription.is_paid)
+
+
+def games_played_today(profile):
+    from apps.users.models import GameHistory
+
+    return GameHistory.objects.filter(
+        user=profile.user, played_at__date=timezone.localdate()
+    ).count()
+
+
+def can_play_game(profile):
+    """(permitido, restantes_hoje) — restantes é None para plano pago
+    (ilimitado)."""
+    if has_paid_access(profile):
+        return True, None
+    remaining = max(0, FREE_DAILY_GAME_LIMIT - games_played_today(profile))
+    return remaining > 0, remaining

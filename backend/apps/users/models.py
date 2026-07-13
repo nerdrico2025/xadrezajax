@@ -57,6 +57,12 @@ class Profile(models.Model):
     onboarding_completed_at = models.DateTimeField(
         null=True, blank=True, verbose_name="Onboarding concluído em"
     )
+    # Customer do Stripe fica no perfil (não na Subscription) para não
+    # duplicar customer em compras futuras — o customer existe antes de
+    # qualquer assinatura ser criada (item 0.1).
+    stripe_customer_id = models.CharField(
+        max_length=100, blank=True, default="", verbose_name="Stripe Customer"
+    )
     games_played = models.IntegerField(default=0, verbose_name="Partidas jogadas")
     wins = models.IntegerField(default=0, verbose_name="Vitórias")
     losses = models.IntegerField(default=0, verbose_name="Derrotas")

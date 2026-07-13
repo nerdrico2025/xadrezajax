@@ -20,6 +20,7 @@ import { useGameSocket } from "@/hooks/useGameSocket";
 import { useAuth } from "@/context/AuthContext";
 import { useFriends } from "@/hooks/useFriends";
 import { loadSavedGame, clearSavedGame, type SavedAiGame } from "@/utils/savedGame";
+import { checkAiGameAllowed } from "@/utils/preGameGate";
 
 import HomeScreen from "@/screen/home/HomeScreen";
 import GameScreen from "@/screen/game/GameScreen";
@@ -38,7 +39,7 @@ type ActiveScreen = "home" | "play" | "private_room" | "profile" | "settings" | 
 export default function Home() {
   const { theme } = useTheme();
   const colors = Colors[theme];
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { pendingRequests } = useFriends();
 
   const [activeTab, setActiveTab] = useState<BottomTab>("home");
@@ -59,6 +60,7 @@ export default function Home() {
     status: socketStatus,
     game: onlineGame,
     error: socketError,
+    errorCode: socketErrorCode,
     roomCode,
     opponentDisconnected,
     friendInvitation,
@@ -84,6 +86,32 @@ export default function Home() {
       setQuickSearching(false);
     }
   }, [socketStatus, quickSearching, onlineGame]);
+
+  const showDailyLimitAlert = useCallback(() => {
+    Alert.alert(
+      "Limite diário atingido",
+      "Você já jogou as 5 partidas de hoje do plano Grátis. Assine o Premium para jogar sem limites — partidas sem relógio continuam liberadas.",
+      [
+        { text: "Agora não", style: "cancel" },
+        {
+          text: "Ver planos",
+          onPress: () => {
+            setActiveScreen("subscription");
+            setActiveMenu(null);
+          },
+        },
+      ]
+    );
+  }, []);
+
+  // Gating online (RF-MON-05): o node-api recusa a entrada na fila antes do
+  // pareamento e envia code daily_limit_reached — mapeia p/ tela de upgrade
+  useEffect(() => {
+    if (socketStatus === "error" && socketErrorCode === "daily_limit_reached") {
+      setQuickSearching(false);
+      showDailyLimitAlert();
+    }
+  }, [socketStatus, socketErrorCode, showDailyLimitAlert]);
 
   useEffect(() => {
     if (!friendInvitation) return;
@@ -149,14 +177,22 @@ export default function Home() {
     setShowColorPicker(true);
   }, []);
 
-  const handleSelectColor = useCallback((selected: PlayerColor, tc: TimeControl) => {
+  const handleSelectColor = useCallback(async (selected: PlayerColor, tc: TimeControl) => {
+    // Gating pré-jogo vs IA (RF-MON-05): bloqueia ANTES de o tabuleiro
+    // abrir. Partidas sem relógio são não-rateadas e passam direto.
+    const gate = await checkAiGameAllowed(token, tc);
+    if (!gate.allowed) {
+      setShowColorPicker(false);
+      showDailyLimitAlert();
+      return;
+    }
     setPlayerColor(selected);
     setTimeControl(tc);
     setSavedGame(null);
     setShowColorPicker(false);
     setActiveScreen("play");
     setGameKey((k) => k + 1);
-  }, []);
+  }, [token, showDailyLimitAlert]);
 
   const handleLeaveOnline = useCallback(() => {
     clearGame();

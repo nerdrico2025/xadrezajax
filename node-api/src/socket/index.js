@@ -2,7 +2,7 @@ const { Server } = require("socket.io");
 const { getRedis } = require("../services/redis.service");
 const { verifySocketToken } = require("./auth");
 const { addToQueue, removeFromQueue, findOpponent, getUserGame, QUEUE_KEY, QUEUE_MAX_AGE_MS } = require("./matchmaking");
-const { reportGameResult } = require("../services/gameResult.service");
+const { reportGameResult, canPlayGame } = require("../services/gameResult.service");
 const {
   createGame,
   getGame,
@@ -92,6 +92,20 @@ function setupSocket(httpServer) {
             socket.emit("error", { message: "Você já está em uma partida" });
             return;
           }
+        }
+
+        // Gating do plano Grátis (RF-MON-05): bloqueia ANTES de entrar na
+        // fila — nunca depois do pareamento. Salas privadas (não-rateadas)
+        // não passam por aqui e seguem livres.
+        const access = await canPlayGame(userId);
+        if (access.can_play === false) {
+          socket.emit("error", {
+            message:
+              "Limite diário de partidas do plano Grátis atingido. " +
+              "Assine o Premium para jogar sem limites.",
+            code: "daily_limit_reached",
+          });
+          return;
         }
 
         let opponent = await findOpponent(userId);

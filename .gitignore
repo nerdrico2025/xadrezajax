@@ -48,3 +48,6 @@ node-api/coverage/
 # Docker / dados persistidos
 # ─────────────────────────────────────────
 postgres_data/
+
+# macOS
+.DS_Store
