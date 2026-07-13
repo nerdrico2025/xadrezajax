@@ -203,22 +203,23 @@ class GameResultViewGlickoTests(APITestCase):
             round(self.rating_of(self.white, "rapid").rating),
         )
 
-    def test_migrated_elo_seed_is_respected(self):
-        """Perfil migrado do Elo (seed 1200, RD 350) continua funcionando e
-        parte do valor migrado, não de 1500."""
+    def test_uniform_seed_ignores_legacy_elo(self):
+        """Seed uniforme (decisão do PM 2026-07-12): o Elo antigo do perfil
+        não é herdado — todo rating Glicko-2 parte de 1500/350/0.06,
+        independente do valor de Profile.rating (espelho legado)."""
         white_profile = Profile.objects.get(user=self.white)
-        ModalityRating.objects.create(
-            profile=white_profile,
-            modality="blitz",
-            rating=1200,
-            deviation=350,
-            games_played=10,
-        )
-        response = self.post_result("white", time_control=300)
+        white_profile.rating = 1350  # Elo legado alto não muda o seed
+        white_profile.games_played = 42
+        white_profile.save(update_fields=["rating", "games_played"])
+
+        response = self.post_result("draw", time_control=300)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        new_rating = self.rating_of(self.white, "blitz").rating
-        self.assertGreater(new_rating, 1200)
-        self.assertLess(new_rating, 1500)  # não "pula" para a escala nova
+        # Empate entre dois seeds 1500 idênticos ≈ nenhum movimento: prova
+        # que o cálculo partiu de 1500, não do Elo 1350.
+        self.assertAlmostEqual(
+            self.rating_of(self.white, "blitz").rating, 1500.0, delta=0.01
+        )
+        self.assertLess(self.rating_of(self.white, "blitz").deviation, 350)
 
     def test_invalid_time_control_returns_400(self):
         response = self.post_result("white", time_control="blitz")

@@ -1,12 +1,14 @@
 # Migração de dados Elo → Glicko-2 (RF-PERF-02).
 #
-# Para cada Profile existente cria os 3 ModalityRating (bullet/blitz/rapid):
-# - rating: o Elo atual como seed, se o perfil já jogou (deviation=350 marca
-#   "não calibrado" — o histórico Elo não tem base estatística Glicko-2);
-#   perfis que nunca jogaram recebem o default 1500 do Glicko-2.
-# - Todo o histórico pré-migração é blitz (decisão do PM 2026-07-07: online
-#   era sempre 5 min), então games_played do blitz herda o total do perfil e
-#   bullet/rapid começam em 0.
+# Para cada Profile existente cria os 3 ModalityRating (bullet/blitz/rapid)
+# com o seed uniforme do Glicko-2 — 1500/350/0.06 — igual para perfis
+# existentes e novos (decisão do PM em 2026-07-12: não herdar o Elo antigo
+# como seed; todos recalibram do mesmo ponto de partida, e o RD 350 faz o
+# rating convergir rápido nas primeiras partidas).
+#
+# Todo o histórico pré-migração é blitz (decisão do PM 2026-07-07: online era
+# sempre 5 min), então games_played do blitz herda o total do perfil — isso
+# preserva quem já saiu do período provisório — e bullet/rapid começam em 0.
 #
 # Reversível: o reverso apaga os ModalityRating criados (o Elo permanece
 # intacto em Profile.rating, que segue como espelho denormalizado).
@@ -26,14 +28,12 @@ def seed_modality_ratings(apps, schema_editor):
 
     to_create = []
     for profile in Profile.objects.all().iterator():
-        has_played = profile.games_played > 0
-        seed_rating = float(profile.rating) if has_played else DEFAULT_RATING
         for modality in MODALITIES:
             to_create.append(
                 ModalityRating(
                     profile=profile,
                     modality=modality,
-                    rating=seed_rating,
+                    rating=DEFAULT_RATING,
                     deviation=DEFAULT_DEVIATION,
                     volatility=DEFAULT_VOLATILITY,
                     games_played=(profile.games_played if modality == "blitz" else 0),

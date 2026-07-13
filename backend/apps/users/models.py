@@ -85,8 +85,8 @@ class ModalityRating(models.Model):
 
     PROVISIONAL_GAMES = 20
 
-    # Defaults do Glicko-2 (paper de Glickman); a migração de dados usa o Elo
-    # antigo como seed de `rating` para perfis que já jogaram.
+    # Defaults do Glicko-2 (paper de Glickman) — seed uniforme para todos os
+    # perfis, existentes e novos (o Elo antigo não é herdado; decisão do PM).
     DEFAULT_RATING = 1500.0
     DEFAULT_DEVIATION = 350.0
     DEFAULT_VOLATILITY = 0.06
