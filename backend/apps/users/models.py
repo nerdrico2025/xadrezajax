@@ -64,6 +64,60 @@ class Profile(models.Model):
         return f"Perfil de {self.user.email}"
 
 
+class ModalityRating(models.Model):
+    """
+    Rating Glicko-2 de um perfil em uma modalidade (RF-PERF-02).
+
+    Três valores por rating (não só um número, como no Elo): `rating` (força),
+    `deviation` (RD — incerteza) e `volatility` (consistência). O período
+    provisório das 20 primeiras partidas é derivado de `games_played` — não há
+    campo extra: `is_provisional` é uma property.
+    """
+
+    MODALITY_BULLET = "bullet"
+    MODALITY_BLITZ = "blitz"
+    MODALITY_RAPID = "rapid"
+    MODALITY_CHOICES = [
+        ("bullet", "Bullet"),
+        ("blitz", "Blitz"),
+        ("rapid", "Rápido"),
+    ]
+
+    PROVISIONAL_GAMES = 20
+
+    # Defaults do Glicko-2 (paper de Glickman); a migração de dados usa o Elo
+    # antigo como seed de `rating` para perfis que já jogaram.
+    DEFAULT_RATING = 1500.0
+    DEFAULT_DEVIATION = 350.0
+    DEFAULT_VOLATILITY = 0.06
+
+    profile = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="modality_ratings"
+    )
+    modality = models.CharField(max_length=6, choices=MODALITY_CHOICES)
+    rating = models.FloatField(default=DEFAULT_RATING, verbose_name="Rating")
+    deviation = models.FloatField(default=DEFAULT_DEVIATION, verbose_name="Desvio (RD)")
+    volatility = models.FloatField(
+        default=DEFAULT_VOLATILITY, verbose_name="Volatilidade"
+    )
+    games_played = models.IntegerField(default=0, verbose_name="Partidas jogadas")
+
+    class Meta:
+        unique_together = ("profile", "modality")
+        verbose_name = "Rating por modalidade"
+        verbose_name_plural = "Ratings por modalidade"
+
+    @property
+    def is_provisional(self):
+        return self.games_played < self.PROVISIONAL_GAMES
+
+    def __str__(self):
+        return (
+            f"{self.profile.user.email} [{self.modality}] "
+            f"{self.rating:.0f} ±{self.deviation:.0f}"
+        )
+
+
 class GameHistory(models.Model):
     RESULT_WIN = "win"
     RESULT_LOSS = "loss"
@@ -87,6 +141,14 @@ class GameHistory(models.Model):
     opponent_name = models.CharField(max_length=150, blank=True, default="")
     result = models.CharField(max_length=4, choices=RESULT_CHOICES)
     mode = models.CharField(max_length=6, choices=MODE_CHOICES)
+    # Default "blitz" cobre o histórico pré-Glicko-2: partidas online eram
+    # sempre 5 min (blitz) e jogos vs IA antigos não têm dado de tempo
+    # (decisão do PM em 2026-07-07: tudo vira blitz).
+    modality = models.CharField(
+        max_length=6,
+        choices=ModalityRating.MODALITY_CHOICES,
+        default=ModalityRating.MODALITY_BLITZ,
+    )
     rating_before = models.IntegerField()
     rating_after = models.IntegerField()
     played_at = models.DateTimeField(auto_now_add=True)
