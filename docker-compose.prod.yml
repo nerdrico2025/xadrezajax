@@ -1,3 +1,14 @@
+# ⚠️  ATENÇÃO — este arquivo NÃO espelha o deploy real.
+#
+# A produção roda no Easypanel, que gerencia django_ajaxclube,
+# node_ajaxclube, Postgres e Redis como serviços nativos, cada um com seu
+# próprio proxy/SSL. O serviço `nginx` abaixo (com Let's Encrypt/certbot)
+# NÃO está em uso na produção atual.
+#
+# Este compose serve como referência para rodar a stack completa localmente
+# ou numa futura migração para fora do Easypanel — mantido funcional, mas
+# não é a fonte de verdade do que está no ar.
+
 services:
 
   # ─────────────────────────────────────────
