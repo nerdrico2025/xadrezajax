@@ -1,4 +1,4 @@
-import { View, StyleSheet, Alert, ActivityIndicator, Pressable, Image } from "react-native";
+import { View, StyleSheet, Alert, ActivityIndicator, Pressable, Image, Text } from "react-native";
 import { useRef, useState, useEffect, useCallback } from "react";
 import Chessboard from "react-native-chessboard";
 import type { ChessboardRef } from "react-native-chessboard";
@@ -63,6 +63,7 @@ export default function GameScreen({
   const [loading, setLoading] = useState(false);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
+  const [showDrawConfirm, setShowDrawConfirm] = useState(false);
   const [moveCount, setMoveCount] = useState(savedGame?.moveCount ?? 0);
   const chessboardRef = useRef<ChessboardRef>(null);
   const { play } = useChessSound();
@@ -242,8 +243,17 @@ export default function GameScreen({
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { borderBottomColor: colors.buttonSecondary }]}>
-        <Pressable style={styles.headerButton} onPress={handleNewGame} hitSlop={8}>
+        <Pressable
+          style={styles.headerButton}
+          onPress={handleNewGame}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Reiniciar partida"
+        >
           <Ionicons name="refresh-outline" size={22} color={colors.text} />
+          <Text style={[styles.headerButtonLabel, { color: colors.text }]}>
+            Reiniciar
+          </Text>
         </Pressable>
 
         {timeControl !== null && (
@@ -256,18 +266,53 @@ export default function GameScreen({
           />
         )}
 
-        <Pressable
-          style={styles.headerButton}
-          onPress={handleResign}
-          hitSlop={8}
-          disabled={!isGameActive}
-        >
-          <Ionicons
-            name="flag-outline"
-            size={22}
-            color={isGameActive ? colors.error : colors.icon}
-          />
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            style={styles.headerButton}
+            onPress={() => setShowDrawConfirm(true)}
+            hitSlop={8}
+            disabled={!isGameActive}
+            accessibilityRole="button"
+            accessibilityLabel="Oferecer empate"
+          >
+            <Ionicons
+              name="remove-circle-outline"
+              size={22}
+              color={isGameActive ? colors.text : colors.icon}
+            />
+            <Text
+              style={[
+                styles.headerButtonLabel,
+                { color: isGameActive ? colors.text : colors.icon },
+              ]}
+            >
+              Empate
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.headerButton}
+            onPress={handleResign}
+            hitSlop={8}
+            disabled={!isGameActive}
+            accessibilityRole="button"
+            accessibilityLabel="Desistir da partida"
+          >
+            <Ionicons
+              name="flag-outline"
+              size={22}
+              color={isGameActive ? colors.error : colors.icon}
+            />
+            <Text
+              style={[
+                styles.headerButtonLabel,
+                { color: isGameActive ? colors.error : colors.icon },
+              ]}
+            >
+              Desistir
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.boardSection}>
@@ -328,6 +373,19 @@ export default function GameScreen({
         }}
         onCancel={() => setShowResignConfirm(false)}
       />
+
+      <ConfirmModal
+        visible={showDrawConfirm}
+        title="Oferecer empate"
+        message="Contra a IA o empate é aceito na hora e a partida termina empatada. Deseja continuar?"
+        confirmLabel="Empatar"
+        cancelLabel="Cancelar"
+        onConfirm={() => {
+          setShowDrawConfirm(false);
+          finishGame({ outcome: "draw", reason: "agreement" });
+        }}
+        onCancel={() => setShowDrawConfirm(false)}
+      />
     </View>
   );
 }
@@ -344,8 +402,19 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
   headerButton: {
     padding: 6,
+    alignItems: "center",
+    gap: 2,
+  },
+  headerButtonLabel: {
+    fontSize: 10,
+    fontWeight: "600",
   },
   boardSection: {
     flex: 1,

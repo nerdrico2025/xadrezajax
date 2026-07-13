@@ -34,8 +34,14 @@ interface Props {
   opponentDisconnected: boolean;
   moveError: string | null;
   isReconnecting?: boolean;
+  incomingDrawOffer?: boolean;
+  outgoingDrawOffer?: boolean;
+  drawOfferDeclined?: boolean;
   onMakeMove: (from: string, to: string, promotion?: string) => void;
   onResign: () => void;
+  onOfferDraw?: () => void;
+  onAcceptDraw?: () => void;
+  onDeclineDraw?: () => void;
   onLeave: () => void;
 }
 
@@ -66,8 +72,14 @@ export default function OnlineGameScreen({
   opponentDisconnected,
   moveError,
   isReconnecting = false,
+  incomingDrawOffer = false,
+  outgoingDrawOffer = false,
+  drawOfferDeclined = false,
   onMakeMove,
   onResign,
+  onOfferDraw,
+  onAcceptDraw,
+  onDeclineDraw,
   onLeave,
 }: Props) {
   const { theme } = useTheme();
@@ -76,6 +88,7 @@ export default function OnlineGameScreen({
   const chessboardRef = useRef<ChessboardRef>(null);
   const [squareSize, setSquareSize] = useState(0);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
+  const [showDrawConfirm, setShowDrawConfirm] = useState(false);
   const [localFen, setLocalFen] = useState(game.fen);
   const [myCaptures, setMyCaptures] = useState<string[]>([]);
   const [opponentCaptures, setOpponentCaptures] = useState<string[]>([]);
@@ -264,18 +277,68 @@ export default function OnlineGameScreen({
           )}
           <Pressable
             style={styles.headerButton}
+            onPress={() => setShowDrawConfirm(true)}
+            disabled={!!game.gameOver || outgoingDrawOffer}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Oferecer empate"
+          >
+            <Ionicons
+              name="remove-circle-outline"
+              size={22}
+              color={game.gameOver || outgoingDrawOffer ? colors.icon : colors.text}
+            />
+            <Text
+              style={[
+                styles.headerButtonLabel,
+                { color: game.gameOver || outgoingDrawOffer ? colors.icon : colors.text },
+              ]}
+            >
+              Empate
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.headerButton}
             onPress={() => setShowResignConfirm(true)}
             disabled={!!game.gameOver}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Desistir da partida"
           >
             <Ionicons
               name="flag-outline"
               size={22}
               color={game.gameOver ? colors.icon : colors.error}
             />
+            <Text
+              style={[
+                styles.headerButtonLabel,
+                { color: game.gameOver ? colors.icon : colors.error },
+              ]}
+            >
+              Desistir
+            </Text>
           </Pressable>
         </View>
       </View>
+
+      {/* Draw offer status */}
+      {outgoingDrawOffer && !game.gameOver && (
+        <View style={[styles.infoBanner, { backgroundColor: colors.buttonSecondary + "60" }]}>
+          <ActivityIndicator size="small" color={colors.secondary} />
+          <Text style={[styles.infoBannerText, { color: colors.secondary }]}>
+            Proposta de empate enviada...
+          </Text>
+        </View>
+      )}
+      {drawOfferDeclined && !game.gameOver && (
+        <View style={[styles.infoBanner, { backgroundColor: colors.buttonSecondary + "60" }]}>
+          <Text style={[styles.infoBannerText, { color: colors.secondary }]}>
+            O oponente recusou o empate.
+          </Text>
+        </View>
+      )}
 
       {/* Board area */}
       <View style={styles.boardSection}>
@@ -338,6 +401,29 @@ export default function OnlineGameScreen({
         }}
         onCancel={() => setShowResignConfirm(false)}
       />
+
+      <ConfirmModal
+        visible={showDrawConfirm}
+        title="Oferecer empate"
+        message="Propor empate ao oponente? Ele poderá aceitar ou recusar."
+        confirmLabel="Oferecer"
+        cancelLabel="Cancelar"
+        onConfirm={() => {
+          setShowDrawConfirm(false);
+          onOfferDraw?.();
+        }}
+        onCancel={() => setShowDrawConfirm(false)}
+      />
+
+      <ConfirmModal
+        visible={incomingDrawOffer && !game.gameOver}
+        title="Proposta de empate"
+        message="Seu oponente ofereceu empate. Deseja aceitar?"
+        confirmLabel="Aceitar"
+        cancelLabel="Recusar"
+        onConfirm={() => onAcceptDraw?.()}
+        onCancel={() => onDeclineDraw?.()}
+      />
     </View>
   );
 }
@@ -365,7 +451,16 @@ const styles = StyleSheet.create({
   opponentRating: { fontSize: 11, marginTop: 1 },
   disconnectedBadge: { fontSize: 11 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 12 },
-  headerButton: { padding: 6 },
+  headerButton: { padding: 6, alignItems: "center", gap: 2 },
+  headerButtonLabel: { fontSize: 10, fontWeight: "600" },
+  infoBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 6,
+  },
+  infoBannerText: { fontSize: 13, fontWeight: "600" },
   boardSection: {
     flex: 1,
     alignItems: "center",

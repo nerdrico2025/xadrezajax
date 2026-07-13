@@ -172,6 +172,87 @@ async function resignGame(gameId, userId) {
   };
 }
 
+// Proposta de empate expira sozinha para não travar a partida se o
+// oponente desconectar ou ignorar o modal (o cliente também expira aos 30s).
+const DRAW_OFFER_TTL_MS = 60_000;
+
+async function offerDraw(gameId, userId) {
+  const game = await getGame(gameId);
+  if (!game) return { error: "Partida não encontrada" };
+  if (game.status !== "active") return { error: "Partida já encerrada" };
+
+  const isWhite = String(game.white_id) === String(userId);
+  const isBlack = String(game.black_id) === String(userId);
+  if (!isWhite && !isBlack) return { error: "Você não está nesta partida" };
+
+  await updateGame(gameId, {
+    draw_offer_by: String(userId),
+    draw_offer_at: String(Date.now()),
+  });
+
+  return {
+    offered_by: String(userId),
+    white_id: game.white_id,
+    black_id: game.black_id,
+  };
+}
+
+async function acceptDraw(gameId, userId) {
+  const game = await getGame(gameId);
+  if (!game) return { error: "Partida não encontrada" };
+  if (game.status !== "active") return { error: "Partida já encerrada" };
+
+  const isWhite = String(game.white_id) === String(userId);
+  const isBlack = String(game.black_id) === String(userId);
+  if (!isWhite && !isBlack) return { error: "Você não está nesta partida" };
+
+  const offeredBy = game.draw_offer_by;
+  if (!offeredBy || String(offeredBy) === String(userId)) {
+    return { error: "Não há proposta de empate do oponente" };
+  }
+
+  const offeredAt = parseInt(game.draw_offer_at || "0");
+  if (Date.now() - offeredAt > DRAW_OFFER_TTL_MS) {
+    await updateGame(gameId, { draw_offer_by: "", draw_offer_at: "" });
+    return { error: "A proposta de empate expirou" };
+  }
+
+  await updateGame(gameId, {
+    status: "finished",
+    draw_offer_by: "",
+    draw_offer_at: "",
+  });
+  await setUserGame(game.white_id, null);
+  await setUserGame(game.black_id, null);
+
+  return {
+    winner: null,
+    reason: "agreement",
+    white_id: game.white_id,
+    black_id: game.black_id,
+    time_control: game.time_control ? parseInt(game.time_control) : null,
+  };
+}
+
+async function declineDraw(gameId, userId) {
+  const game = await getGame(gameId);
+  if (!game) return { error: "Partida não encontrada" };
+
+  const offeredBy = game.draw_offer_by;
+  if (!offeredBy || String(offeredBy) === String(userId)) {
+    return { error: "Não há proposta de empate do oponente" };
+  }
+
+  await updateGame(gameId, { draw_offer_by: "", draw_offer_at: "" });
+
+  return {
+    declined_by: String(userId),
+    offered_by: offeredBy,
+    white_id: game.white_id,
+    black_id: game.black_id,
+  };
+}
+
 async function updateSocket(gameId, userId, newSocketId) {
   const game = await getGame(gameId);
   if (!game) return;
@@ -217,4 +298,15 @@ async function joinRoom(code, joinerId, joinerSocketId, joinerMeta = {}) {
   return { gameId, white, black };
 }
 
-module.exports = { createGame, getGame, applyMove, resignGame, updateSocket, createRoom, joinRoom };
+module.exports = {
+  createGame,
+  getGame,
+  applyMove,
+  resignGame,
+  offerDraw,
+  acceptDraw,
+  declineDraw,
+  updateSocket,
+  createRoom,
+  joinRoom,
+};
