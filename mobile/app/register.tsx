@@ -100,25 +100,36 @@ export default function Register() {
 
       // Auto-login pós-cadastro (meta do PRD: <90s do fim do cadastro ao
       // primeiro lance, zero campos extras — sem redigitar credenciais).
-      // Conta nova sempre cai no onboarding em 3 toques (item 0.4).
+      // A senha vem do state do formulário e é reenviada nesta chamada
+      // imediata, única vez — nada dela é persistido (signIn guarda só
+      // tokens + user). Conta nova sempre cai no onboarding (item 0.4).
+      let autoLoginData: any = null;
       try {
         const loginResponse = await fetch(`${API_URL}/api/v1/auth/login/`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password }),
         });
-        const loginData = await loginResponse.json();
         if (loginResponse.ok) {
-          await signIn(loginData.access, loginData.refresh, loginData.user);
-          router.replace(
-            loginData.user?.onboarding_completed === false
-              ? "/onboarding"
-              : "/home"
-          );
-          return;
+          autoLoginData = await loginResponse.json();
         }
       } catch {
         // auto-login falhou — segue o fluxo antigo via tela de login
+      }
+
+      // Senha sai do state assim que a chamada imediata termina,
+      // com sucesso ou falha — não fica acessível no componente.
+      setPassword("");
+      setConfirmPassword("");
+
+      if (autoLoginData) {
+        await signIn(autoLoginData.access, autoLoginData.refresh, autoLoginData.user);
+        router.replace(
+          autoLoginData.user?.onboarding_completed === false
+            ? "/onboarding"
+            : "/home"
+        );
+        return;
       }
 
       alert("Cadastro realizado com sucesso!");
