@@ -231,7 +231,7 @@ Executado na branch `feature/assinaturas-stripe`. Decisões de escopo do PM: **S
 - **Gating RF-MON-05**: `apps/payments/access.py` — `has_paid_access` (genérico, o 0.2 reaproveita) + `can_play_game` (5 partidas/dia no Grátis, IA+online via GameHistory). Trava real no backend em `AiGameResultView` (403 `daily_limit_reached` na 6ª do dia). Enforcement pré-partida online (matchmaking do node-api) fica como follow-up.
 - **Mobile**: `SubscriptionScreen` real — preços do PRD (Mensal R$ 39,90 / Anual R$ 359), seleção de plano, CTA dourado "Assinar — 7 dias grátis", checkout via `WebBrowser.openAuthSessionAsync` (navegador de sistema; sem WebView própria p/ PCI/3DS), retorno por deep link com reconsulta ao backend (cancelar não é erro), selo dourado "Premium ativo" com trial/renovação. **0.6-C completo**: CTA + selo + destaque do próprio rating no Leaderboard em `colors.accent`.
 - **Testes**: backend 23 novos (checkout mockado, cada evento de webhook + idempotência, gating bloqueando a 6ª partida e liberando trialing/active, perfil sem Subscription = grátis); mobile 6 novos (preços do PRD, fluxo de assinatura anual/mensal, cancelamento sem erro, estado Premium).
-- **Pós-merge (ação do PM)**: cadastrar `POST /api/v1/payments/stripe/webhook/` no Dashboard do Stripe e definir `STRIPE_WEBHOOK_SECRET` no ambiente.
+- ~~**Pós-merge (ação do PM)**: cadastrar `POST /api/v1/payments/stripe/webhook/` no Dashboard do Stripe e definir `STRIPE_WEBHOOK_SECRET` no ambiente.~~ **[FEITO 2026-07-13]** Webhook cadastrado e testado pelo PM; `STRIPE_WEBHOOK_SECRET` definido no EasyPanel.
 
 ## 11. Build de preview consolidado 1.1.0 (2026-07-13)
 
