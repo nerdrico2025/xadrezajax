@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import status
@@ -5,7 +7,46 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.payments.access import (
+    FREE_DAILY_PUZZLE_LIMIT,
+    can_solve_puzzle,
+    has_paid_access,
+)
+from apps.users.models import Profile
+
 from .models import Puzzle, UserPuzzleProgress
+
+
+def _daily_limit_response(remaining):
+    return Response(
+        {
+            "detail": (
+                "Limite diário do plano Grátis atingido "
+                f"({FREE_DAILY_PUZZLE_LIMIT} puzzles/dia). "
+                "Assine o Premium para treinar sem limites."
+            ),
+            "code": "daily_limit_reached",
+            "remaining_puzzles_today": remaining,
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
+def _current_streak(user):
+    """Dias consecutivos com pelo menos um puzzle resolvido, terminando hoje
+    ou ontem (o streak de hoje ainda não foi 'quebrado' se o dia não acabou)."""
+    solved_dates = set(
+        UserPuzzleProgress.objects.filter(
+            user=user, solved=True, solved_at__isnull=False
+        ).values_list("solved_at__date", flat=True)
+    )
+    today = timezone.localdate()
+    day = today if today in solved_dates else today - timedelta(days=1)
+    streak = 0
+    while day in solved_dates:
+        streak += 1
+        day -= timedelta(days=1)
+    return streak
 
 
 class PuzzleMapView(APIView):
@@ -92,6 +133,14 @@ class NextPuzzleView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # Gating do plano Grátis (RF-MON-05, item 0.2): pré-gate antes de
+        # entregar um novo puzzle. A tela consulta stats/ para o contador;
+        # aqui é a trava de quem pede o próximo puzzle já sem cota.
+        profile = Profile.objects.get(user=request.user)
+        allowed, remaining = can_solve_puzzle(profile)
+        if not allowed:
+            return _daily_limit_response(remaining)
+
         difficulty = request.query_params.get("difficulty")
         solved_ids = UserPuzzleProgress.objects.filter(
             user=request.user, solved=True
@@ -155,6 +204,19 @@ class PuzzleProgressView(APIView):
         solved = bool(request.data.get("solved", False))
         attempts = max(1, int(request.data.get("attempts", 1)))
 
+        # Defesa em profundidade do gating (item 0.2): só um solve NOVO
+        # consome cota — tentativa falha e re-registro de puzzle já resolvido
+        # passam livres. Espelha o padrão do AiGameResultView (403 + code).
+        existing = UserPuzzleProgress.objects.filter(
+            user=request.user, puzzle=puzzle
+        ).first()
+        records_new_solve = solved and not (existing and existing.solved)
+        if records_new_solve:
+            profile = Profile.objects.get(user=request.user)
+            allowed, remaining = can_solve_puzzle(profile)
+            if not allowed:
+                return _daily_limit_response(remaining)
+
         progress, created = UserPuzzleProgress.objects.get_or_create(
             user=request.user,
             puzzle=puzzle,
@@ -195,10 +257,19 @@ class PuzzleStatsView(APIView):
         total = Puzzle.objects.filter(is_active=True).count()
         attempts = progress_qs.aggregate(total=Sum("attempts"))["total"] or 0
 
+        profile = Profile.objects.get(user=request.user)
+        paid = has_paid_access(profile)
+        _, remaining = can_solve_puzzle(profile)
+
         return Response(
             {
                 "solved": solved,
                 "total": total,
                 "attempts": attempts,
+                # Item 0.2: streak de dias consecutivos + contador do gating
+                # (limit/remaining são None no plano pago = ilimitado)
+                "streak": _current_streak(request.user),
+                "daily_puzzle_limit": None if paid else FREE_DAILY_PUZZLE_LIMIT,
+                "remaining_puzzles_today": remaining,
             }
         )

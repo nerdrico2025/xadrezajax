@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
+import { getPuzzleStats } from "@/services/puzzles";
 import LeaderboardScreen from "./LeaderboardScreen";
 
 const CHESS_QUOTES = [
@@ -21,14 +22,31 @@ type Props = {
   onPlayAI: () => void;
   onPlayOnline: () => void;
   onPrivateRoom: () => void;
+  onPlayPuzzles: () => void;
 };
 
-export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom }: Props) {
+export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPlayPuzzles }: Props) {
   const { theme } = useTheme();
   const colors = Colors[theme];
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { profile } = useProfile();
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [puzzleStreak, setPuzzleStreak] = useState(0);
+
+  // Streak de puzzles para o chip dourado do card (0.6-D) — falha silenciosa:
+  // sem rede o card continua funcional, só sem o chip.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    getPuzzleStats(token)
+      .then((stats) => {
+        if (!cancelled) setPuzzleStreak(stats.streak);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   if (showLeaderboard) {
     return <LeaderboardScreen onBack={() => setShowLeaderboard(false)} />;
@@ -145,6 +163,38 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom }: Pr
         <Ionicons name="chevron-forward" size={20} color={colors.secondary} />
       </Pressable>
 
+      {/* Card: Puzzle do dia */}
+      <Pressable
+        style={[styles.card, { backgroundColor: colors.card, borderColor: colors.divider, borderWidth: 1 }]}
+        onPress={onPlayPuzzles}
+        android_ripple={{ color: colors.primary + "20" }}
+      >
+        <View style={styles.cardLeft}>
+          <Ionicons name="extension-puzzle" size={28} color={colors.accent} style={styles.cardIcon} />
+          <View>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Puzzle do dia</Text>
+            <Text style={[styles.cardSub, { color: colors.secondary }]}>Treine táticas em poucos lances</Text>
+          </View>
+        </View>
+        <View style={styles.cardRight}>
+          {puzzleStreak > 0 && (
+            /* Chip de streak em dourado (0.6-D) — número em colors.text
+               (dourado como texto reprova contraste AA no tema claro) */
+            <View
+              style={[
+                styles.streakChip,
+                { backgroundColor: colors.accent + "22", borderColor: colors.accent + "55" },
+              ]}
+              accessibilityLabel={`Sequência de ${puzzleStreak} dias de puzzle`}
+            >
+              <Ionicons name="flame" size={13} color={colors.accent} />
+              <Text style={[styles.streakText, { color: colors.text }]}>{puzzleStreak}</Text>
+            </View>
+          )}
+          <Ionicons name="chevron-forward" size={20} color={colors.secondary} />
+        </View>
+      </Pressable>
+
       {/* Card: Classificação */}
       <Pressable
         style={[styles.card, { backgroundColor: colors.card, borderColor: colors.divider, borderWidth: 1, marginTop: 4 }]}
@@ -250,8 +300,20 @@ const styles = StyleSheet.create({
 
   // Cards secundários — cor vinda do tema
   cardPiece: { fontSize: 32, width: 40, textAlign: "center" },
+  cardIcon: { width: 40, textAlign: "center" },
   cardTitle: { fontSize: 16, fontWeight: "700" },
   cardSub: { fontSize: 12, marginTop: 2 },
+  cardRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  streakChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  streakText: { fontSize: 12, fontWeight: "800" },
 
   statsRow: { flexDirection: "row", gap: 10 },
   statCard: {
