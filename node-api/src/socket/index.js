@@ -8,6 +8,9 @@ const {
   getGame,
   applyMove,
   resignGame,
+  offerDraw,
+  acceptDraw,
+  declineDraw,
   updateSocket,
   createRoom,
   joinRoom,
@@ -258,6 +261,64 @@ function setupSocket(httpServer) {
         reportGameResult(result.white_id, result.black_id, result.winner);
       } catch (err) {
         console.error("[Socket] resign error:", err);
+      }
+    });
+
+    socket.on("offer_draw", async ({ game_id }) => {
+      try {
+        if (!game_id) return;
+        const result = await offerDraw(game_id, userId);
+        if (result.error) {
+          socket.emit("error", { message: result.error });
+          return;
+        }
+
+        // Só o oponente recebe a proposta (socket.to exclui o remetente)
+        socket.to(`game:${game_id}`).emit("draw_offered", {
+          game_id,
+          from_id: String(userId),
+        });
+        console.log(`[Socket] draw_offered game=${game_id} from=${userId}`);
+      } catch (err) {
+        console.error("[Socket] offer_draw error:", err);
+      }
+    });
+
+    socket.on("accept_draw", async ({ game_id }) => {
+      try {
+        if (!game_id) return;
+        const result = await acceptDraw(game_id, userId);
+        if (result.error) {
+          socket.emit("error", { message: result.error });
+          return;
+        }
+
+        io.to(`game:${game_id}`).emit("game_over", {
+          game_id,
+          winner_id: null,
+          reason: "agreement",
+        });
+
+        reportGameResult(result.white_id, result.black_id, "draw");
+        console.log(`[Socket] draw accepted game=${game_id} by=${userId}`);
+      } catch (err) {
+        console.error("[Socket] accept_draw error:", err);
+      }
+    });
+
+    socket.on("decline_draw", async ({ game_id }) => {
+      try {
+        if (!game_id) return;
+        const result = await declineDraw(game_id, userId);
+        if (result.error) return;
+
+        socket.to(`game:${game_id}`).emit("draw_declined", {
+          game_id,
+          declined_by: String(userId),
+        });
+        console.log(`[Socket] draw declined game=${game_id} by=${userId}`);
+      } catch (err) {
+        console.error("[Socket] decline_draw error:", err);
       }
     });
 
