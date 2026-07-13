@@ -634,9 +634,14 @@ class AiGameResultView(APIView):
 
                 # Gating do plano Grátis (RF-MON-05, item 0.1): 5 partidas/dia
                 # (IA + online somadas). Plano pago (trialing/active) é
-                # ilimitado. A trava real é aqui no backend — a UI só reflete.
+                # ilimitado. Defesa em profundidade: a checagem principal é
+                # pré-jogo (GET /payments/can-play/, consultado pelo app antes
+                # de abrir o tabuleiro) — aqui é a rede de segurança contra
+                # clients que burlem o início. Partidas sem relógio (unrated,
+                # decisão do PR #68) não são gateadas, mas continuam contando
+                # no GameHistory (a regra de contagem não muda).
                 allowed, remaining = can_play_game(profile)
-                if not allowed:
+                if not unrated and not allowed:
                     return Response(
                         {
                             "detail": (

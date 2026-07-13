@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -53,6 +53,14 @@ export default function SubscriptionScreen({ onBack }: Props) {
   const [selectedPlan, setSelectedPlan] = useState<PaidPlan>("annual");
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState("");
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+    },
+    []
+  );
 
   const refreshSubscription = useCallback(async () => {
     if (!token) return null;
@@ -90,7 +98,7 @@ export default function SubscriptionScreen({ onBack }: Props) {
         state?.status === "active" || state?.status === "trialing";
       if (!nowPaid) {
         // O webhook pode levar alguns segundos — tenta mais uma vez.
-        setTimeout(refreshSubscription, 3000);
+        retryTimer.current = setTimeout(refreshSubscription, 3000);
       }
     } catch (e: any) {
       setError(e?.message ?? "Não foi possível abrir o checkout.");

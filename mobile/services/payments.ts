@@ -34,6 +34,22 @@ export async function getSubscription(
   return res.json();
 }
 
+export interface CanPlayState {
+  can_play: boolean;
+  daily_game_limit: number | null;
+  remaining_games_today: number | null;
+  code: "daily_limit_reached" | null;
+}
+
+/** Gating pré-jogo (RF-MON-05): consultado antes de abrir o tabuleiro. */
+export async function canPlayGame(token: string): Promise<CanPlayState> {
+  const res = await fetch(`${API_URL}/api/v1/payments/can-play/`, {
+    headers: headers(token),
+  });
+  if (!res.ok) throw new Error("Falha ao verificar o limite de partidas");
+  return res.json();
+}
+
 export async function createCheckoutSession(
   token: string,
   plan: PaidPlan

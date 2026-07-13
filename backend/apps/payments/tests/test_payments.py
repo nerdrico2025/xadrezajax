@@ -307,12 +307,26 @@ class FreePlanGatingTests(APITestCase):
         self.assertEqual(self.post_ai_result().status_code, status.HTTP_200_OK)
 
     def test_sixth_game_of_the_day_is_blocked_for_free_plan(self):
+        """Defesa em profundidade: mesmo que um client burle a checagem
+        pré-jogo, o registro do resultado rateado continua recusando."""
         self.play_games_today(5)
         response = self.post_ai_result()
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(response.data["code"], "daily_limit_reached")
         # Nada foi gravado além das 5 já existentes
         self.assertEqual(GameHistory.objects.filter(user=self.user).count(), 5)
+
+    def test_unrated_game_is_not_gated_even_at_limit(self):
+        """Partida sem relógio (não-rateada, PR #68) não é bloqueada pelo
+        gating — a contagem continua a mesma (ela entra no GameHistory)."""
+        self.play_games_today(5)
+        response = self.client.post(
+            AI_RESULT_URL,
+            {"result": "win", "difficulty": "medium", "time_control": None},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(GameHistory.objects.filter(user=self.user).count(), 6)
 
     def test_fifth_game_still_allowed_for_free_plan(self):
         self.play_games_today(4)
@@ -332,6 +346,109 @@ class FreePlanGatingTests(APITestCase):
         make_subscription(self.profile, status="canceled")
         self.play_games_today(5)
         self.assertEqual(self.post_ai_result().status_code, status.HTTP_403_FORBIDDEN)
+
+
+# ── Gating pré-jogo (can-play) ───────────────────────────────────────
+
+
+class CanPlayViewTests(APITestCase):
+    """GET /payments/can-play/ — consultado pelo app antes de abrir o
+    tabuleiro vs IA (bloqueio antes do jogo, não depois)."""
+
+    def setUp(self):
+        self.user = make_user("prejogo@chess.com")
+        self.profile = Profile.objects.get(user=self.user)
+        self.client.force_authenticate(user=self.user)
+
+    def play_games_today(self, count):
+        for _ in range(count):
+            GameHistory.objects.create(
+                user=self.user,
+                opponent_name="IA Médio",
+                result="win",
+                mode="ai",
+                rating_before=1500,
+                rating_after=1500,
+            )
+
+    def test_free_under_limit_can_play(self):
+        response = self.client.get(reverse("payments:can-play"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["can_play"])
+        self.assertEqual(response.data["remaining_games_today"], 5)
+        self.assertIsNone(response.data["code"])
+
+    def test_free_at_limit_is_blocked_with_mappable_code(self):
+        self.play_games_today(5)
+        response = self.client.get(reverse("payments:can-play"))
+        self.assertFalse(response.data["can_play"])
+        self.assertEqual(response.data["remaining_games_today"], 0)
+        self.assertEqual(response.data["code"], "daily_limit_reached")
+
+    def test_paid_plan_is_unlimited(self):
+        make_subscription(self.profile, status="trialing")
+        self.play_games_today(8)
+        response = self.client.get(reverse("payments:can-play"))
+        self.assertTrue(response.data["can_play"])
+        self.assertIsNone(response.data["daily_game_limit"])
+
+    def test_requires_authentication(self):
+        self.client.force_authenticate(user=None)
+        response = self.client.get(reverse("payments:can-play"))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+@override_settings(INTERNAL_API_SECRET="node-secret")
+class InternalCanPlayViewTests(APITestCase):
+    """GET /payments/internal/can-play/ — node-api consulta antes de
+    colocar o jogador na fila (mesmo segredo do GameResultView)."""
+
+    def setUp(self):
+        self.user = make_user("fila@chess.com")
+        self.profile = Profile.objects.get(user=self.user)
+        self.url = reverse("payments:internal-can-play")
+
+    def get(self, user_id, secret="node-secret"):
+        return self.client.get(
+            self.url,
+            {"user_id": user_id},
+            headers={"X-Internal-Secret": secret},
+        )
+
+    def test_wrong_secret_returns_403(self):
+        response = self.get(self.user.id, secret="errado")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_missing_user_id_returns_400(self):
+        response = self.client.get(
+            self.url, headers={"X-Internal-Secret": "node-secret"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_unknown_user_returns_404(self):
+        response = self.get(99999)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_free_at_limit_reports_blocked(self):
+        for _ in range(5):
+            GameHistory.objects.create(
+                user=self.user,
+                opponent_name="Alguém",
+                result="loss",
+                mode="online",
+                rating_before=1500,
+                rating_after=1500,
+            )
+        response = self.get(self.user.id)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["can_play"])
+        self.assertEqual(response.data["code"], "daily_limit_reached")
+
+    def test_paid_plan_reports_unlimited(self):
+        make_subscription(self.profile, status="active")
+        response = self.get(self.user.id)
+        self.assertTrue(response.data["can_play"])
+        self.assertIsNone(response.data["remaining_games_today"])
 
 
 # ── Estado do plano (fonte de verdade p/ o app) ──────────────────────

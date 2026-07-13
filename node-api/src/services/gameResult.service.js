@@ -39,4 +39,28 @@ async function reportGameResult(whiteId, blackId, result, timeControlSecs = null
   }
 }
 
-module.exports = { reportGameResult };
+// Gating pré-fila (RF-MON-05): consulta o Django antes de colocar o jogador
+// na fila de matchmaking — o bloqueio acontece ANTES do pareamento, nunca
+// depois. Fail-open: se o backend estiver indisponível (ou o segredo não
+// configurado), o matchmaking não trava — a defesa em profundidade continua
+// no registro do resultado.
+async function canPlayGame(userId) {
+  if (!INTERNAL_SECRET) return { can_play: true };
+
+  try {
+    const res = await fetch(
+      `${BACKEND_URL}/api/v1/payments/internal/can-play/?user_id=${encodeURIComponent(userId)}`,
+      { headers: { "X-Internal-Secret": INTERNAL_SECRET } }
+    );
+    if (!res.ok) {
+      console.error(`[CanPlay] backend respondeu ${res.status}, liberando por segurança`);
+      return { can_play: true };
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("[CanPlay] falha na consulta, liberando por segurança:", err.message);
+    return { can_play: true };
+  }
+}
+
+module.exports = { reportGameResult, canPlayGame };

@@ -152,8 +152,8 @@ export function useGameSocket() {
       dispatch({ type: "MOVE_ERROR", error: message })
     );
 
-    socket.on("error", ({ message }: { message: string }) =>
-      dispatch({ type: "ERROR", error: message })
+    socket.on("error", ({ message, code }: { message: string; code?: string }) =>
+      dispatch({ type: "ERROR", error: message, errorCode: code ?? null })
     );
 
     socket.on("invite_error", ({ message }: { message: string }) =>
@@ -293,6 +293,7 @@ export function useGameSocket() {
     status: state.status,
     game: state.game,
     error: state.error,
+    errorCode: state.errorCode,
     roomCode: state.roomCode,
     opponentDisconnected: state.opponentDisconnected,
     friendInvitation: state.friendInvitation,

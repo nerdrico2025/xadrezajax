@@ -119,6 +119,23 @@ describe("fluxo de proposta de empate no gameSocketReducer", () => {
     expect(state.outgoingDrawOffer).toBe(false);
   });
 
+  it("erro do servidor com código fica mapeável pela UI (ex.: limite diário)", () => {
+    let state = gameSocketReducer(
+      { ...initialState, status: "connected" },
+      {
+        type: "ERROR",
+        error: "Limite diário de partidas do plano Grátis atingido.",
+        errorCode: "daily_limit_reached",
+      }
+    );
+    expect(state.status).toBe("error");
+    expect(state.errorCode).toBe("daily_limit_reached");
+
+    // Erro sem código (ex.: conexão) não carrega código antigo
+    state = gameSocketReducer(state, { type: "ERROR", error: "outro" });
+    expect(state.errorCode).toBeNull();
+  });
+
   it("nova partida (inclusive rejoin) começa sem propostas pendentes", () => {
     let state = inGame();
     state = gameSocketReducer(state, { type: "DRAW_OFFER_SENT" });

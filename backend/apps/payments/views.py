@@ -351,6 +351,70 @@ class StripeWebhookView(APIView):
         subscription.save(update_fields=["status", "updated_at"])
 
 
+def _can_play_payload(profile):
+    """Payload compartilhado pelos dois endpoints de gating pré-jogo."""
+    allowed, remaining = can_play_game(profile)
+    paid = has_paid_access(profile)
+    return {
+        "can_play": allowed,
+        "daily_game_limit": None if paid else FREE_DAILY_GAME_LIMIT,
+        "remaining_games_today": remaining,
+        "code": None if allowed else "daily_limit_reached",
+    }
+
+
+class CanPlayView(APIView):
+    """
+    GET /api/v1/payments/can-play/
+    Gating pré-jogo para o app: consultado antes de abrir o tabuleiro
+    vs IA com relógio (partidas rateadas). O AiGameResultView mantém a
+    mesma checagem como defesa em profundidade.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = Profile.objects.get(user=request.user)
+        return Response(_can_play_payload(profile))
+
+
+class InternalCanPlayView(APIView):
+    """
+    GET /api/v1/payments/internal/can-play/?user_id=N
+    Consulta barata do node-api antes de colocar o jogador na fila de
+    matchmaking (bloqueio ANTES do pareamento — nunca depois). Mesmo
+    padrão de segredo compartilhado do GameResultView (X-Internal-Secret);
+    sem throttle por ser tráfego interno.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    def get(self, request):
+        secret = request.headers.get("X-Internal-Secret", "")
+        expected = getattr(settings, "INTERNAL_API_SECRET", "")
+        if not expected or secret != expected:
+            return Response(
+                {"detail": "Não autorizado."}, status=status.HTTP_403_FORBIDDEN
+            )
+
+        user_id = request.query_params.get("user_id")
+        if not user_id:
+            return Response(
+                {"detail": "user_id é obrigatório."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            profile = Profile.objects.get(user_id=user_id)
+        except Profile.DoesNotExist:
+            return Response(
+                {"detail": "Perfil não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(_can_play_payload(profile))
+
+
 class MySubscriptionView(APIView):
     """
     GET /api/v1/payments/subscription/
