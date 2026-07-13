@@ -115,6 +115,9 @@ test-node: ## Roda apenas os testes do Node API
 -include .env.prod
 export
 
+# ⚠️  Os alvos prod-* abaixo usam o docker-compose.prod.yml, que NÃO espelha
+# o deploy real: a produção roda no Easypanel (serviços nativos com
+# proxy/SSL próprios). Use-os só para rodar a stack fora do Easypanel.
 PROD_COMPOSE = docker compose -f docker-compose.prod.yml
 
 prod-init: ## Primeira inicialização: obtém certificado SSL e sobe produção
