@@ -206,7 +206,12 @@ function setupSocket(httpServer) {
             winner_id: winnerId,
             reason: "timeout",
           });
-          reportGameResult(result.white_id, result.black_id, result.loser === "white" ? "black" : "white");
+          reportGameResult(
+            result.white_id,
+            result.black_id,
+            result.loser === "white" ? "black" : "white",
+            result.time_control
+          );
           return;
         }
 
@@ -232,7 +237,12 @@ function setupSocket(httpServer) {
             const resultStr = result.gameOver.winner === "white" ? "white"
               : result.gameOver.winner === "black" ? "black"
               : "draw";
-            reportGameResult(game.white_id, game.black_id, resultStr);
+            reportGameResult(
+              game.white_id,
+              game.black_id,
+              resultStr,
+              game.time_control ? parseInt(game.time_control) : null
+            );
           }
         }
       } catch (err) {
@@ -258,7 +268,12 @@ function setupSocket(httpServer) {
           reason: "resign",
         });
 
-        reportGameResult(result.white_id, result.black_id, result.winner);
+        reportGameResult(
+          result.white_id,
+          result.black_id,
+          result.winner,
+          result.time_control
+        );
       } catch (err) {
         console.error("[Socket] resign error:", err);
       }
@@ -299,7 +314,12 @@ function setupSocket(httpServer) {
           reason: "agreement",
         });
 
-        reportGameResult(result.white_id, result.black_id, "draw");
+        reportGameResult(
+          result.white_id,
+          result.black_id,
+          "draw",
+          result.time_control
+        );
         console.log(`[Socket] draw accepted game=${game_id} by=${userId}`);
       } catch (err) {
         console.error("[Socket] accept_draw error:", err);

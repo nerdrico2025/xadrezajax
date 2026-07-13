@@ -121,7 +121,7 @@ describe("desistência vs IA (fluxo existente preservado)", () => {
 
     expect(hasText(tree.root, "IA venceu!")).toBe(true);
     expect(hasText(tree.root, "Abandono")).toBe(true);
-    expect(reportAiResult).toHaveBeenCalledWith("test-token", "loss", "medium");
+    expect(reportAiResult).toHaveBeenCalledWith("test-token", "loss", "medium", null);
   });
 
   it("cancelar mantém a partida em andamento", () => {
@@ -150,7 +150,7 @@ describe("empate por acordo vs IA (aceito imediatamente)", () => {
 
     expect(hasText(tree.root, "Empate!")).toBe(true);
     expect(hasText(tree.root, "Acordo mútuo")).toBe(true);
-    expect(reportAiResult).toHaveBeenCalledWith("test-token", "draw", "medium");
+    expect(reportAiResult).toHaveBeenCalledWith("test-token", "draw", "medium", null);
   });
 
   it("cancelar não encerra a partida", () => {

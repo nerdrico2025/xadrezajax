@@ -19,6 +19,14 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from .glicko2 import (
+    DRAW,
+    LOSS,
+    WIN,
+    Rating as GlickoRating,
+    rate as glicko2_rate,
+)
+from .models import ModalityRating
 from .serializers import (
     ChessTokenObtainPairSerializer,
     ProfileSerializer,
@@ -332,18 +340,75 @@ class GoogleLoginView(APIView):
         return Response(build_auth_response(user), status=status.HTTP_200_OK)
 
 
-K_FACTOR = 32
-K_FACTOR_AI = 24
-
 AI_RATING = {"easy": 800, "medium": 1200, "hard": 1600}
 
+# A IA vira um oponente Glicko-2 de rating fixo por dificuldade (mesma escala
+# do Elo antigo) e deviation baixo constante: ela joga com força conhecida e
+# consistente, e não tem rating próprio a atualizar.
+AI_DEVIATION = 60.0
+AI_VOLATILITY = 0.06
 
-def _expected_score(rating_a, rating_b):
-    return 1 / (1 + 10 ** ((rating_b - rating_a) / 400))
+
+def _modality_from_time_control(seconds):
+    """Bullet < 3 min, Blitz 3–10 min, Rápido > 10 min (PLANO_FASE0 §0.4).
+
+    Sem relógio (None) conta como Rápido — é o jogo sem pressão de tempo.
+    """
+    if seconds is None:
+        return ModalityRating.MODALITY_RAPID
+    if seconds < 180:
+        return ModalityRating.MODALITY_BULLET
+    if seconds <= 600:
+        return ModalityRating.MODALITY_BLITZ
+    return ModalityRating.MODALITY_RAPID
 
 
-def _new_rating(rating, expected, actual, k=K_FACTOR):
-    return max(100, round(rating + k * (actual - expected)))
+def _modality_from_request(data):
+    """Extrai a modalidade do payload; retorna None se time_control for inválido.
+
+    Payload sem a chave `time_control` (clientes/node-api antigos) cai em
+    blitz — todo o histórico pré-Glicko-2 era 5 min (decisão do PM).
+    """
+    if "time_control" not in data:
+        return ModalityRating.MODALITY_BLITZ
+    value = data.get("time_control")
+    if value is None:
+        return _modality_from_time_control(None)
+    try:
+        return _modality_from_time_control(int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _locked_modality_rating(profile, modality):
+    rating, _ = ModalityRating.objects.select_for_update().get_or_create(
+        profile=profile, modality=modality
+    )
+    return rating
+
+
+def _apply_glicko2_result(modality_rating, opponent, score):
+    """Atualiza um ModalityRating in-place com o resultado de uma partida."""
+    new = glicko2_rate(
+        GlickoRating(
+            modality_rating.rating,
+            modality_rating.deviation,
+            modality_rating.volatility,
+        ),
+        [(opponent, score)],
+    )
+    modality_rating.rating = new.rating
+    modality_rating.deviation = new.deviation
+    modality_rating.volatility = new.volatility
+    modality_rating.games_played += 1
+    modality_rating.save()
+
+
+def _sync_rating_mirror(profile, modality_rating):
+    """Profile.rating segue como espelho denormalizado do rating blitz
+    (arredondado) para não quebrar leaderboard/app antigo na transição."""
+    if modality_rating.modality == ModalityRating.MODALITY_BLITZ:
+        profile.rating = round(modality_rating.rating)
 
 
 class GameResultView(APIView):
@@ -352,10 +417,13 @@ class GameResultView(APIView):
     Chamado internamente pelo node-api ao fim de cada partida.
     Atualiza wins/losses/draws/games_played e recalcula ELO dos dois jogadores.
     Autenticado por INTERNAL_API_SECRET no header X-Internal-Secret.
+    Sem throttle: é tráfego interno do node-api — o AnonRateThrottle global
+    (20/min por IP) descartaria resultados em horário de pico de partidas.
     """
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = []
 
     def post(self, request):
         secret = request.headers.get("X-Internal-Secret", "")
@@ -369,8 +437,14 @@ class GameResultView(APIView):
         black_id = request.data.get("black_id")
         # result: "white" | "black" | "draw"
         result = request.data.get("result")
+        modality = _modality_from_request(request.data)
 
-        if not white_id or not black_id or result not in ("white", "black", "draw"):
+        if (
+            not white_id
+            or not black_id
+            or result not in ("white", "black", "draw")
+            or modality is None
+        ):
             return Response(
                 {"detail": "Dados inválidos."}, status=status.HTTP_400_BAD_REQUEST
             )
@@ -385,33 +459,45 @@ class GameResultView(APIView):
                 black_profile = Profile.objects.select_for_update().get(
                     user_id=black_id
                 )
+                white_rating = _locked_modality_rating(white_profile, modality)
+                black_rating = _locked_modality_rating(black_profile, modality)
 
-                exp_white = _expected_score(white_profile.rating, black_profile.rating)
-                exp_black = 1 - exp_white
-                w_before, b_before = white_profile.rating, black_profile.rating
+                w_before = round(white_rating.rating)
+                b_before = round(black_rating.rating)
+                # Snapshot pré-partida: os dois updates usam os valores
+                # antigos do oponente, nunca os recém-calculados.
+                white_pre = GlickoRating(
+                    white_rating.rating,
+                    white_rating.deviation,
+                    white_rating.volatility,
+                )
+                black_pre = GlickoRating(
+                    black_rating.rating,
+                    black_rating.deviation,
+                    black_rating.volatility,
+                )
 
                 if result == "white":
-                    score_white, score_black = 1, 0
+                    score_white, score_black = WIN, LOSS
                     white_profile.wins += 1
                     black_profile.losses += 1
                     w_result, b_result = "win", "loss"
                 elif result == "black":
-                    score_white, score_black = 0, 1
+                    score_white, score_black = LOSS, WIN
                     white_profile.losses += 1
                     black_profile.wins += 1
                     w_result, b_result = "loss", "win"
                 else:
-                    score_white = score_black = 0.5
+                    score_white = score_black = DRAW
                     white_profile.draws += 1
                     black_profile.draws += 1
                     w_result = b_result = "draw"
 
-                white_profile.rating = _new_rating(
-                    white_profile.rating, exp_white, score_white, K_FACTOR
-                )
-                black_profile.rating = _new_rating(
-                    black_profile.rating, exp_black, score_black, K_FACTOR
-                )
+                _apply_glicko2_result(white_rating, black_pre, score_white)
+                _apply_glicko2_result(black_rating, white_pre, score_black)
+
+                _sync_rating_mirror(white_profile, white_rating)
+                _sync_rating_mirror(black_profile, black_rating)
                 white_profile.games_played += 1
                 black_profile.games_played += 1
 
@@ -435,16 +521,18 @@ class GameResultView(APIView):
                     opponent_name=w_name,
                     result=w_result,
                     mode=GameHistory.MODE_ONLINE,
+                    modality=modality,
                     rating_before=w_before,
-                    rating_after=white_profile.rating,
+                    rating_after=round(white_rating.rating),
                 )
                 GameHistory.objects.create(
                     user=black_profile.user,
                     opponent_name=b_name,
                     result=b_result,
                     mode=GameHistory.MODE_ONLINE,
+                    modality=modality,
                     rating_before=b_before,
-                    rating_after=black_profile.rating,
+                    rating_after=round(black_rating.rating),
                 )
 
         except Profile.DoesNotExist:
@@ -454,8 +542,17 @@ class GameResultView(APIView):
 
         return Response(
             {
-                "white": {"rating": white_profile.rating},
-                "black": {"rating": black_profile.rating},
+                "modality": modality,
+                "white": {
+                    "rating": round(white_rating.rating),
+                    "deviation": round(white_rating.deviation),
+                    "provisional": white_rating.is_provisional,
+                },
+                "black": {
+                    "rating": round(black_rating.rating),
+                    "deviation": round(black_rating.deviation),
+                    "provisional": black_rating.is_provisional,
+                },
             },
             status=status.HTTP_200_OK,
         )
@@ -473,6 +570,7 @@ class AiGameResultView(APIView):
     def post(self, request):
         result = request.data.get("result")
         difficulty = request.data.get("difficulty", "medium")
+        modality = _modality_from_request(request.data)
 
         if result not in ("win", "loss", "draw"):
             return Response(
@@ -484,26 +582,33 @@ class AiGameResultView(APIView):
                 {"detail": "difficulty deve ser 'easy', 'medium' ou 'hard'."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if modality is None:
+            return Response(
+                {"detail": "time_control deve ser um número de segundos ou null."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         from .models import GameHistory, Profile
 
         try:
             with transaction.atomic():
                 profile = Profile.objects.select_for_update().get(user=request.user)
-                ai_rating = AI_RATING[difficulty]
-                expected = _expected_score(profile.rating, ai_rating)
-                rating_before = profile.rating
+                modality_rating = _locked_modality_rating(profile, modality)
+                rating_before = round(modality_rating.rating)
 
                 if result == "win":
-                    score, profile.wins = 1, profile.wins + 1
+                    score, profile.wins = WIN, profile.wins + 1
                 elif result == "loss":
-                    score, profile.losses = 0, profile.losses + 1
+                    score, profile.losses = LOSS, profile.losses + 1
                 else:
-                    score, profile.draws = 0.5, profile.draws + 1
+                    score, profile.draws = DRAW, profile.draws + 1
 
-                profile.rating = _new_rating(
-                    profile.rating, expected, score, K_FACTOR_AI
+                ai_opponent = GlickoRating(
+                    AI_RATING[difficulty], AI_DEVIATION, AI_VOLATILITY
                 )
+                _apply_glicko2_result(modality_rating, ai_opponent, score)
+
+                _sync_rating_mirror(profile, modality_rating)
                 profile.games_played += 1
                 profile.save(
                     update_fields=["rating", "wins", "losses", "draws", "games_played"]
@@ -519,15 +624,24 @@ class AiGameResultView(APIView):
                     opponent_name=difficulty_label[difficulty],
                     result=result,
                     mode=GameHistory.MODE_AI,
+                    modality=modality,
                     rating_before=rating_before,
-                    rating_after=profile.rating,
+                    rating_after=round(modality_rating.rating),
                 )
         except Profile.DoesNotExist:
             return Response(
                 {"detail": "Perfil não encontrado."}, status=status.HTTP_404_NOT_FOUND
             )
 
-        return Response({"rating": profile.rating}, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "rating": round(modality_rating.rating),
+                "deviation": round(modality_rating.deviation),
+                "provisional": modality_rating.is_provisional,
+                "modality": modality,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class GameHistoryView(APIView):
@@ -551,6 +665,7 @@ class GameHistoryView(APIView):
                 "opponent_name": g.opponent_name,
                 "result": g.result,
                 "mode": g.mode,
+                "modality": g.modality,
                 "rating_before": g.rating_before,
                 "rating_after": g.rating_after,
                 "rating_delta": g.rating_after - g.rating_before,
@@ -563,34 +678,41 @@ class GameHistoryView(APIView):
 
 class LeaderboardView(APIView):
     """
-    GET /api/v1/auth/leaderboard/?limit=50
-    Top jogadores por rating. Público.
+    GET /api/v1/auth/leaderboard/?limit=50&modality=blitz
+    Top jogadores por rating Glicko-2 na modalidade (default blitz). Público.
+    Só entram jogadores com ao menos 1 partida na modalidade.
     """
 
     authentication_classes = []
     permission_classes = [AllowAny]
 
     def get(self, request):
-        from .models import Profile
-
         limit = min(int(request.query_params.get("limit", 50)), 100)
+        modality = request.query_params.get("modality", ModalityRating.MODALITY_BLITZ)
+        if modality not in dict(ModalityRating.MODALITY_CHOICES):
+            return Response(
+                {"detail": "modality deve ser 'bullet', 'blitz' ou 'rapid'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        profiles = (
-            Profile.objects.select_related("user")
-            .filter(games_played__gt=0)
+        ratings = (
+            ModalityRating.objects.select_related("profile__user")
+            .filter(modality=modality, games_played__gt=0)
             .order_by("-rating")[:limit]
         )
         data = [
             {
                 "rank": i + 1,
-                "user_id": p.user_id,
-                "username": p.username or p.user.full_name,
-                "full_name": p.user.full_name,
-                "rating": p.rating,
-                "games_played": p.games_played,
-                "wins": p.wins,
+                "user_id": r.profile.user_id,
+                "username": r.profile.username or r.profile.user.full_name,
+                "full_name": r.profile.user.full_name,
+                "rating": round(r.rating),
+                "provisional": r.is_provisional,
+                "modality": modality,
+                "games_played": r.profile.games_played,
+                "wins": r.profile.wins,
             }
-            for i, p in enumerate(profiles)
+            for i, r in enumerate(ratings)
         ]
         return Response(data)
 

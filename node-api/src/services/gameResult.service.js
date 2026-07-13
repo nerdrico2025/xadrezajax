@@ -1,7 +1,9 @@
 const BACKEND_URL = process.env.BACKEND_URL || "http://backend:8000";
 const INTERNAL_SECRET = process.env.INTERNAL_API_SECRET || "";
 
-async function reportGameResult(whiteId, blackId, result) {
+// timeControlSecs define a modalidade Glicko-2 no backend (bullet/blitz/rapid);
+// null = partida sem relógio (salas privadas) → rápido.
+async function reportGameResult(whiteId, blackId, result, timeControlSecs = null) {
   if (!INTERNAL_SECRET) {
     console.warn("[GameResult] INTERNAL_API_SECRET não configurado, resultado não reportado.");
     return;
@@ -14,7 +16,12 @@ async function reportGameResult(whiteId, blackId, result) {
         "Content-Type": "application/json",
         "X-Internal-Secret": INTERNAL_SECRET,
       },
-      body: JSON.stringify({ white_id: whiteId, black_id: blackId, result }),
+      body: JSON.stringify({
+        white_id: whiteId,
+        black_id: blackId,
+        result,
+        time_control: timeControlSecs,
+      }),
     });
 
     if (!res.ok) {
@@ -24,7 +31,9 @@ async function reportGameResult(whiteId, blackId, result) {
     }
 
     const data = await res.json();
-    console.log(`[GameResult] ELO atualizado — brancas: ${data.white.rating} pretas: ${data.black.rating}`);
+    console.log(
+      `[GameResult] rating atualizado (${data.modality ?? "?"}) — brancas: ${data.white.rating} pretas: ${data.black.rating}`
+    );
   } catch (err) {
     console.error("[GameResult] Falha na chamada ao backend:", err.message);
   }

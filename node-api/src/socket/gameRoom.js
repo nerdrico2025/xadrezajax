@@ -90,6 +90,7 @@ async function applyMove(gameId, userId, from, to, promotion) {
         loser: isWhite ? "white" : "black",
         white_id: game.white_id,
         black_id: game.black_id,
+        time_control: timeControlSecs,
       };
     }
   }
@@ -167,6 +168,7 @@ async function resignGame(gameId, userId) {
     reason: "resign",
     white_id: game.white_id,
     black_id: game.black_id,
+    time_control: game.time_control ? parseInt(game.time_control) : null,
   };
 }
 
@@ -228,6 +230,7 @@ async function acceptDraw(gameId, userId) {
     reason: "agreement",
     white_id: game.white_id,
     black_id: game.black_id,
+    time_control: game.time_control ? parseInt(game.time_control) : null,
   };
 }
 

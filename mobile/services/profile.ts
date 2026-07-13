@@ -1,12 +1,25 @@
 import { API_URL } from "./api";
 
+export type RatingModality = "bullet" | "blitz" | "rapid";
+
+// Rating Glicko-2 de uma modalidade. `provisional` = período de calibração
+// (primeiras 20 partidas na modalidade, RD ainda alto).
+export interface ModalityRating {
+  rating: number;
+  deviation: number;
+  games_played: number;
+  provisional: boolean;
+}
+
 export interface UserProfile {
   email: string;
   full_name: string;
   username: string | null;
   avatar: string | null;
   bio: string;
+  /** Espelho legado do rating blitz (compatibilidade) — prefira `ratings`. */
   rating: number;
+  ratings: Record<RatingModality, ModalityRating>;
   games_played: number;
   wins: number;
   losses: number;
@@ -74,6 +87,7 @@ export interface GameHistoryEntry {
   opponent_name: string;
   result: "win" | "loss" | "draw";
   mode: "ai" | "online";
+  modality: RatingModality;
   rating_before: number;
   rating_after: number;
   rating_delta: number;
@@ -96,12 +110,15 @@ export async function getGameHistory(
 export async function reportAiResult(
   token: string,
   result: "win" | "loss" | "draw",
-  difficulty: "easy" | "medium" | "hard"
-): Promise<{ rating: number }> {
+  difficulty: "easy" | "medium" | "hard",
+  // Segundos do relógio da partida (null = sem limite) — define a modalidade
+  // Glicko-2 no backend (bullet < 3 min, blitz 3–10 min, rápido > 10/sem limite)
+  timeControl: number | null = null
+): Promise<{ rating: number; provisional: boolean; modality: RatingModality }> {
   const res = await fetch(`${API_URL}/api/v1/auth/game/ai-result/`, {
     method: "POST",
     headers: headers(token),
-    body: JSON.stringify({ result, difficulty }),
+    body: JSON.stringify({ result, difficulty, time_control: timeControl }),
   });
   if (!res.ok) throw new Error("Falha ao salvar resultado");
   return res.json();
@@ -113,6 +130,8 @@ export interface LeaderboardEntry {
   username: string;
   full_name: string;
   rating: number;
+  provisional: boolean;
+  modality: RatingModality;
   games_played: number;
   wins: number;
 }

@@ -88,9 +88,10 @@ export default function GameScreen({
     clearSavedGame().catch(() => {});
     setGameResult(result);
     if (authToken) {
-      reportAiResult(authToken, result.outcome, difficulty).catch(() => {});
+      // timeControl define a modalidade Glicko-2 (bullet/blitz/rapid) no backend
+      reportAiResult(authToken, result.outcome, difficulty, timeControl).catch(() => {});
     }
-  }, [authToken, difficulty, clock]);
+  }, [authToken, difficulty, clock, timeControl]);
 
   useEffect(() => {
     if (!clockTimedOut || gameResult) return;

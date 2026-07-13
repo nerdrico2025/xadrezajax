@@ -4,7 +4,7 @@ from django.db import transaction
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .models import Profile
+from .models import ModalityRating, Profile
 
 User = get_user_model()
 
@@ -86,6 +86,7 @@ class ProfileSerializer(serializers.ModelSerializer):
     date_joined = serializers.DateTimeField(source="user.date_joined", read_only=True)
     avatar = serializers.ImageField(required=False, allow_null=True)
     friends_count = serializers.SerializerMethodField()
+    ratings = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
@@ -96,6 +97,7 @@ class ProfileSerializer(serializers.ModelSerializer):
             "avatar",
             "bio",
             "rating",
+            "ratings",
             "games_played",
             "wins",
             "losses",
@@ -106,6 +108,7 @@ class ProfileSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "email",
             "rating",
+            "ratings",
             "games_played",
             "wins",
             "losses",
@@ -113,6 +116,25 @@ class ProfileSerializer(serializers.ModelSerializer):
             "date_joined",
             "friends_count",
         ]
+
+    def get_ratings(self, obj):
+        """Ratings Glicko-2 por modalidade; modalidades ainda não jogadas
+        (sem linha no banco) aparecem com os defaults do sistema."""
+        stored = {r.modality: r for r in obj.modality_ratings.all()}
+        result = {}
+        for modality, _ in ModalityRating.MODALITY_CHOICES:
+            r = stored.get(modality)
+            result[modality] = {
+                "rating": (
+                    round(r.rating) if r else round(ModalityRating.DEFAULT_RATING)
+                ),
+                "deviation": round(
+                    r.deviation if r else ModalityRating.DEFAULT_DEVIATION
+                ),
+                "games_played": r.games_played if r else 0,
+                "provisional": r.is_provisional if r else True,
+            }
+        return result
 
     def get_friends_count(self, obj):
         from django.db.models import Q
