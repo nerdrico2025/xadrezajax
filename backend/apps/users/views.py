@@ -380,11 +380,31 @@ def _modality_from_request(data):
         return None
 
 
+def _is_unrated_request(data):
+    """Partida sem relógio: chave `time_control` presente com valor None.
+
+    Decisão do PM (PLANO_FASE0 §8): essas partidas contam para
+    wins/losses/draws/games_played e para o GameHistory, mas não alteram
+    ModalityRating nem o espelho Profile.rating. Chave ausente é outro caso
+    (cliente antigo) e segue como blitz ratedo — não mexer.
+    """
+    return "time_control" in data and data.get("time_control") is None
+
+
 def _locked_modality_rating(profile, modality):
     rating, _ = ModalityRating.objects.select_for_update().get_or_create(
         profile=profile, modality=modality
     )
     return rating
+
+
+def _modality_rating_snapshot(profile, modality):
+    """Leitura do estado atual sem lock nem criação de linha — para partidas
+    não rateadas, que só precisam do valor vigente para preencher histórico
+    e resposta (rating_before == rating_after)."""
+    rating = ModalityRating.objects.filter(profile=profile, modality=modality).first()
+    # Instância não salva carrega os defaults (1500/350/0.06, 0 jogos)
+    return rating or ModalityRating(profile=profile, modality=modality)
 
 
 def _apply_glicko2_result(modality_rating, opponent, score):
@@ -438,6 +458,7 @@ class GameResultView(APIView):
         # result: "white" | "black" | "draw"
         result = request.data.get("result")
         modality = _modality_from_request(request.data)
+        unrated = _is_unrated_request(request.data)
 
         if (
             not white_id
@@ -459,8 +480,14 @@ class GameResultView(APIView):
                 black_profile = Profile.objects.select_for_update().get(
                     user_id=black_id
                 )
-                white_rating = _locked_modality_rating(white_profile, modality)
-                black_rating = _locked_modality_rating(black_profile, modality)
+                if unrated:
+                    # Partida sem relógio não mexe no rating: leitura sem
+                    # lock/criação, só para histórico e resposta.
+                    white_rating = _modality_rating_snapshot(white_profile, modality)
+                    black_rating = _modality_rating_snapshot(black_profile, modality)
+                else:
+                    white_rating = _locked_modality_rating(white_profile, modality)
+                    black_rating = _locked_modality_rating(black_profile, modality)
 
                 w_before = round(white_rating.rating)
                 b_before = round(black_rating.rating)
@@ -493,11 +520,12 @@ class GameResultView(APIView):
                     black_profile.draws += 1
                     w_result = b_result = "draw"
 
-                _apply_glicko2_result(white_rating, black_pre, score_white)
-                _apply_glicko2_result(black_rating, white_pre, score_black)
+                if not unrated:
+                    _apply_glicko2_result(white_rating, black_pre, score_white)
+                    _apply_glicko2_result(black_rating, white_pre, score_black)
 
-                _sync_rating_mirror(white_profile, white_rating)
-                _sync_rating_mirror(black_profile, black_rating)
+                    _sync_rating_mirror(white_profile, white_rating)
+                    _sync_rating_mirror(black_profile, black_rating)
                 white_profile.games_played += 1
                 black_profile.games_played += 1
 
@@ -571,6 +599,7 @@ class AiGameResultView(APIView):
         result = request.data.get("result")
         difficulty = request.data.get("difficulty", "medium")
         modality = _modality_from_request(request.data)
+        unrated = _is_unrated_request(request.data)
 
         if result not in ("win", "loss", "draw"):
             return Response(
@@ -593,7 +622,12 @@ class AiGameResultView(APIView):
         try:
             with transaction.atomic():
                 profile = Profile.objects.select_for_update().get(user=request.user)
-                modality_rating = _locked_modality_rating(profile, modality)
+                if unrated:
+                    # Partida sem relógio não mexe no rating: leitura sem
+                    # lock/criação, só para histórico e resposta.
+                    modality_rating = _modality_rating_snapshot(profile, modality)
+                else:
+                    modality_rating = _locked_modality_rating(profile, modality)
                 rating_before = round(modality_rating.rating)
 
                 if result == "win":
@@ -603,12 +637,13 @@ class AiGameResultView(APIView):
                 else:
                     score, profile.draws = DRAW, profile.draws + 1
 
-                ai_opponent = GlickoRating(
-                    AI_RATING[difficulty], AI_DEVIATION, AI_VOLATILITY
-                )
-                _apply_glicko2_result(modality_rating, ai_opponent, score)
+                if not unrated:
+                    ai_opponent = GlickoRating(
+                        AI_RATING[difficulty], AI_DEVIATION, AI_VOLATILITY
+                    )
+                    _apply_glicko2_result(modality_rating, ai_opponent, score)
 
-                _sync_rating_mirror(profile, modality_rating)
+                    _sync_rating_mirror(profile, modality_rating)
                 profile.games_played += 1
                 profile.save(
                     update_fields=["rating", "wins", "losses", "draws", "games_played"]

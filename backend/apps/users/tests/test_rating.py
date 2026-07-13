@@ -221,6 +221,63 @@ class GameResultViewGlickoTests(APITestCase):
         )
         self.assertLess(self.rating_of(self.white, "blitz").deviation, 350)
 
+    def test_unrated_game_counts_stats_but_not_rating(self):
+        """Partida sem relógio (time_control null): incrementa wins/losses/
+        games_played e cria GameHistory, mas não altera ModalityRating nem o
+        espelho Profile.rating (decisão do PM, PLANO_FASE0 §8)."""
+        # Estado prévio calibrado no rapid para provar que nada se move
+        white_profile = Profile.objects.get(user=self.white)
+        ModalityRating.objects.create(
+            profile=white_profile,
+            modality="rapid",
+            rating=1600,
+            deviation=90,
+            games_played=25,
+        )
+        mirror_before = white_profile.rating
+
+        response = self.post_result("white", time_control=None)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["modality"], "rapid")
+        # Resposta reflete o estado atual, sem cálculo de atualização
+        self.assertEqual(response.data["white"]["rating"], 1600)
+        self.assertEqual(response.data["white"]["deviation"], 90)
+        self.assertFalse(response.data["white"]["provisional"])
+        self.assertEqual(response.data["black"]["rating"], 1500)
+        self.assertEqual(response.data["black"]["deviation"], 350)
+        self.assertTrue(response.data["black"]["provisional"])
+
+        # Rating intocado (nem linha nova para quem não tinha)
+        white_rapid = self.rating_of(self.white, "rapid")
+        self.assertEqual(
+            (white_rapid.rating, white_rapid.deviation, white_rapid.games_played),
+            (1600, 90, 25),
+        )
+        self.assertFalse(
+            ModalityRating.objects.filter(profile__user=self.black).exists()
+        )
+
+        # Espelho e contadores
+        white_profile.refresh_from_db()
+        self.assertEqual(white_profile.rating, mirror_before)
+        self.assertEqual((white_profile.wins, white_profile.games_played), (1, 1))
+        black_profile = Profile.objects.get(user=self.black)
+        self.assertEqual((black_profile.losses, black_profile.games_played), (1, 1))
+
+        # Histórico criado com rating congelado
+        white_history = GameHistory.objects.get(user=self.white)
+        self.assertEqual(white_history.modality, "rapid")
+        self.assertEqual(white_history.rating_before, white_history.rating_after)
+        self.assertEqual(white_history.rating_before, 1600)
+        black_history = GameHistory.objects.get(user=self.black)
+        self.assertEqual(black_history.rating_before, black_history.rating_after)
+
+    def test_timed_game_still_rated_regression(self):
+        """Regressão: com relógio (mesmo rápido, >10 min) segue rateando."""
+        self.post_result("white", time_control=900)
+        self.assertGreater(self.rating_of(self.white, "rapid").rating, 1500)
+        self.assertEqual(self.rating_of(self.white, "rapid").games_played, 1)
+
     def test_invalid_time_control_returns_400(self):
         response = self.post_result("white", time_control="blitz")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -270,8 +327,9 @@ class AiGameResultViewGlickoTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["modality"], "blitz")
 
-    def test_null_time_control_maps_to_rapid(self):
-        """Partida sem relógio ("Sem limite") conta como Rápido."""
+    def test_null_time_control_is_rapid_and_unrated(self):
+        """Partida sem relógio ("Sem limite"): modalidade rápido, mas não
+        rateada — conta stats/histórico e congela o rating."""
         response = self.client.post(
             AI_RESULT_URL,
             {"result": "win", "difficulty": "medium", "time_control": None},
@@ -279,6 +337,21 @@ class AiGameResultViewGlickoTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["modality"], "rapid")
+        self.assertEqual(response.data["rating"], 1500)
+        self.assertEqual(response.data["deviation"], 350)
+        self.assertTrue(response.data["provisional"])
+
+        # Sem linha de rating criada; stats e histórico registrados
+        self.assertFalse(
+            ModalityRating.objects.filter(profile__user=self.user).exists()
+        )
+        profile = Profile.objects.get(user=self.user)
+        self.assertEqual((profile.wins, profile.games_played), (1, 1))
+        self.assertEqual(profile.rating, 1200)  # espelho intocado
+
+        history = GameHistory.objects.get(user=self.user)
+        self.assertEqual(history.modality, "rapid")
+        self.assertEqual(history.rating_before, history.rating_after)
 
     def test_beating_hard_ai_pays_more_than_easy(self):
         first = self.client.post(
