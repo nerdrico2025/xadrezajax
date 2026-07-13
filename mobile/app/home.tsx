@@ -24,6 +24,7 @@ import { checkAiGameAllowed } from "@/utils/preGameGate";
 
 import HomeScreen from "@/screen/home/HomeScreen";
 import GameScreen from "@/screen/game/GameScreen";
+import PuzzleScreen from "@/screen/puzzles/PuzzleScreen";
 import OnlineGameScreen from "@/screen/game/OnlineGameScreen";
 import ProfileScreen from "@/screen/profile/ProfileScreen";
 import SettingsScreen from "@/screen/profile/SettingsScreen";
@@ -34,7 +35,7 @@ import MenuBottomSheet from "@/presentation/components/MenuBottomSheet";
 import { gameMenu, profileMenu } from "@/presentation/config/menuConfigs";
 
 type ActiveMenu = "game" | "profile" | null;
-type ActiveScreen = "home" | "play" | "private_room" | "profile" | "settings" | "leaderboard" | "subscription";
+type ActiveScreen = "home" | "play" | "puzzles" | "private_room" | "profile" | "settings" | "leaderboard" | "subscription";
 
 export default function Home() {
   const { theme } = useTheme();
@@ -257,6 +258,7 @@ export default function Home() {
             onPlayAI={handleStartAI}
             onPlayOnline={handleQuickOnline}
             onPrivateRoom={() => { setActiveScreen("private_room"); }}
+            onPlayPuzzles={() => { setActiveScreen("puzzles"); }}
           />
         ) : activeScreen === "play" ? (
           <View style={styles.gameContainer}>
@@ -269,6 +271,14 @@ export default function Home() {
               onLeave={() => setActiveScreen("home")}
             />
           </View>
+        ) : activeScreen === "puzzles" ? (
+          <PuzzleScreen
+            onBack={() => {
+              setActiveScreen("home");
+              setActiveTab("home");
+            }}
+            onUpgrade={() => setActiveScreen("subscription")}
+          />
         ) : activeScreen === "private_room" ? (
           <MatchmakingScreen
             status={socketStatus}
