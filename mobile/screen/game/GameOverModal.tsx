@@ -8,8 +8,10 @@ export type GameEndReason =
   | "checkmate"
   | "stalemate"
   | "threefold"
+  | "repetition"
   | "insufficient"
   | "draw"
+  | "agreement"
   | "resign"
   | "timeout";
 
@@ -31,8 +33,10 @@ const REASON_LABEL: Record<GameEndReason, string> = {
   checkmate: "Xeque-mate",
   stalemate: "Afogamento",
   threefold: "Repetição de posição",
+  repetition: "Repetição de posição",
   insufficient: "Material insuficiente",
   draw: "Regra dos 50 lances",
+  agreement: "Acordo mútuo",
   resign: "Abandono",
   timeout: "Tempo esgotado",
 };

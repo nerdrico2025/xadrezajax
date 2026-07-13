@@ -190,3 +190,12 @@ Todas as branches partem de `main` (trunk pós-0.5) e são mescladas em sequênc
 - **Fix mergeado em `main`** (PR #65): roque no tap-to-move (bug de mapeamento SAN na `react-native-chessboard@0.1.2`, corrigido via patch-package) e promoção com escolha de peça respeitada nos dois fluxos (vs IA e online); en passant já funcionava e ganhou teste de regressão. 13 testes novos (jest-expo).
 - **CI de mobile adicionado** (job `test-mobile`: npm ci + ESLint + tsc + Jest) — primeiro job de mobile do pipeline, verde na estreia; `main` pós-merge 5/5 checks.
 - **Novo build de preview com o fix incluído**: build `b6e55fff-5d22-483a-b471-7203b7f90514` (commit d4718d4, ~17 min) — substitui o `0fdb0e50` anterior, que era pré-fix.
+
+## 7. Clareza do botão de desistir + Oferecer empate (2026-07-12)
+
+Item novo, fora do plano original — encontrado durante teste manual do build de preview no dispositivo (o fundador não conseguiu identificar o botão de desistir, e não havia como propor empate por acordo).
+
+- **Clareza do botão de desistir**: os botões do cabeçalho de `GameScreen` e `OnlineGameScreen` (antes só ícone `flag-outline`) ganharam rótulo textual pequeno abaixo do ícone ("Desistir", "Empate", "Reiniciar") + `accessibilityLabel`. Fluxo de confirmação (`ConfirmModal`) mantido.
+- **Oferecer empate vs IA**: novo botão "Empate" encerra a partida imediatamente como empate por acordo após confirmação (sem negociação com o Stockfish); novo motivo `agreement` ("Acordo mútuo") no `GameOverModal`, resultado reportado como `draw`.
+- **Oferecer empate online**: fluxo completo proposta/aceite/recusa via socket (`offer_draw` → `draw_offered` → `accept_draw`/`decline_draw` → `game_over reason=agreement`/`draw_declined`), com TTL de 60s no servidor + expiração local de 30s e limpeza em desconexão do oponente (proposta não trava). Resultado reportado ao Django como `draw` pelo mesmo caminho do resign (`GameResultView`, sem mudança de schema).
+- **Testes**: `node-api/src/tests/gameRoom.test.js` (resign + offer/accept/decline com Redis mockado) e no mobile testes de reducer (`gameSocketReducer`) + componentes (`GameScreen`/`OnlineGameScreen` com react-test-renderer). Reducer do socket extraído para `mobile/hooks/gameSocketReducer.ts` para ser testável.

@@ -2,161 +2,24 @@ import { useEffect, useRef, useReducer, useCallback } from "react";
 import { io, type Socket } from "socket.io-client";
 import { NODE_URL } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
+import {
+  gameSocketReducer,
+  initialState,
+  type GameColor,
+} from "./gameSocketReducer";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+export type {
+  GameColor,
+  GamePlayer,
+  OnlineGame,
+  SocketStatus,
+  FriendInvitation,
+} from "./gameSocketReducer";
 
-export type GameColor = "w" | "b";
-
-export type GamePlayer = {
-  id: string;
-  username?: string;
-  rating?: number;
-};
-
-export type OnlineGame = {
-  gameId: string;
-  fen: string;
-  white: GamePlayer;
-  black: GamePlayer;
-  myColor: GameColor;
-  turn: GameColor;
-  check: boolean;
-  lastMove: { from: string; to: string } | null;
-  gameOver: { winnerId: string | null; reason: string } | null;
-  timeControl: number | null;
-  whiteTimeMs: number | null;
-  blackTimeMs: number | null;
-};
-
-export type SocketStatus =
-  | "idle"
-  | "connecting"
-  | "reconnecting"
-  | "connected"
-  | "queued"
-  | "in_game"
-  | "error";
-
-// ─── State machine ────────────────────────────────────────────────────────────
-
-export type FriendInvitation = {
-  fromId: string;
-  fromName: string;
-  roomCode: string;
-};
-
-type State = {
-  status: SocketStatus;
-  game: OnlineGame | null;
-  error: string | null;
-  roomCode: string | null;
-  opponentDisconnected: boolean;
-  friendInvitation: FriendInvitation | null;
-};
-
-type Action =
-  | { type: "CONNECTING" }
-  | { type: "CONNECTED" }
-  | { type: "DISCONNECTED" }
-  | { type: "RECONNECTING" }
-  | { type: "ERROR"; error: string }
-  | { type: "QUEUED" }
-  | { type: "QUEUE_LEFT" }
-  | { type: "ROOM_CREATED"; code: string }
-  | { type: "GAME_STARTED"; game: OnlineGame }
-  | { type: "MOVE_MADE"; fen: string; turn: GameColor; check: boolean; lastMove: { from: string; to: string } | null; whiteTimeMs: number | null; blackTimeMs: number | null }
-  | { type: "GAME_OVER"; winnerId: string | null; reason: string }
-  | { type: "OPPONENT_DISCONNECTED" }
-  | { type: "MOVE_ERROR"; error: string }
-  | { type: "OPPONENT_RECONNECTED" }
-  | { type: "CLEAR_GAME"; connected: boolean }
-  | { type: "FRIEND_INVITATION"; invitation: FriendInvitation }
-  | { type: "DISMISS_INVITATION" };
-
-const initialState: State = {
-  status: "idle",
-  game: null,
-  error: null,
-  roomCode: null,
-  opponentDisconnected: false,
-  friendInvitation: null,
-};
-
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case "CONNECTING":
-      return { ...initialState, status: "connecting" };
-    case "CONNECTED":
-      return { ...state, status: "connected", error: null };
-    case "DISCONNECTED":
-      // Se havia partida ativa, mantém o game e vai para reconnecting
-      return state.game && state.status === "in_game"
-        ? { ...state, status: "reconnecting" }
-        : { ...state, status: "idle" };
-    case "RECONNECTING":
-      return { ...state, status: "reconnecting" };
-    case "ERROR":
-      return { ...state, status: "error", error: action.error };
-    case "QUEUED":
-      return { ...state, status: "queued" };
-    case "QUEUE_LEFT":
-      return { ...state, status: "connected", roomCode: null };
-    case "ROOM_CREATED":
-      return { ...state, status: "queued", roomCode: action.code };
-    case "GAME_STARTED":
-      return {
-        ...state,
-        status: "in_game",
-        game: action.game,
-        roomCode: null,
-        opponentDisconnected: false,
-        error: null,
-      };
-    case "MOVE_MADE":
-      if (!state.game) return state;
-      return {
-        ...state,
-        game: {
-          ...state.game,
-          fen: action.fen,
-          turn: action.turn,
-          check: action.check,
-          lastMove: action.lastMove,
-          whiteTimeMs: action.whiteTimeMs ?? state.game.whiteTimeMs,
-          blackTimeMs: action.blackTimeMs ?? state.game.blackTimeMs,
-        },
-      };
-    case "GAME_OVER":
-      if (!state.game) return state;
-      return {
-        ...state,
-        game: {
-          ...state.game,
-          gameOver: { winnerId: action.winnerId, reason: action.reason },
-        },
-      };
-    case "OPPONENT_DISCONNECTED":
-      return { ...state, opponentDisconnected: true };
-    case "OPPONENT_RECONNECTED":
-      return { ...state, opponentDisconnected: false };
-    case "MOVE_ERROR":
-      return { ...state, error: action.error };
-    case "CLEAR_GAME":
-      return {
-        ...state,
-        game: null,
-        opponentDisconnected: false,
-        status: action.connected ? "connected" : "idle",
-        error: null,
-      };
-    case "FRIEND_INVITATION":
-      return { ...state, friendInvitation: action.invitation };
-    case "DISMISS_INVITATION":
-      return { ...state, friendInvitation: null };
-    default:
-      return state;
-  }
-}
+// Espelha o TTL do servidor (60s) com folga: expira localmente antes para o
+// modal/botão não ficarem pendentes indefinidamente se a resposta nunca chegar.
+const DRAW_OFFER_TIMEOUT_MS = 30_000;
+const DRAW_DECLINED_BANNER_MS = 4_000;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -182,7 +45,7 @@ export function useGameSocket() {
   // stateRef gives action callbacks always-current state without stale closures.
   const socketRef = useRef<Socket | null>(null);
   const tokenRef = useRef(token);
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(gameSocketReducer, initialState);
   const stateRef = useRef(state);
 
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -281,6 +144,10 @@ export function useGameSocket() {
       dispatch({ type: "OPPONENT_RECONNECTED" })
     );
 
+    socket.on("draw_offered", () => dispatch({ type: "DRAW_OFFER_RECEIVED" }));
+
+    socket.on("draw_declined", () => dispatch({ type: "DRAW_OFFER_DECLINED" }));
+
     socket.on("move_error", ({ message }: { message: string }) =>
       dispatch({ type: "MOVE_ERROR", error: message })
     );
@@ -310,6 +177,34 @@ export function useGameSocket() {
       socketRef.current = null;
     };
   }, [token]);
+
+  // Expiração local das propostas de empate pendentes
+  useEffect(() => {
+    if (!state.incomingDrawOffer) return;
+    const t = setTimeout(
+      () => dispatch({ type: "INCOMING_DRAW_CLEARED" }),
+      DRAW_OFFER_TIMEOUT_MS
+    );
+    return () => clearTimeout(t);
+  }, [state.incomingDrawOffer]);
+
+  useEffect(() => {
+    if (!state.outgoingDrawOffer) return;
+    const t = setTimeout(
+      () => dispatch({ type: "OUTGOING_DRAW_CLEARED" }),
+      DRAW_OFFER_TIMEOUT_MS
+    );
+    return () => clearTimeout(t);
+  }, [state.outgoingDrawOffer]);
+
+  useEffect(() => {
+    if (!state.drawOfferDeclined) return;
+    const t = setTimeout(
+      () => dispatch({ type: "DISMISS_DRAW_DECLINED" }),
+      DRAW_DECLINED_BANNER_MS
+    );
+    return () => clearTimeout(t);
+  }, [state.drawOfferDeclined]);
 
   // ─── Actions ────────────────────────────────────────────────────────────────
   // All callbacks have stable references (empty deps).
@@ -353,6 +248,32 @@ export function useGameSocket() {
     socket.emit("resign", { game_id: game.gameId });
   }, []);
 
+  const offerDraw = useCallback(() => {
+    const socket = socketRef.current;
+    const { game, outgoingDrawOffer } = stateRef.current;
+    if (!socket?.connected || !game || game.gameOver || outgoingDrawOffer) return;
+    socket.emit("offer_draw", { game_id: game.gameId });
+    dispatch({ type: "DRAW_OFFER_SENT" });
+  }, []);
+
+  const acceptDraw = useCallback(() => {
+    const socket = socketRef.current;
+    const { game, incomingDrawOffer } = stateRef.current;
+    if (!socket?.connected || !game || !incomingDrawOffer) return;
+    socket.emit("accept_draw", { game_id: game.gameId });
+    dispatch({ type: "INCOMING_DRAW_CLEARED" });
+  }, []);
+
+  const declineDraw = useCallback(() => {
+    const socket = socketRef.current;
+    const { game, incomingDrawOffer } = stateRef.current;
+    if (!incomingDrawOffer) return;
+    if (socket?.connected && game) {
+      socket.emit("decline_draw", { game_id: game.gameId });
+    }
+    dispatch({ type: "INCOMING_DRAW_CLEARED" });
+  }, []);
+
   const clearGame = useCallback(() => {
     dispatch({ type: "CLEAR_GAME", connected: socketRef.current?.connected ?? false });
   }, []);
@@ -375,12 +296,18 @@ export function useGameSocket() {
     roomCode: state.roomCode,
     opponentDisconnected: state.opponentDisconnected,
     friendInvitation: state.friendInvitation,
+    incomingDrawOffer: state.incomingDrawOffer,
+    outgoingDrawOffer: state.outgoingDrawOffer,
+    drawOfferDeclined: state.drawOfferDeclined,
     joinQueue,
     leaveQueue,
     createRoom,
     joinRoom,
     makeMove,
     resign,
+    offerDraw,
+    acceptDraw,
+    declineDraw,
     clearGame,
     inviteFriend,
     dismissInvitation,

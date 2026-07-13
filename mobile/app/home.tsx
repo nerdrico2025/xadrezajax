@@ -68,6 +68,12 @@ export default function Home() {
     joinRoom,
     makeMove,
     resign,
+    offerDraw,
+    acceptDraw,
+    declineDraw,
+    incomingDrawOffer,
+    outgoingDrawOffer,
+    drawOfferDeclined,
     clearGame,
     inviteFriend,
     dismissInvitation,
@@ -200,8 +206,14 @@ export default function Home() {
             opponentDisconnected={opponentDisconnected}
             moveError={socketError}
             isReconnecting={socketStatus === "reconnecting"}
+            incomingDrawOffer={incomingDrawOffer}
+            outgoingDrawOffer={outgoingDrawOffer}
+            drawOfferDeclined={drawOfferDeclined}
             onMakeMove={makeMove}
             onResign={resign}
+            onOfferDraw={offerDraw}
+            onAcceptDraw={acceptDraw}
+            onDeclineDraw={declineDraw}
             onLeave={handleLeaveOnline}
           />
         ) : activeScreen === "home" ? (
