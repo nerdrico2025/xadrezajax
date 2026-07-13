@@ -33,7 +33,7 @@ A auditoria confirmou: **apenas o item 0.5 foi iniciado** (hoje ✅ concluído �
 | 0.5 Trunk + qualidade de CI | ✅ Código completo — aguardando CI verde no PR | `chore/trunk-stabilization` (PR pendente) |
 | 0.6-A Accent (base) | ✅ Entregue junto do 0.3 (mesmo PR) | `feature/rating-glicko2` |
 | 0.3 Glicko-2 (+0.6-B) | ✅ Código completo — ver §8 | `feature/rating-glicko2` |
-| 0.1 Assinaturas+PIX (+0.6-C) | ⬜ | — |
+| 0.1 Assinaturas Stripe (+0.6-C) | ✅ Código completo (cartão; PIX pendente de liberação da conta) — ver §10 | `feature/assinaturas-stripe` |
 | 0.2 Puzzles mobile (+0.6-D) | ⬜ | — |
 | 0.4 Onboarding | ✅ Código completo — ver §9 (antecipado; 0.1/0.2 seguem pendentes) | `feature/onboarding-3-toques` |
 
@@ -221,3 +221,14 @@ Executado antes de 0.1/0.2 (decisão do PM), na branch `feature/onboarding-3-toq
 - **Auto-login pós-cadastro**: o register não devolvia tokens e mandava redigitar credenciais no login — quebrava a meta de <90s/zero formulários. O mobile agora encadeia o login com as credenciais recém-digitadas e navega direto ao onboarding (fallback: fluxo antigo via /login se o auto-login falhar).
 - **Instrumentação**: `services/analytics.ts` (buffer local em memória, interface estável p/ provedor futuro) com `onboarding_started` / `onboarding_completed` (nível) / `first_game_started`.
 - **Testes**: backend 11 novos (níveis, seed por nível, idempotência, grandfathering, rating conquistado preservado, payload de login); mobile 7 novos (diagramas validados com chess.js — exatamente um tem mate em 1 —, buffer de analytics, fluxo completo da tela com aceite/erro/retry/já-onboardado).
+
+## 10. Item 0.1 fechado — Assinaturas via Stripe + 0.6-C (2026-07-13)
+
+Executado na branch `feature/assinaturas-stripe`. Decisões de escopo do PM: **Stripe com cartão via Checkout** (PIX aguarda liberação da conta — invite-only no Brasil; arquitetura pronta p/ múltiplos métodos sem refatorar), **sem RevenueCat** (APK direto, fora da Play Store), **sem plano Elite** (Fase 2), **trial de 7 dias via `subscription_data.trial_period_days` na Checkout Session** (não no Price).
+
+- **Backend — app novo `apps/payments/`**: `Subscription` agnóstica a provedor (OneToOne c/ Profile; plan monthly/annual; status trialing/active/past_due/canceled; provider; ids do Stripe; datas) — **Grátis = ausência de linha**, nunca erro. `PaymentEvent.event_id` unique = idempotência de webhook. `Profile.stripe_customer_id` (users 0011) evita duplicar Customer.
+- **Endpoints**: `POST /api/v1/payments/stripe/checkout/` (autenticado; cria/reusa Customer; Checkout Session com price do env, trial 7d, metadata user/plan); **`POST /api/v1/payments/stripe/webhook/`** (valida assinatura; erro claro se `STRIPE_WEBHOOK_SECRET` ausente, sem crash de boot; processa checkout.session.completed, invoice.payment_succeeded/failed, customer.subscription.updated/deleted; tolera os dois formatos de API do Stripe p/ `current_period_end` e `invoice.subscription`, que mudaram de lugar nas versões 2025+); `GET /api/v1/payments/stripe/return/` (página http mínima → deep link `ajax://subscription-return`, porque o Checkout não aceita scheme customizado); `GET /api/v1/payments/subscription/` (fonte de verdade do plano p/ o app).
+- **Gating RF-MON-05**: `apps/payments/access.py` — `has_paid_access` (genérico, o 0.2 reaproveita) + `can_play_game` (5 partidas/dia no Grátis, IA+online via GameHistory). Trava real no backend em `AiGameResultView` (403 `daily_limit_reached` na 6ª do dia). Enforcement pré-partida online (matchmaking do node-api) fica como follow-up.
+- **Mobile**: `SubscriptionScreen` real — preços do PRD (Mensal R$ 39,90 / Anual R$ 359), seleção de plano, CTA dourado "Assinar — 7 dias grátis", checkout via `WebBrowser.openAuthSessionAsync` (navegador de sistema; sem WebView própria p/ PCI/3DS), retorno por deep link com reconsulta ao backend (cancelar não é erro), selo dourado "Premium ativo" com trial/renovação. **0.6-C completo**: CTA + selo + destaque do próprio rating no Leaderboard em `colors.accent`.
+- **Testes**: backend 23 novos (checkout mockado, cada evento de webhook + idempotência, gating bloqueando a 6ª partida e liberando trialing/active, perfil sem Subscription = grátis); mobile 6 novos (preços do PRD, fluxo de assinatura anual/mensal, cancelamento sem erro, estado Premium).
+- **Pós-merge (ação do PM)**: cadastrar `POST /api/v1/payments/stripe/webhook/` no Dashboard do Stripe e definir `STRIPE_WEBHOOK_SECRET` no ambiente.
