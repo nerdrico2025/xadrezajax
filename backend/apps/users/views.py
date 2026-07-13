@@ -417,10 +417,13 @@ class GameResultView(APIView):
     Chamado internamente pelo node-api ao fim de cada partida.
     Atualiza wins/losses/draws/games_played e recalcula ELO dos dois jogadores.
     Autenticado por INTERNAL_API_SECRET no header X-Internal-Secret.
+    Sem throttle: é tráfego interno do node-api — o AnonRateThrottle global
+    (20/min por IP) descartaria resultados em horário de pico de partidas.
     """
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = []
 
     def post(self, request):
         secret = request.headers.get("X-Internal-Secret", "")

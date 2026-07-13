@@ -8,6 +8,7 @@ payloads antigos (sem time_control) e com o histórico Elo migrado.
 """
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
@@ -321,6 +322,12 @@ class AiGameResultViewGlickoTests(APITestCase):
 
 @override_settings(INTERNAL_API_SECRET=INTERNAL_SECRET)
 class LeaderboardModalityTests(APITestCase):
+    def setUp(self):
+        # O leaderboard é público e throttled (anon 20/min); no CI a suíte
+        # inteira compartilha o contador via Redis — zera para não herdar
+        # requisições anônimas dos testes anteriores.
+        cache.clear()
+
     def make_player(self, email, blitz=None, bullet=None):
         user = User.objects.create_user(
             email=email, full_name=email.split("@")[0], password="Xadrez@2024"
