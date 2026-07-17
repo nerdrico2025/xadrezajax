@@ -34,6 +34,18 @@ export class DailyPuzzleLimitError extends Error {
   }
 }
 
+/**
+ * 404 do backend quando não há nenhum puzzle disponível (banco não semeado).
+ * Distingue "acabou o conteúdo" de "erro de rede" para a tela mostrar um
+ * estado vazio decente em vez do erro genérico com retry.
+ */
+export class NoPuzzlesAvailableError extends Error {
+  code = "no_puzzles" as const;
+  constructor() {
+    super("Nenhum puzzle disponível");
+  }
+}
+
 // Dificuldade adaptativa (item 0.2): rating Glicko-2 blitz → dificuldade
 // do próximo puzzle. Thresholds documentados no PLANO_FASE0 §2.
 export function difficultyForRating(rating: number): PuzzleDifficulty {
@@ -67,6 +79,9 @@ export async function getNextPuzzle(
     const body = await res.json().catch(() => ({}));
     if (body?.code === "daily_limit_reached") throw new DailyPuzzleLimitError();
   }
+  // 404 = banco sem puzzles ("Nenhum puzzle disponível"): não é erro de rede,
+  // é ausência de conteúdo → estado vazio na tela.
+  if (res.status === 404) throw new NoPuzzlesAvailableError();
   if (!res.ok) throw new Error("Falha ao carregar o próximo puzzle");
   return res.json();
 }
