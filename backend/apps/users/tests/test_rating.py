@@ -381,6 +381,34 @@ class AiGameResultViewTests(APITestCase):
             GameHistory.objects.filter(user=self.user, rated=True).exists()
         )
 
+    def test_new_five_levels_accepted_and_labeled(self):
+        """PR C: os 5 níveis (incl. beginner/master) são aceitos e rotulados."""
+        cases = {
+            "beginner": "IA Iniciante",
+            "master": "IA Mestre",
+        }
+        for i, (difficulty, label) in enumerate(cases.items()):
+            resp = self.client.post(
+                AI_RESULT_URL,
+                {"result": "draw", "difficulty": difficulty, "time_control": 300},
+                format="json",
+            )
+            self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        labels = set(
+            GameHistory.objects.filter(user=self.user).values_list(
+                "opponent_name", flat=True
+            )
+        )
+        self.assertEqual(labels, set(cases.values()))
+
+    def test_invalid_difficulty_returns_400(self):
+        resp = self.client.post(
+            AI_RESULT_URL,
+            {"result": "win", "difficulty": "impossible", "time_control": 300},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
 
 @override_settings(INTERNAL_API_SECRET=INTERNAL_SECRET)
 class LeaderboardModalityTests(APITestCase):

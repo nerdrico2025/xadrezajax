@@ -22,14 +22,16 @@ import GameOverModal, { type GameResult } from "./GameOverModal";
 import CapturedPieces from "./CapturedPieces";
 import ConfirmModal from "@/components/ConfirmModal";
 import ChessClock from "@/components/ChessClock";
-import type { Difficulty } from "@/components/DifficultyModal";
-import type { PlayerColor, TimeControl } from "@/components/ColorPickerModal";
+import type { Difficulty, PlayerColor } from "@/constants/aiGame";
 
 interface GameScreenProps {
   onLeave?: () => void;
   difficulty?: Difficulty;
   playerColor?: PlayerColor;
-  timeControl?: TimeControl;
+  /** Base do relógio em segundos (null = sem limite). */
+  timeControl?: number | null;
+  /** Incremento Fischer em segundos (0 = sem incremento). */
+  increment?: number;
   savedGame?: SavedAiGame;
 }
 
@@ -50,6 +52,7 @@ export default function GameScreen({
   difficulty = "medium",
   playerColor = "w",
   timeControl = null,
+  increment = 0,
   savedGame,
 }: GameScreenProps) {
   const { theme } = useTheme();
@@ -73,7 +76,7 @@ export default function GameScreen({
   const isGameActive = moveCount > 0 && !gameResult;
 
   const [clockTimedOut, setClockTimedOut] = useState<"w" | "b" | null>(null);
-  const clock = useChessClock(timeControl, setClockTimedOut);
+  const clock = useChessClock(timeControl, setClockTimedOut, increment);
 
   // Ref always holds latest capture/count values so async callbacks can read them
   const capturesRef = useRef({ playerCaptures, aiCaptures, moveCount });

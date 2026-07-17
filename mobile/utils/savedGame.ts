@@ -1,5 +1,4 @@
-import type { Difficulty } from "@/components/DifficultyModal";
-import type { PlayerColor } from "@/components/ColorPickerModal";
+import type { Difficulty, PlayerColor } from "@/constants/aiGame";
 import { getItem, setItem, removeItem } from "./storage";
 
 const KEY = "savedAiGame";

@@ -347,10 +347,17 @@ class GoogleLoginView(APIView):
         return Response(build_auth_response(user), status=status.HTTP_200_OK)
 
 
-# Níveis de dificuldade aceitos no payload de partida vs IA. A partir do PR B
-# (decisão D1) a IA NUNCA afeta o Glicko-2, então não há mais oponente-IA com
-# rating/deviation próprios — só a validação do nível permanece.
-AI_RATING = {"easy": 800, "medium": 1200, "hard": 1600}
+# Níveis de dificuldade aceitos no payload de partida vs IA (PR C: 5 níveis).
+# A partir do PR B (decisão D1) a IA NUNCA afeta o Glicko-2, então não há mais
+# oponente-IA com rating/deviation próprios — o dicionário serve só para
+# validar o nível recebido e como Elo aproximado exibido na UI.
+AI_RATING = {
+    "beginner": 800,
+    "easy": 1100,
+    "medium": 1400,
+    "hard": 1700,
+    "master": 2000,
+}
 
 
 def _modality_from_time_control(seconds):
@@ -675,9 +682,11 @@ class AiGameResultView(APIView):
                 profile.save(update_fields=["wins", "losses", "draws", "games_played"])
 
                 difficulty_label = {
+                    "beginner": "IA Iniciante",
                     "easy": "IA Fácil",
                     "medium": "IA Médio",
                     "hard": "IA Difícil",
+                    "master": "IA Mestre",
                 }
                 GameHistory.objects.create(
                     user=request.user,

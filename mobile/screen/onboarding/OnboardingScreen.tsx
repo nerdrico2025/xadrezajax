@@ -26,7 +26,7 @@ import {
   type OnboardingFrequency,
 } from "@/constants/onboarding";
 import GameScreen from "@/screen/game/GameScreen";
-import type { Difficulty } from "@/components/DifficultyModal";
+import type { Difficulty } from "@/constants/aiGame";
 
 // Onboarding em 3 toques (item 0.4): 3 perguntas, 1 toque cada, zero campos
 // de texto. Tocar numa opção já avança — não há botão "avançar" (a meta do

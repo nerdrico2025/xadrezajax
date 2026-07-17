@@ -1,4 +1,5 @@
 import { API_URL } from "./api";
+import type { Difficulty } from "@/constants/aiGame";
 
 export type RatingModality = "bullet" | "blitz" | "rapid";
 
@@ -127,7 +128,7 @@ export async function getGameHistory(
 export async function reportAiResult(
   token: string,
   result: "win" | "loss" | "draw",
-  difficulty: "easy" | "medium" | "hard",
+  difficulty: Difficulty,
   // Segundos do relógio da partida (null = sem limite) — define a modalidade
   // Glicko-2 no backend (bullet < 3 min, blitz 3–10 min, rápido > 10/sem limite)
   timeControl: number | null = null

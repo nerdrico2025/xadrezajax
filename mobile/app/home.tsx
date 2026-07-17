@@ -12,8 +12,7 @@ import {
 import TopBar from "@/components/TopBar";
 import BottomBar, { type BottomTab } from "@/components/BottomBar";
 import OfflineBanner from "@/components/OfflineBanner";
-import DifficultyModal, { type Difficulty } from "@/components/DifficultyModal";
-import ColorPickerModal, { type PlayerColor, type TimeControl } from "@/components/ColorPickerModal";
+import type { ColorChoice, Difficulty, PlayerColor } from "@/constants/aiGame";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useGameSocket } from "@/hooks/useGameSocket";
@@ -21,9 +20,15 @@ import { useAuth } from "@/context/AuthContext";
 import { useFriends } from "@/hooks/useFriends";
 import { loadSavedGame, clearSavedGame, type SavedAiGame } from "@/utils/savedGame";
 import { checkAiGameAllowed } from "@/utils/preGameGate";
+import {
+  loadAiSetupPrefs,
+  saveAiSetupPrefs,
+  type AiSetupPrefs,
+} from "@/utils/aiSetupPrefs";
 
 import HomeScreen from "@/screen/home/HomeScreen";
 import GameScreen from "@/screen/game/GameScreen";
+import AiGameSetupScreen from "@/screen/game/AiGameSetupScreen";
 import PuzzleScreen from "@/screen/puzzles/PuzzleScreen";
 import OnlineGameScreen from "@/screen/game/OnlineGameScreen";
 import ProfileScreen from "@/screen/profile/ProfileScreen";
@@ -35,7 +40,7 @@ import MenuBottomSheet from "@/presentation/components/MenuBottomSheet";
 import { gameMenu, profileMenu } from "@/presentation/config/menuConfigs";
 
 type ActiveMenu = "game" | "profile" | null;
-type ActiveScreen = "home" | "play" | "puzzles" | "private_room" | "profile" | "settings" | "leaderboard" | "subscription";
+type ActiveScreen = "home" | "ai_setup" | "play" | "puzzles" | "private_room" | "profile" | "settings" | "leaderboard" | "subscription";
 
 export default function Home() {
   const { theme } = useTheme();
@@ -47,11 +52,11 @@ export default function Home() {
   const [activeScreen, setActiveScreen] = useState<ActiveScreen>("home");
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
   const [quickSearching, setQuickSearching] = useState(false);
-  const [showDifficulty, setShowDifficulty] = useState(false);
-  const [showColorPicker, setShowColorPicker] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [playerColor, setPlayerColor] = useState<PlayerColor>("w");
-  const [timeControl, setTimeControl] = useState<TimeControl>(180);
+  const [timeControl, setTimeControl] = useState<number | null>(300);
+  const [increment, setIncrement] = useState(0);
+  const [aiSetupInitial, setAiSetupInitial] = useState<AiSetupPrefs | null>(null);
   const [gameKey, setGameKey] = useState(0);
   const [savedGame, setSavedGame] = useState<SavedAiGame | null>(null);
   const [showContinueModal, setShowContinueModal] = useState(false);
@@ -156,6 +161,13 @@ export default function Home() {
     joinQueue(ONLINE_TIME_CONTROL, { username: user?.username, rating: user?.rating });
   }, [joinQueue, user]);
 
+  const openAiSetup = useCallback(async () => {
+    // Pré-seleciona a última configuração usada (PR C).
+    const prefs = await loadAiSetupPrefs();
+    setAiSetupInitial(prefs);
+    setActiveScreen("ai_setup");
+  }, []);
+
   const handleStartAI = useCallback(async () => {
     setActiveMenu(null);
     const saved = await loadSavedGame();
@@ -163,37 +175,45 @@ export default function Home() {
       setPendingSavedGame(saved);
       setShowContinueModal(true);
     } else {
-      setShowDifficulty(true);
+      await openAiSetup();
     }
-  }, []);
+  }, [openAiSetup]);
 
   const handleCancelQuickSearch = useCallback(() => {
     leaveQueue();
     setQuickSearching(false);
   }, [leaveQueue]);
 
-  const handleSelectDifficulty = useCallback((selected: Difficulty) => {
-    setDifficulty(selected);
-    setShowDifficulty(false);
-    setShowColorPicker(true);
-  }, []);
-
-  const handleSelectColor = useCallback(async (selected: PlayerColor, tc: TimeControl) => {
-    // Gating pré-jogo vs IA (RF-MON-05): bloqueia ANTES de o tabuleiro
-    // abrir. Partidas sem relógio são não-rateadas e passam direto.
-    const gate = await checkAiGameAllowed(token, tc);
-    if (!gate.allowed) {
-      setShowColorPicker(false);
-      showDailyLimitAlert();
-      return;
-    }
-    setPlayerColor(selected);
-    setTimeControl(tc);
-    setSavedGame(null);
-    setShowColorPicker(false);
-    setActiveScreen("play");
-    setGameKey((k) => k + 1);
-  }, [token, showDailyLimitAlert]);
+  const handleStartConfiguredGame = useCallback(
+    async (config: {
+      difficulty: Difficulty;
+      playerColor: PlayerColor;
+      color: ColorChoice;
+      timeControl: { id: string; base: number | null; increment: number };
+    }) => {
+      // Gating pré-jogo vs IA (RF-MON-05): bloqueia ANTES de o tabuleiro
+      // abrir. Partidas sem relógio são não-rateadas e passam direto.
+      const gate = await checkAiGameAllowed(token, config.timeControl.base);
+      if (!gate.allowed) {
+        showDailyLimitAlert();
+        return;
+      }
+      // Persiste a última configuração para pré-selecionar na próxima vez.
+      saveAiSetupPrefs({
+        difficulty: config.difficulty,
+        color: config.color,
+        timeId: config.timeControl.id,
+      });
+      setDifficulty(config.difficulty);
+      setPlayerColor(config.playerColor);
+      setTimeControl(config.timeControl.base);
+      setIncrement(config.timeControl.increment);
+      setSavedGame(null);
+      setActiveScreen("play");
+      setGameKey((k) => k + 1);
+    },
+    [token, showDailyLimitAlert]
+  );
 
   const handleLeaveOnline = useCallback(() => {
     clearGame();
@@ -260,6 +280,12 @@ export default function Home() {
             onPrivateRoom={() => { setActiveScreen("private_room"); }}
             onPlayPuzzles={() => { setActiveScreen("puzzles"); }}
           />
+        ) : activeScreen === "ai_setup" ? (
+          <AiGameSetupScreen
+            initial={aiSetupInitial}
+            onStart={handleStartConfiguredGame}
+            onBack={() => { setActiveScreen("home"); setActiveTab("home"); }}
+          />
         ) : activeScreen === "play" ? (
           <View style={styles.gameContainer}>
             <GameScreen
@@ -267,6 +293,7 @@ export default function Home() {
               difficulty={difficulty}
               playerColor={playerColor}
               timeControl={timeControl}
+              increment={increment}
               savedGame={savedGame ?? undefined}
               onLeave={() => setActiveScreen("home")}
             />
@@ -354,7 +381,7 @@ export default function Home() {
                 clearSavedGame().catch(() => {});
                 setPendingSavedGame(null);
                 setShowContinueModal(false);
-                setShowDifficulty(true);
+                openAiSetup();
               }}
             >
               <Text style={[styles.cancelText, { color: colors.error }]}>Novo jogo</Text>
@@ -362,18 +389,6 @@ export default function Home() {
           </View>
         </View>
       </Modal>
-
-      <DifficultyModal
-        visible={showDifficulty}
-        onSelect={handleSelectDifficulty}
-        onCancel={() => setShowDifficulty(false)}
-      />
-
-      <ColorPickerModal
-        visible={showColorPicker}
-        onSelect={handleSelectColor}
-        onCancel={() => setShowColorPicker(false)}
-      />
 
       <Modal
         visible={quickSearching && !showOnlineGame}

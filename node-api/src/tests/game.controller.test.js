@@ -4,7 +4,10 @@ const app = require("../../src/app");
 // Mocka o serviço do Stockfish para não precisar do binário nos testes
 jest.mock("../services/stockfish.service", () => ({
   getBestMove: jest.fn(),
-  DEPTH_BY_DIFFICULTY: { easy: 2, medium: 8, hard: 18 },
+  LEVELS: {
+    beginner: {}, easy: {}, medium: {}, hard: {}, master: {},
+  },
+  DEFAULT_LEVEL: "medium",
 }));
 
 const { getBestMove } = require("../services/stockfish.service");
@@ -29,15 +32,35 @@ describe("POST /api/v1/game/move", () => {
     expect(res.body).toHaveProperty("bestMove", "e7e5");
   });
 
-  test("repassa o FEN correto para o Stockfish", async () => {
+  test("sem difficulty/depth, usa o nível padrão", async () => {
     getBestMove.mockResolvedValue("d7d5");
 
     await request(app)
       .post("/api/v1/game/move")
       .send({ fen: VALID_FEN });
 
-    expect(getBestMove).toHaveBeenCalledWith(VALID_FEN, 8);
+    expect(getBestMove).toHaveBeenCalledWith(VALID_FEN, "medium");
     expect(getBestMove).toHaveBeenCalledTimes(1);
+  });
+
+  test("repassa o nível de dificuldade recebido", async () => {
+    getBestMove.mockResolvedValue("d7d5");
+
+    await request(app)
+      .post("/api/v1/game/move")
+      .send({ fen: VALID_FEN, difficulty: "beginner" });
+
+    expect(getBestMove).toHaveBeenCalledWith(VALID_FEN, "beginner");
+  });
+
+  test("compatibilidade: aceita depth numérico legado", async () => {
+    getBestMove.mockResolvedValue("d7d5");
+
+    await request(app)
+      .post("/api/v1/game/move")
+      .send({ fen: VALID_FEN, depth: 12 });
+
+    expect(getBestMove).toHaveBeenCalledWith(VALID_FEN, 12);
   });
 
   // ── Validação de entrada ───────────────────────────────────────────
