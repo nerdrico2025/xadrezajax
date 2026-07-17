@@ -92,6 +92,85 @@ function pressText(root: ReactTestInstance, text: string) {
 
 afterEach(() => {
   jest.clearAllMocks();
+  jest.useRealTimers();
+});
+
+const { getBestMove } = jest.requireMock("@/services/game");
+
+// Renderiza com o jogador de PRETAS: a IA (brancas) joga primeiro no mount,
+// exercitando o fluxo "Pensando" / timeout.
+async function renderAiTurn(difficulty = "medium") {
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {
+    tree = renderer.create(
+      <GameScreen difficulty={difficulty as any} playerColor="b" timeControl={null} />
+    );
+  });
+  return tree;
+}
+
+function hasLabel(root: ReactTestInstance, label: string) {
+  return root.findAll((n) => n.props?.accessibilityLabel === label).length > 0;
+}
+
+describe("percepção de travamento na jogada da IA (PR D, item 8)", () => {
+  it("mostra o indicador 'Pensando' enquanto a IA calcula (sem overlay)", async () => {
+    getBestMove.mockReturnValueOnce(new Promise(() => {})); // nunca resolve
+    const tree = await renderAiTurn();
+
+    // Indicador não-bloqueante presente; o tabuleiro segue montado.
+    expect(hasLabel(tree.root, "A IA está pensando")).toBe(true);
+    expect(hasText(tree.root, "Pensando")).toBe(true);
+  });
+
+  it("piso humanizado: a jogada da IA não aparece antes de 400ms", async () => {
+    jest.useFakeTimers();
+    getBestMove.mockResolvedValueOnce("e2e4"); // responde na hora
+    const tree = await renderAiTurn("easy");
+
+    // Antes do piso, ainda 'Pensando' (a jogada foi segurada).
+    expect(hasLabel(tree.root, "A IA está pensando")).toBe(true);
+
+    // Passa do piso (easy: 400–800ms) → deixa de pensar.
+    await act(async () => {
+      jest.advanceTimersByTime(900);
+    });
+    expect(hasLabel(tree.root, "A IA está pensando")).toBe(false);
+  });
+
+  it("falha/timeout da IA mostra erro tratado, sem limbo silencioso", async () => {
+    jest.useFakeTimers();
+    getBestMove.mockRejectedValueOnce(new Error("boom"));
+    const tree = await renderAiTurn();
+
+    await act(async () => {
+      jest.advanceTimersByTime(1300);
+    });
+
+    expect(hasText(tree.root, "A IA não respondeu")).toBe(true);
+    expect(hasText(tree.root, "Tentar novamente")).toBe(true);
+    expect(hasText(tree.root, "Sair")).toBe(true);
+  });
+
+  it("'Tentar novamente' re-solicita a jogada à engine", async () => {
+    jest.useFakeTimers();
+    getBestMove.mockRejectedValueOnce(new Error("boom"));
+    const tree = await renderAiTurn();
+    await act(async () => {
+      jest.advanceTimersByTime(1300);
+    });
+    expect(hasText(tree.root, "A IA não respondeu")).toBe(true);
+    expect(getBestMove).toHaveBeenCalledTimes(1);
+
+    getBestMove.mockResolvedValueOnce("e2e4");
+    pressText(tree.root, "Tentar novamente");
+    await act(async () => {
+      jest.advanceTimersByTime(1300);
+    });
+
+    expect(getBestMove).toHaveBeenCalledTimes(2);
+    expect(hasText(tree.root, "A IA não respondeu")).toBe(false);
+  });
 });
 
 describe("clareza dos botões do cabeçalho (vs IA)", () => {
