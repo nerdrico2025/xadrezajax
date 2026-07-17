@@ -5,6 +5,7 @@ import { configureReanimatedLogger, ReanimatedLogLevel } from "react-native-rean
 
 import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { BoardThemeProvider } from "@/context/BoardThemeContext";
 
 configureReanimatedLogger({
   level: ReanimatedLogLevel.warn,
@@ -58,8 +59,10 @@ export default function Layout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
         <ThemeProvider>
-          <RouteGuard />
-          <Stack screenOptions={{ headerShown: false }} />
+          <BoardThemeProvider>
+            <RouteGuard />
+            <Stack screenOptions={{ headerShown: false }} />
+          </BoardThemeProvider>
         </ThemeProvider>
       </AuthProvider>
     </GestureHandlerRootView>
