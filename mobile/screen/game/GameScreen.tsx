@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { getBestMove } from "@/services/game";
 import { parseUciMove } from "@/utils/chessSpecialMoves";
 import { reportAiResult } from "@/services/profile";
+import { logEvent } from "@/services/analytics";
 import { saveGame, clearSavedGame, type SavedAiGame } from "@/utils/savedGame";
 import { useChessSound } from "@/hooks/useChessSound";
 import { useChessClock } from "@/hooks/useChessClock";
@@ -88,8 +89,19 @@ export default function GameScreen({
     clearSavedGame().catch(() => {});
     setGameResult(result);
     if (authToken) {
-      // timeControl define a modalidade Glicko-2 (bullet/blitz/rapid) no backend
-      reportAiResult(authToken, result.outcome, difficulty, timeControl).catch(() => {});
+      // Persiste a partida vs IA no histórico/estatísticas (decisão D1: nunca
+      // altera o rating). Falha não pode ser silenciosa — era a causa provável
+      // de partidas "sumirem" do Perfil (diagnóstico do PR B).
+      reportAiResult(authToken, result.outcome, difficulty, timeControl).catch(
+        (e) => {
+          console.error("[ai-result] falha ao registrar partida vs IA", e);
+          logEvent("ai_result_error", {
+            difficulty,
+            time_control: timeControl,
+            message: (e as Error)?.message,
+          });
+        }
+      );
     }
   }, [authToken, difficulty, clock, timeControl]);
 

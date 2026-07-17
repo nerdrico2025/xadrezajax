@@ -163,6 +163,17 @@ class GameHistory(models.Model):
     )
     rating_before = models.IntegerField()
     rating_after = models.IntegerField()
+    # Fonte do split de estatísticas do Perfil (decisão D2): partidas
+    # ranqueadas (com relógio contra humanos) vs. "vs IA e Amistosas".
+    # False = partida vs IA (qualquer) ou sem relógio: entra no histórico e
+    # nas estatísticas, mas NUNCA alterou o Glicko-2 (decisão D1).
+    rated = models.BooleanField(
+        default=True,
+        help_text=(
+            "False para partidas vs IA e sem relógio — contam no histórico e "
+            "nas estatísticas, mas não alteram o rating."
+        ),
+    )
     played_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

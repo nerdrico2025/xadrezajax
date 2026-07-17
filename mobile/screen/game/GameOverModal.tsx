@@ -80,6 +80,11 @@ export default function GameOverModal({
             {REASON_LABEL[result.reason]}
           </Text>
 
+          {/* Clareza no fim da partida vs IA (decisão D1): sem jargão técnico. */}
+          <Text style={[styles.ratingNote, { color: colors.secondary }]}>
+            Partida contra a IA — seu rating não mudou.
+          </Text>
+
           <View style={styles.buttons}>
             <Pressable
               style={[styles.button, { backgroundColor: colors.primary }]}
@@ -129,7 +134,12 @@ const styles = StyleSheet.create({
   },
   reason: {
     fontSize: 15,
-    marginBottom: 32,
+    marginBottom: 12,
+  },
+  ratingNote: {
+    fontSize: 13,
+    textAlign: "center",
+    marginBottom: 28,
   },
   buttons: {
     width: "100%",

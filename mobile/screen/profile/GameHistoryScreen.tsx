@@ -13,11 +13,21 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/context/AuthContext";
 import { Colors } from "@/constants/theme";
-import { getGameHistory, type GameHistoryEntry } from "@/services/profile";
+import {
+  getGameHistory,
+  type GameHistoryEntry,
+  type HistoryFilter,
+} from "@/services/profile";
 
 interface Props {
   onBack: () => void;
 }
+
+const FILTERS: { key: HistoryFilter; label: string }[] = [
+  { key: "all", label: "Todas" },
+  { key: "ranked", label: "Ranqueadas" },
+  { key: "ai", label: "vs IA" },
+];
 
 export default function GameHistoryScreen({ onBack }: Props) {
   const { theme } = useTheme();
@@ -26,6 +36,7 @@ export default function GameHistoryScreen({ onBack }: Props) {
   const { token } = useAuth();
 
   const [history, setHistory] = useState<GameHistoryEntry[]>([]);
+  const [filter, setFilter] = useState<HistoryFilter>("all");
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -35,7 +46,7 @@ export default function GameHistoryScreen({ onBack }: Props) {
   const load = useCallback(async (offset = 0) => {
     if (!token) return;
     try {
-      const data = await getGameHistory(token, LIMIT, offset);
+      const data = await getGameHistory(token, LIMIT, offset, filter);
       if (offset === 0) setHistory(data);
       else setHistory((prev) => [...prev, ...data]);
       setHasMore(data.length === LIMIT);
@@ -45,9 +56,10 @@ export default function GameHistoryScreen({ onBack }: Props) {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [token]);
+  }, [token, filter]);
 
-  useEffect(() => { load(0); }, [load]);
+  // Recarrega do zero quando o filtro muda (e no mount).
+  useEffect(() => { setLoading(true); load(0); }, [load]);
 
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore) return;
@@ -78,10 +90,22 @@ export default function GameHistoryScreen({ onBack }: Props) {
           <Text style={[styles.meta, { color: colors.secondary }]}>
             {modeLabel} · {date}
           </Text>
+          {!item.rated && (
+            <Text style={[styles.unratedTag, { color: colors.secondary }]}>
+              Não valida rating
+            </Text>
+          )}
         </View>
         <View style={styles.rowRight}>
-          <Text style={[styles.delta, { color: deltaColor }]}>{delta}</Text>
-          <Text style={[styles.rating, { color: colors.secondary }]}>{item.rating_after}</Text>
+          {/* Partida não ranqueada não move o rating: nada de delta enganoso. */}
+          {item.rated ? (
+            <>
+              <Text style={[styles.delta, { color: deltaColor }]}>{delta}</Text>
+              <Text style={[styles.rating, { color: colors.secondary }]}>{item.rating_after}</Text>
+            </>
+          ) : (
+            <Text style={[styles.rating, { color: colors.secondary }]}>—</Text>
+          )}
         </View>
       </View>
     );
@@ -96,6 +120,38 @@ export default function GameHistoryScreen({ onBack }: Props) {
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>Histórico</Text>
         <View style={{ width: 42 }} />
+      </View>
+
+      {/* Filtro: Todas | Ranqueadas | vs IA (decisão D2) */}
+      <View style={[styles.filterBar, { borderBottomColor: colors.divider }]}>
+        {FILTERS.map((f) => {
+          const active = filter === f.key;
+          return (
+            <Pressable
+              key={f.key}
+              onPress={() => setFilter(f.key)}
+              style={[
+                styles.filterChip,
+                {
+                  backgroundColor: active ? colors.accent + "22" : "transparent",
+                  borderColor: active ? colors.accent : colors.divider,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`Filtrar: ${f.label}`}
+              accessibilityState={{ selected: active }}
+            >
+              <Text
+                style={[
+                  styles.filterLabel,
+                  { color: active ? colors.accent : colors.secondary },
+                ]}
+              >
+                {f.label}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
 
       {loading ? (
@@ -139,6 +195,21 @@ const styles = StyleSheet.create({
   },
   backBtn: { padding: 8 },
   title: { fontSize: 17, fontWeight: "700" },
+  filterBar: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  filterLabel: { fontSize: 13, fontWeight: "600" },
+  unratedTag: { fontSize: 11, marginTop: 2, fontStyle: "italic" },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   empty: { fontSize: 14, textAlign: "center" },
   row: {

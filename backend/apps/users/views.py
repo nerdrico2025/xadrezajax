@@ -347,13 +347,10 @@ class GoogleLoginView(APIView):
         return Response(build_auth_response(user), status=status.HTTP_200_OK)
 
 
+# Níveis de dificuldade aceitos no payload de partida vs IA. A partir do PR B
+# (decisão D1) a IA NUNCA afeta o Glicko-2, então não há mais oponente-IA com
+# rating/deviation próprios — só a validação do nível permanece.
 AI_RATING = {"easy": 800, "medium": 1200, "hard": 1600}
-
-# A IA vira um oponente Glicko-2 de rating fixo por dificuldade (mesma escala
-# do Elo antigo) e deviation baixo constante: ela joga com força conhecida e
-# consistente, e não tem rating próprio a atualizar.
-AI_DEVIATION = 60.0
-AI_VOLATILITY = 0.06
 
 
 def _modality_from_time_control(seconds):
@@ -559,6 +556,7 @@ class GameResultView(APIView):
                     modality=modality,
                     rating_before=w_before,
                     rating_after=round(white_rating.rating),
+                    rated=not unrated,
                 )
                 GameHistory.objects.create(
                     user=black_profile.user,
@@ -568,6 +566,7 @@ class GameResultView(APIView):
                     modality=modality,
                     rating_before=b_before,
                     rating_after=round(black_rating.rating),
+                    rated=not unrated,
                 )
 
         except Profile.DoesNotExist:
@@ -606,7 +605,11 @@ class AiGameResultView(APIView):
         result = request.data.get("result")
         difficulty = request.data.get("difficulty", "medium")
         modality = _modality_from_request(request.data)
-        unrated = _is_unrated_request(request.data)
+        # Decisão D1: TODA partida vs IA é congelada para efeito de rating —
+        # nunca altera o Glicko-2, tenha relógio ou não. `no_clock` fica só
+        # para o gating do plano Grátis (que continua contando as partidas
+        # COM relógio, preservando a regra de monetização existente).
+        no_clock = _is_unrated_request(request.data)
 
         if result not in ("win", "loss", "draw"):
             return Response(
@@ -641,7 +644,7 @@ class AiGameResultView(APIView):
                 # decisão do PR #68) não são gateadas, mas continuam contando
                 # no GameHistory (a regra de contagem não muda).
                 allowed, remaining = can_play_game(profile)
-                if not unrated and not allowed:
+                if not no_clock and not allowed:
                     return Response(
                         {
                             "detail": (
@@ -655,32 +658,21 @@ class AiGameResultView(APIView):
                         status=status.HTTP_403_FORBIDDEN,
                     )
 
-                if unrated:
-                    # Partida sem relógio não mexe no rating: leitura sem
-                    # lock/criação, só para histórico e resposta.
-                    modality_rating = _modality_rating_snapshot(profile, modality)
-                else:
-                    modality_rating = _locked_modality_rating(profile, modality)
+                # D1: rating SEMPRE congelado numa partida vs IA — leitura sem
+                # lock/criação, só para preencher histórico e resposta. Nada de
+                # Glicko-2 nem de espelho Profile.rating aqui.
+                modality_rating = _modality_rating_snapshot(profile, modality)
                 rating_before = round(modality_rating.rating)
 
                 if result == "win":
-                    score, profile.wins = WIN, profile.wins + 1
+                    profile.wins += 1
                 elif result == "loss":
-                    score, profile.losses = LOSS, profile.losses + 1
+                    profile.losses += 1
                 else:
-                    score, profile.draws = DRAW, profile.draws + 1
+                    profile.draws += 1
 
-                if not unrated:
-                    ai_opponent = GlickoRating(
-                        AI_RATING[difficulty], AI_DEVIATION, AI_VOLATILITY
-                    )
-                    _apply_glicko2_result(modality_rating, ai_opponent, score)
-
-                    _sync_rating_mirror(profile, modality_rating)
                 profile.games_played += 1
-                profile.save(
-                    update_fields=["rating", "wins", "losses", "draws", "games_played"]
-                )
+                profile.save(update_fields=["wins", "losses", "draws", "games_played"])
 
                 difficulty_label = {
                     "easy": "IA Fácil",
@@ -694,7 +686,8 @@ class AiGameResultView(APIView):
                     mode=GameHistory.MODE_AI,
                     modality=modality,
                     rating_before=rating_before,
-                    rating_after=round(modality_rating.rating),
+                    rating_after=rating_before,  # D1: rating não muda
+                    rated=False,
                 )
         except Profile.DoesNotExist:
             return Response(
@@ -830,8 +823,13 @@ class OnboardingView(APIView):
 
 class GameHistoryView(APIView):
     """
-    GET /api/v1/auth/game/history/?limit=20&offset=0
+    GET /api/v1/auth/game/history/?limit=20&offset=0&filter=all|ranked|ai
     Retorna histórico de partidas do usuário autenticado.
+
+    filter (decisão D2):
+      all    → todas (padrão)
+      ranked → só ranqueadas (rated=True)
+      ai     → só partidas vs IA (mode="ai")
     """
 
     permission_classes = [IsAuthenticated]
@@ -841,8 +839,14 @@ class GameHistoryView(APIView):
 
         limit = min(int(request.query_params.get("limit", 20)), 100)
         offset = int(request.query_params.get("offset", 0))
+        filt = request.query_params.get("filter", "all")
 
-        qs = GameHistory.objects.filter(user=request.user)[offset : offset + limit]
+        qs = GameHistory.objects.filter(user=request.user)
+        if filt == "ranked":
+            qs = qs.filter(rated=True)
+        elif filt == "ai":
+            qs = qs.filter(mode=GameHistory.MODE_AI)
+
         data = [
             {
                 "id": g.id,
@@ -850,12 +854,13 @@ class GameHistoryView(APIView):
                 "result": g.result,
                 "mode": g.mode,
                 "modality": g.modality,
+                "rated": g.rated,
                 "rating_before": g.rating_before,
                 "rating_after": g.rating_after,
                 "rating_delta": g.rating_after - g.rating_before,
                 "played_at": g.played_at.isoformat(),
             }
-            for g in qs
+            for g in qs[offset : offset + limit]
         ]
         return Response(data)
 

@@ -11,6 +11,14 @@ export interface ModalityRating {
   provisional: boolean;
 }
 
+/** Bloco de estatísticas do Perfil (decisão D2) — nunca somar os dois. */
+export interface StatsBlock {
+  wins: number;
+  losses: number;
+  draws: number;
+  total: number;
+}
+
 export interface UserProfile {
   email: string;
   full_name: string;
@@ -24,6 +32,10 @@ export interface UserProfile {
   wins: number;
   losses: number;
   draws: number;
+  /** Partidas com relógio contra humanos — a única fonte do rating. */
+  stats_ranked: StatsBlock;
+  /** Partidas contra a IA e sem relógio — não alteram o rating. */
+  stats_casual: StatsBlock;
   date_joined: string;
   friends_count: number;
 }
@@ -82,12 +94,16 @@ export async function uploadAvatar(
   return res.json();
 }
 
+export type HistoryFilter = "all" | "ranked" | "ai";
+
 export interface GameHistoryEntry {
   id: number;
   opponent_name: string;
   result: "win" | "loss" | "draw";
   mode: "ai" | "online";
   modality: RatingModality;
+  /** False = partida vs IA ou sem relógio (não alterou o rating). */
+  rated: boolean;
   rating_before: number;
   rating_after: number;
   rating_delta: number;
@@ -97,10 +113,11 @@ export interface GameHistoryEntry {
 export async function getGameHistory(
   token: string,
   limit = 20,
-  offset = 0
+  offset = 0,
+  filter: HistoryFilter = "all"
 ): Promise<GameHistoryEntry[]> {
   const res = await fetch(
-    `${API_URL}/api/v1/auth/game/history/?limit=${limit}&offset=${offset}`,
+    `${API_URL}/api/v1/auth/game/history/?limit=${limit}&offset=${offset}&filter=${filter}`,
     { headers: headers(token) }
   );
   if (!res.ok) throw new Error("Falha ao carregar histórico");

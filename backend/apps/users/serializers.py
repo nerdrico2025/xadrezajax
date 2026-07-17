@@ -92,6 +92,10 @@ class ProfileSerializer(serializers.ModelSerializer):
     avatar = serializers.ImageField(required=False, allow_null=True)
     friends_count = serializers.SerializerMethodField()
     ratings = serializers.SerializerMethodField()
+    # Decisão D2: dois blocos separados de estatística, derivados do
+    # GameHistory (nunca somados). "Ranqueadas" é a única fonte do rating.
+    stats_ranked = serializers.SerializerMethodField()
+    stats_casual = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
@@ -107,6 +111,8 @@ class ProfileSerializer(serializers.ModelSerializer):
             "wins",
             "losses",
             "draws",
+            "stats_ranked",
+            "stats_casual",
             "date_joined",
             "friends_count",
         ]
@@ -118,9 +124,31 @@ class ProfileSerializer(serializers.ModelSerializer):
             "wins",
             "losses",
             "draws",
+            "stats_ranked",
+            "stats_casual",
             "date_joined",
             "friends_count",
         ]
+
+    def _history_stats(self, obj, rated):
+        from django.db.models import Count, Q
+
+        from .models import GameHistory
+
+        return GameHistory.objects.filter(user=obj.user, rated=rated).aggregate(
+            wins=Count("id", filter=Q(result="win")),
+            losses=Count("id", filter=Q(result="loss")),
+            draws=Count("id", filter=Q(result="draw")),
+            total=Count("id"),
+        )
+
+    def get_stats_ranked(self, obj):
+        """Partidas com relógio contra humanos — a fonte do rating."""
+        return self._history_stats(obj, rated=True)
+
+    def get_stats_casual(self, obj):
+        """Partidas contra a IA e sem relógio — não alteram o rating."""
+        return self._history_stats(obj, rated=False)
 
     def get_ratings(self, obj):
         """Ratings Glicko-2 por modalidade; modalidades ainda não jogadas
