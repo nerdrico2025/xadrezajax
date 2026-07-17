@@ -1,4 +1,4 @@
-import type { Difficulty } from "@/components/DifficultyModal";
+import type { Difficulty } from "@/constants/aiGame";
 
 // Onboarding em 3 toques (item 0.4). O nível é calculado no backend
 // (POST /api/v1/auth/onboarding/); aqui fica só o que a UI precisa.

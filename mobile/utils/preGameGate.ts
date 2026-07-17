@@ -1,5 +1,4 @@
 import { canPlayGame } from "@/services/payments";
-import type { TimeControl } from "@/components/ColorPickerModal";
 
 // Gating pré-jogo vs IA (RF-MON-05, ajuste da PR #70): a checagem acontece
 // ANTES de o tabuleiro abrir, não no registro do resultado. O backend
@@ -11,7 +10,7 @@ export type PreGameGateResult =
 
 export async function checkAiGameAllowed(
   token: string | null,
-  timeControl: TimeControl
+  timeControl: number | null
 ): Promise<PreGameGateResult> {
   // Sem relógio = partida não-rateada (decisão do PR #68) — nunca gateada
   if (timeControl === null) return { allowed: true };
