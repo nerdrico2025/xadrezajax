@@ -249,3 +249,10 @@ Executado conforme o desenho do §2, na branch `feature/puzzles-mobile-ui`. Últ
 - **Home**: card "Puzzle do dia" no padrão dos cards existentes + chip de streak dourado (só aparece com streak > 0; falha de rede não quebra o card).
 - **Analytics**: `puzzle_started`, `puzzle_solved`, `paywall_shown` (source puzzles) no buffer do `services/analytics.ts`.
 - **Testes**: backend 13 novos (streak: consecutivos/quebra/ontem-ainda-vale/mesmo-dia; gating: contador no stats, 403 no next e no 4º solve, tentativa falha e re-solve livres, plano pago ilimitado) — suíte 110/110; mobile 12 novos (dificuldade adaptativa, solve com 1 e com 3 lances + resposta automática, lance errado, paywall com CTA, 403 → bloqueio, plano pago sem contador, thresholds e mapeamento de erro do serviço) — suíte 79/79.
+
+## 13. Build de preview 1.2.0 — Fase 0 completa (2026-07-13)
+
+- Build `c683618f-db25-438c-88c8-d06151801bd3` (commit eccd36d, versão/runtime 1.2.0), perfil `preview`, ~64 min de fila+build (18:32 → 19:36) — primeiro APK com **toda a Fase 0 fechada**: soma o 1.1.0 (0.3 Glicko-2, 0.4 onboarding, 0.1 assinaturas+gating) e adiciona o **0.2 puzzles no mobile + 0.6-D** (tela interativa, streak, gating 3/dia). Entregue ao fundador para teste manual no dispositivo.
+- APK: https://expo.dev/artifacts/eas/PpNjTQRAnj6tatWFgX0oaXDZGhYKF4MAu6S5oVIX-wo.apk
+- Runtime version 1.2.0 reinicia o canal de OTA updates em relação ao 1.1.0 — esperado, ainda sem usuários em produção.
+- **Fase 0 encerrada no código**: todos os itens 0.1–0.6 concluídos e consolidados neste build.

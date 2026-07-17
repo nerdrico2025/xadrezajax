@@ -14,6 +14,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
+import { logEvent } from "@/services/analytics";
 import {
   createCheckoutSession,
   getSubscription,
@@ -50,6 +51,10 @@ export default function SubscriptionScreen({ onBack }: Props) {
   const { token } = useAuth();
 
   const [subscription, setSubscription] = useState<SubscriptionState | null>(null);
+  // Marca que a 1ª consulta ao backend já retornou (sucesso OU falha). O CTA
+  // fica desabilitado só até esse instante — nunca depende de `subscription`
+  // continuar não-nulo, senão uma falha silenciosa do GET travava o botão.
+  const [subLoaded, setSubLoaded] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PaidPlan>("annual");
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState("");
@@ -68,8 +73,15 @@ export default function SubscriptionScreen({ onBack }: Props) {
       const state = await getSubscription(token);
       setSubscription(state);
       return state;
-    } catch {
+    } catch (e) {
+      // Não bloqueia a tela: o backend é a fonte de verdade no checkout, então
+      // seguimos exibindo os planos mesmo sem conhecer o estado atual. Falha
+      // não fica silenciosa — vai para o log/analytics.
+      console.warn("[subscription] falha ao consultar o plano", e);
+      logEvent("subscription_fetch_error", { message: (e as Error)?.message });
       return null;
+    } finally {
+      setSubLoaded(true);
     }
   }, [token]);
 
@@ -101,7 +113,11 @@ export default function SubscriptionScreen({ onBack }: Props) {
         retryTimer.current = setTimeout(refreshSubscription, 3000);
       }
     } catch (e: any) {
-      setError(e?.message ?? "Não foi possível abrir o checkout.");
+      // Erro VISÍVEL ao usuário (em português) + registro no log/analytics.
+      const message = e?.message ?? "Não foi possível abrir o checkout.";
+      setError(message);
+      console.error("[subscription] falha no checkout", e);
+      logEvent("subscription_checkout_error", { plan: selectedPlan, message });
     } finally {
       setCheckoutLoading(false);
     }
@@ -204,7 +220,7 @@ export default function SubscriptionScreen({ onBack }: Props) {
         <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </Pressable>
-        <Text style={[styles.title, { color: colors.text }]}>Premium</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Seja um Membro</Text>
         <View style={{ width: 42 }} />
       </View>
 
@@ -215,9 +231,10 @@ export default function SubscriptionScreen({ onBack }: Props) {
         {/* Hero */}
         <View style={[styles.hero, { backgroundColor: colors.accent + "14", borderColor: colors.accent + "44" }]}>
           <Text style={styles.heroIcon}>♔</Text>
-          <Text style={[styles.heroTitle, { color: colors.text }]}>Xadrez Ajax Premium</Text>
+          <Text style={[styles.heroTitle, { color: colors.text }]}>Entre para o Clube</Text>
           <Text style={[styles.heroSub, { color: colors.secondary }]}>
-            Leve seu jogo ao próximo nível com recursos exclusivos
+            Faça parte da nossa comunidade enxadrística, receba treinamentos, dispute
+            torneios entre outros recursos exclusivos
           </Text>
         </View>
 
@@ -260,7 +277,7 @@ export default function SubscriptionScreen({ onBack }: Props) {
             <Pressable
               style={[styles.ctaBtn, { backgroundColor: colors.accent }]}
               onPress={handleSubscribe}
-              disabled={checkoutLoading || subscription === null}
+              disabled={checkoutLoading || !subLoaded}
               accessibilityRole="button"
               accessibilityLabel="Assinar com 7 dias grátis"
             >

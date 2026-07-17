@@ -22,6 +22,7 @@ import { parseUciMove } from "@/utils/chessSpecialMoves";
 import { logEvent } from "@/services/analytics";
 import {
   DailyPuzzleLimitError,
+  NoPuzzlesAvailableError,
   difficultyForRating,
   getNextPuzzle,
   getPuzzleStats,
@@ -35,7 +36,13 @@ type Props = {
   onUpgrade: () => void;
 };
 
-type ScreenState = "loading" | "playing" | "solved" | "limit" | "error";
+type ScreenState =
+  | "loading"
+  | "playing"
+  | "solved"
+  | "limit"
+  | "empty"
+  | "error";
 
 const CATEGORY_LABELS: Record<string, string> = {
   mate_in_1: "Mate em 1",
@@ -113,6 +120,9 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
       if (err instanceof DailyPuzzleLimitError) {
         logEvent("paywall_shown", { source: "puzzles" });
         setState("limit");
+      } else if (err instanceof NoPuzzlesAvailableError) {
+        // Banco sem conteúdo: estado vazio decente, não tela quebrada.
+        setState("empty");
       } else {
         setState("error");
       }
@@ -271,6 +281,23 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
             Verifique sua conexão e tente novamente.
           </Text>
           <Button title="Tentar novamente" onPress={loadPuzzle} />
+        </View>
+      )}
+
+      {state === "empty" && (
+        <View style={styles.center}>
+          <Ionicons name="extension-puzzle-outline" size={40} color={colors.secondary} />
+          <Text style={[styles.messageTitle, { color: colors.text }]}>
+            Puzzles chegando em breve
+          </Text>
+          <Text style={[styles.messageSub, { color: colors.secondary }]}>
+            Estamos preparando novos desafios táticos. Volte logo!
+          </Text>
+          <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button">
+            <Text style={[styles.backLink, { color: colors.secondary }]}>
+              Voltar ao início
+            </Text>
+          </Pressable>
         </View>
       )}
 

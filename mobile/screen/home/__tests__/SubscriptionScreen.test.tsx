@@ -138,6 +138,20 @@ describe("plano grátis (sem Subscription no backend)", () => {
     expect(hasText(tree.root, "Stripe indisponível")).toBe(true);
     expect(mockOpenAuthSession).not.toHaveBeenCalled();
   });
+
+  // Regressão do bug bloqueante v1.1.0: quando o GET /subscription/ falha, o
+  // CTA ficava desabilitado para sempre (subscription nunca saía de null) e o
+  // botão "não respondia ao toque". Agora o CTA reabilita assim que a 1ª
+  // consulta retorna — inclusive em erro — e o checkout segue funcionando.
+  it("CTA continua tocável mesmo se a consulta de plano falhar", async () => {
+    mockGetSubscription.mockRejectedValue(new Error("backend fora do ar"));
+    const tree = await render();
+
+    await pressLabel(tree.root, "Assinar com 7 dias grátis");
+
+    expect(mockCreateCheckout).toHaveBeenCalledWith("test-token", "annual");
+    expect(mockOpenAuthSession).toHaveBeenCalled();
+  });
 });
 
 describe("plano pago ativo (vindo do backend)", () => {

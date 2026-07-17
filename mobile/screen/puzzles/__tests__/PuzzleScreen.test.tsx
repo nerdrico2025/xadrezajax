@@ -54,7 +54,8 @@ jest.mock("@/services/puzzles", () => {
   };
 });
 
-const { DailyPuzzleLimitError } = jest.requireActual("@/services/puzzles");
+const { DailyPuzzleLimitError, NoPuzzlesAvailableError } =
+  jest.requireActual("@/services/puzzles");
 
 const FREE_STATS = {
   solved: 1,
@@ -210,6 +211,17 @@ describe("gating de 3 puzzles/dia do plano Grátis", () => {
     const tree = await render();
 
     expect(hasText(tree.root, "Você completou os puzzles de hoje!")).toBe(true);
+  });
+});
+
+describe("banco de puzzles sem conteúdo (404)", () => {
+  it("mostra estado vazio decente em vez de erro/tela branca", async () => {
+    mockGetNext.mockRejectedValue(new NoPuzzlesAvailableError());
+    const tree = await render();
+
+    expect(hasText(tree.root, "Puzzles chegando em breve")).toBe(true);
+    // Não é o estado de erro de rede
+    expect(hasText(tree.root, "Não foi possível carregar")).toBe(false);
   });
 
   it("plano pago não mostra contador de cota", async () => {
