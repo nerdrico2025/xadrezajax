@@ -292,8 +292,12 @@ class GameResultViewGlickoTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
-class AiGameResultViewGlickoTests(APITestCase):
-    """Partida vs IA: POST /game/ai-result/ pelo app autenticado."""
+class AiGameResultViewTests(APITestCase):
+    """Partida vs IA: POST /game/ai-result/ pelo app autenticado.
+
+    Decisão D1 (PR B): TODA partida vs IA é registrada no histórico e nas
+    estatísticas, mas NUNCA altera o Glicko-2 — tenha relógio ou não.
+    """
 
     def setUp(self):
         self.user = User.objects.create_user(
@@ -301,10 +305,10 @@ class AiGameResultViewGlickoTests(APITestCase):
         )
         self.client.force_authenticate(user=self.user)
 
-    def rating_of(self, modality):
-        return ModalityRating.objects.get(profile__user=self.user, modality=modality)
-
-    def test_win_creates_modality_rating_and_history(self):
+    def test_clocked_ai_win_persists_history_but_freezes_rating(self):
+        """O caso do bug reportado: partida vs IA COM relógio. Deve entrar no
+        histórico (mode=ai, rated=False) e contar nas estatísticas, mas o
+        rating tem de permanecer inalterado."""
         response = self.client.post(
             AI_RESULT_URL,
             {"result": "win", "difficulty": "medium", "time_control": 60},
@@ -312,12 +316,21 @@ class AiGameResultViewGlickoTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["modality"], "bullet")
-        self.assertGreater(response.data["rating"], 1500)
-        self.assertTrue(response.data["provisional"])
+        # Rating congelado no default — vitória vs IA não muda nada.
+        self.assertEqual(response.data["rating"], 1500)
+
+        # Nenhuma linha de ModalityRating criada: o Glicko-2 nem foi tocado.
+        self.assertFalse(
+            ModalityRating.objects.filter(profile__user=self.user).exists()
+        )
+        profile = Profile.objects.get(user=self.user)
+        self.assertEqual((profile.wins, profile.games_played), (1, 1))
+        self.assertEqual(profile.rating, 1200)  # espelho blitz intocado
 
         history = GameHistory.objects.get(user=self.user)
-        self.assertEqual(history.modality, "bullet")
         self.assertEqual(history.mode, GameHistory.MODE_AI)
+        self.assertFalse(history.rated)
+        self.assertEqual(history.rating_before, history.rating_after)
 
     def test_payload_without_time_control_defaults_to_blitz(self):
         """Compatibilidade: app antigo envia só result + difficulty."""
@@ -326,10 +339,11 @@ class AiGameResultViewGlickoTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["modality"], "blitz")
+        self.assertFalse(GameHistory.objects.get(user=self.user).rated)
 
-    def test_null_time_control_is_rapid_and_unrated(self):
-        """Partida sem relógio ("Sem limite"): modalidade rápido, mas não
-        rateada — conta stats/histórico e congela o rating."""
+    def test_null_time_control_also_freezes_rating(self):
+        """Partida sem relógio ("Sem limite"): modalidade rápido, também não
+        rateada."""
         response = self.client.post(
             AI_RESULT_URL,
             {"result": "win", "difficulty": "medium", "time_control": None},
@@ -338,59 +352,33 @@ class AiGameResultViewGlickoTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["modality"], "rapid")
         self.assertEqual(response.data["rating"], 1500)
-        self.assertEqual(response.data["deviation"], 350)
-        self.assertTrue(response.data["provisional"])
 
-        # Sem linha de rating criada; stats e histórico registrados
         self.assertFalse(
             ModalityRating.objects.filter(profile__user=self.user).exists()
         )
-        profile = Profile.objects.get(user=self.user)
-        self.assertEqual((profile.wins, profile.games_played), (1, 1))
-        self.assertEqual(profile.rating, 1200)  # espelho intocado
-
         history = GameHistory.objects.get(user=self.user)
         self.assertEqual(history.modality, "rapid")
+        self.assertFalse(history.rated)
         self.assertEqual(history.rating_before, history.rating_after)
 
-    def test_beating_hard_ai_pays_more_than_easy(self):
-        first = self.client.post(
-            AI_RESULT_URL,
-            {"result": "win", "difficulty": "hard", "time_control": 300},
-            format="json",
-        )
-        gain_hard = first.data["rating"] - 1500
-
-        other = User.objects.create_user(
-            email="p2@chess.com", full_name="P2", password="Xadrez@2024"
-        )
-        self.client.force_authenticate(user=other)
-        second = self.client.post(
-            AI_RESULT_URL,
-            {"result": "win", "difficulty": "easy", "time_control": 300},
-            format="json",
-        )
-        gain_easy = second.data["rating"] - 1500
-
-        self.assertGreater(gain_hard, gain_easy)
-
-    def test_ai_games_do_not_mix_modalities(self):
-        self.client.post(
-            AI_RESULT_URL,
-            {"result": "win", "difficulty": "medium", "time_control": 60},
-            format="json",
-        )
-        self.client.post(
-            AI_RESULT_URL,
-            {"result": "loss", "difficulty": "medium", "time_control": 600},
-            format="json",
-        )
-        self.assertEqual(self.rating_of("bullet").games_played, 1)
-        self.assertEqual(self.rating_of("blitz").games_played, 1)
+    def test_difficulty_never_changes_rating(self):
+        """Nem o nível da IA nem o resultado alteram o rating (D1). Antes do
+        PR B, vencer a IA 'difícil' com relógio subia o rating."""
+        for difficulty in ("easy", "medium", "hard"):
+            self.client.post(
+                AI_RESULT_URL,
+                {"result": "win", "difficulty": difficulty, "time_control": 300},
+                format="json",
+            )
+        profile = Profile.objects.get(user=self.user)
+        self.assertEqual(profile.rating, 1200)  # espelho intocado
         self.assertFalse(
-            ModalityRating.objects.filter(
-                profile__user=self.user, modality="rapid"
-            ).exists()
+            ModalityRating.objects.filter(profile__user=self.user).exists()
+        )
+        self.assertEqual(profile.wins, 3)
+        self.assertEqual(GameHistory.objects.filter(user=self.user).count(), 3)
+        self.assertFalse(
+            GameHistory.objects.filter(user=self.user, rated=True).exists()
         )
 
 
@@ -461,3 +449,92 @@ class ProfileRatingsTests(APITestCase):
             self.assertTrue(modality["provisional"])
         # Espelho Elo legado permanece no payload
         self.assertEqual(response.data["rating"], 1200)
+
+
+class ProfileStatsSplitTests(APITestCase):
+    """Decisão D2: dois blocos de estatística no Perfil, nunca somados."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="split@chess.com", full_name="Split", password="Xadrez@2024"
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def _history(self, result, mode, rated):
+        GameHistory.objects.create(
+            user=self.user,
+            opponent_name="X",
+            result=result,
+            mode=mode,
+            modality="blitz",
+            rating_before=1500,
+            rating_after=1500,
+            rated=rated,
+        )
+
+    def test_ranked_and_casual_blocks_are_separate(self):
+        # Ranqueadas: 2V 1D (online com relógio)
+        self._history("win", GameHistory.MODE_ONLINE, True)
+        self._history("win", GameHistory.MODE_ONLINE, True)
+        self._history("loss", GameHistory.MODE_ONLINE, True)
+        # vs IA / amistosas: 1V 1E
+        self._history("win", GameHistory.MODE_AI, False)
+        self._history("draw", GameHistory.MODE_AI, False)
+
+        data = self.client.get(PROFILE_URL).data
+        self.assertEqual(
+            data["stats_ranked"],
+            {"wins": 2, "losses": 1, "draws": 0, "total": 3},
+        )
+        self.assertEqual(
+            data["stats_casual"],
+            {"wins": 1, "losses": 0, "draws": 1, "total": 2},
+        )
+
+
+class GameHistoryFilterTests(APITestCase):
+    """Decisão D2: filtro Todas | Ranqueadas | vs IA."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="filter@chess.com", full_name="Filter", password="Xadrez@2024"
+        )
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse("users:game-history")
+        GameHistory.objects.create(
+            user=self.user,
+            opponent_name="Humano",
+            result="win",
+            mode=GameHistory.MODE_ONLINE,
+            modality="blitz",
+            rating_before=1500,
+            rating_after=1512,
+            rated=True,
+        )
+        GameHistory.objects.create(
+            user=self.user,
+            opponent_name="IA Médio",
+            result="loss",
+            mode=GameHistory.MODE_AI,
+            modality="blitz",
+            rating_before=1512,
+            rating_after=1512,
+            rated=False,
+        )
+
+    def test_filter_all_returns_both(self):
+        data = self.client.get(self.url).data
+        self.assertEqual(len(data), 2)
+        self.assertIn("rated", data[0])
+
+    def test_filter_ranked_excludes_ai(self):
+        data = self.client.get(self.url, {"filter": "ranked"}).data
+        self.assertEqual(len(data), 1)
+        self.assertTrue(data[0]["rated"])
+        self.assertEqual(data[0]["mode"], "online")
+
+    def test_filter_ai_returns_only_ai(self):
+        data = self.client.get(self.url, {"filter": "ai"}).data
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["mode"], "ai")
+        self.assertFalse(data[0]["rated"])

@@ -18,7 +18,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useProfile } from "@/hooks/useProfile";
 import { useAuth } from "@/context/AuthContext";
 import { Colors } from "@/constants/theme";
-import { avatarUrl } from "@/services/profile";
+import { avatarUrl, type StatsBlock } from "@/services/profile";
 import GameHistoryScreen from "./GameHistoryScreen";
 import FriendsScreen from "./FriendsScreen";
 import MenuBottomSheet from "@/presentation/components/MenuBottomSheet";
@@ -90,10 +90,6 @@ export default function ProfileScreen() {
   }
 
   const avatar = avatarUrl(profile?.avatar ?? null);
-  const winRate =
-    profile && profile.games_played > 0
-      ? Math.round((profile.wins / profile.games_played) * 100)
-      : 0;
 
   return (
     <>
@@ -204,22 +200,14 @@ export default function ProfileScreen() {
         </Pressable>
       </View>
 
-      {/* Stats */}
-      <View style={[styles.statsCard, { backgroundColor: colors.buttonSecondary + "40" }]}>
-        <StatItem label="Partidas" value={profile?.games_played ?? 0} color={colors.text} />
-        <View style={[styles.statDivider, { backgroundColor: colors.buttonSecondary }]} />
-        <StatItem label="Vitórias" value={profile?.wins ?? 0} color="#4CAF50" />
-        <View style={[styles.statDivider, { backgroundColor: colors.buttonSecondary }]} />
-        <StatItem label="Derrotas" value={profile?.losses ?? 0} color={colors.error} />
-        <View style={[styles.statDivider, { backgroundColor: colors.buttonSecondary }]} />
-        <StatItem label="Empates" value={profile?.draws ?? 0} color={colors.secondary} />
-      </View>
-
-      {profile && profile.games_played > 0 && (
-        <Text style={[styles.winRate, { color: colors.secondary }]}>
-          Taxa de vitória: {winRate}%
-        </Text>
-      )}
+      {/* Estatísticas — dois blocos separados, nunca somados (decisão D2) */}
+      <StatsBlockView title="Ranqueadas" stats={profile?.stats_ranked} colors={colors} />
+      <StatsBlockView
+        title="vs IA e Amistosas"
+        stats={profile?.stats_casual}
+        colors={colors}
+        footnote="Partidas contra a IA entram no seu histórico, mas não alteram seu rating."
+      />
 
       {/* Bio */}
       <View style={styles.bioSection}>
@@ -289,6 +277,38 @@ function StatItem({ label, value, color }: { label: string; value: number; color
   );
 }
 
+function StatsBlockView({
+  title,
+  stats,
+  colors,
+  footnote,
+}: {
+  title: string;
+  stats?: StatsBlock;
+  colors: Record<string, string>;
+  footnote?: string;
+}) {
+  const s = stats ?? { wins: 0, losses: 0, draws: 0, total: 0 };
+  return (
+    <View style={styles.statsBlock}>
+      {/* Título do bloco em dourado (decisão D3 / regra 6 do PR F) */}
+      <Text style={[styles.blockTitle, { color: colors.accent }]}>{title}</Text>
+      <View style={[styles.statsCard, { backgroundColor: colors.buttonSecondary + "40" }]}>
+        <StatItem label="Partidas" value={s.total} color={colors.text} />
+        <View style={[styles.statDivider, { backgroundColor: colors.buttonSecondary }]} />
+        <StatItem label="Vitórias" value={s.wins} color="#4CAF50" />
+        <View style={[styles.statDivider, { backgroundColor: colors.buttonSecondary }]} />
+        <StatItem label="Empates" value={s.draws} color={colors.secondary} />
+        <View style={[styles.statDivider, { backgroundColor: colors.buttonSecondary }]} />
+        <StatItem label="Derrotas" value={s.losses} color={colors.error} />
+      </View>
+      {footnote ? (
+        <Text style={[styles.blockFootnote, { color: colors.secondary }]}>{footnote}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   container: { alignItems: "center", paddingTop: 12, paddingHorizontal: 20 },
@@ -343,15 +363,20 @@ const styles = StyleSheet.create({
   ratingIcon: { fontSize: 18 },
   ratingValue: { fontSize: 20, fontWeight: "700" },
   ratingLabel: { fontSize: 13, fontWeight: "500" },
+  statsBlock: { width: "100%", marginBottom: 16 },
+  blockTitle: {
+    fontSize: 12, fontWeight: "700", textTransform: "uppercase",
+    letterSpacing: 0.8, marginBottom: 8,
+  },
+  blockFootnote: { fontSize: 12, lineHeight: 16, marginTop: 6 },
   statsCard: {
     flexDirection: "row", width: "100%", borderRadius: 16,
-    paddingVertical: 16, marginBottom: 8,
+    paddingVertical: 16,
   },
   statItem: { flex: 1, alignItems: "center", gap: 4 },
   statValue: { fontSize: 20, fontWeight: "700" },
   statLabel: { fontSize: 11, fontWeight: "500", opacity: 0.8 },
   statDivider: { width: 1, marginVertical: 4 },
-  winRate: { fontSize: 12, marginBottom: 20 },
   bioSection: { width: "100%", marginBottom: 24 },
   sectionLabel: { fontSize: 12, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 },
   bioText: { fontSize: 14, lineHeight: 20 },
