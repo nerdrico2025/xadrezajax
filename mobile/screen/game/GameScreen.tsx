@@ -1,4 +1,4 @@
-import { View, StyleSheet, Alert, ActivityIndicator, Pressable, Image, Text } from "react-native";
+import { View, StyleSheet, Alert, Pressable, Image, Text } from "react-native";
 import { useRef, useState, useEffect, useCallback } from "react";
 import Chessboard from "react-native-chessboard";
 import type { ChessboardRef } from "react-native-chessboard";
@@ -19,6 +19,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
 import GameOverModal, { type GameResult } from "./GameOverModal";
+import AiThinkingIndicator from "./AiThinkingIndicator";
 import CapturedPieces from "./CapturedPieces";
 import ConfirmModal from "@/components/ConfirmModal";
 import ChessClock from "@/components/ChessClock";
@@ -33,6 +34,35 @@ interface GameScreenProps {
   /** Incremento Fischer em segundos (0 = sem incremento). */
   increment?: number;
   savedGame?: SavedAiGame;
+}
+
+// Tempo de resposta humanizado da IA (PR D, item 8). Piso por nível — a
+// jogada nunca aparece antes disso, senão parece bug e não parece xadrez.
+// O piso NÃO soma ao tempo real: aplicamos max(tempoReal, piso).
+const AI_MIN_MS: Record<Difficulty, [number, number]> = {
+  beginner: [400, 800],
+  easy: [400, 800],
+  medium: [600, 1200],
+  hard: [600, 600],
+  master: [600, 600],
+};
+
+// Se a engine não responder em 10s, tratamos como falha (nunca deixar o jogo
+// em limbo silencioso).
+const AI_TIMEOUT_MS = 10000;
+
+function aiFloorMs(difficulty: Difficulty): number {
+  const [lo, hi] = AI_MIN_MS[difficulty];
+  return lo === hi ? lo : lo + Math.random() * (hi - lo);
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("ai_timeout")), ms)
+    ),
+  ]);
 }
 
 function detectGameOver(game: Chess, playerColor: PlayerColor): GameResult | null {
@@ -64,7 +94,12 @@ export default function GameScreen({
   const [game, setGame] = useState(() => savedGame ? new Chess(savedGame.fen) : new Chess());
   const [playerCaptures, setPlayerCaptures] = useState<string[]>(savedGame?.playerCaptures ?? []);
   const [aiCaptures, setAiCaptures] = useState<string[]>(savedGame?.aiCaptures ?? []);
+  // `loading` = IA calculando (bloqueia a entrada do jogador e mostra o
+  // indicador não-bloqueante "Pensando", nunca um overlay sobre o tabuleiro).
   const [loading, setLoading] = useState(false);
+  const [aiError, setAiError] = useState(false);
+  // Posição pendente para o "Tentar novamente" quando a IA falha/expira.
+  const pendingAiGameRef = useRef<Chess | null>(null);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [showDrawConfirm, setShowDrawConfirm] = useState(false);
@@ -120,13 +155,35 @@ export default function GameScreen({
   const playerAdvantage = playerMaterial - aiMaterial;
 
   const makeAIMove = useCallback(async (currentGame: Chess) => {
+    setAiError(false);
     setLoading(true);
-    const bestMove = await getBestMove(currentGame.fen(), difficulty);
-    await new Promise((resolve) => setTimeout(resolve, 300 + Math.random() * 400));
 
-    const parsed = parseUciMove(bestMove);
+    // A engine roda no node-api (fetch), fora da thread de UI — o cálculo
+    // não congela a interface. O piso de tempo abaixo é só percepção.
+    const startedAt = Date.now();
+    let bestMove: string | null = null;
+    try {
+      bestMove = await withTimeout(
+        getBestMove(currentGame.fen(), difficulty),
+        AI_TIMEOUT_MS
+      );
+    } catch {
+      bestMove = null;
+    }
+
+    // Piso humanizado: espera só o que FALTA para atingir o piso — nunca soma
+    // ao tempo real (max(tempoReal, piso)).
+    const remaining = aiFloorMs(difficulty) - (Date.now() - startedAt);
+    if (remaining > 0) {
+      await new Promise((resolve) => setTimeout(resolve, remaining));
+    }
+
+    const parsed = bestMove ? parseUciMove(bestMove) : null;
     if (!parsed) {
+      // Falha ou timeout da engine: nunca deixar o jogo em limbo silencioso.
+      pendingAiGameRef.current = currentGame;
       setLoading(false);
+      setAiError(true);
       return;
     }
 
@@ -203,6 +260,17 @@ export default function GameScreen({
   const handleResign = useCallback(() => {
     setShowResignConfirm(true);
   }, []);
+
+  const handleRetryAi = useCallback(() => {
+    setAiError(false);
+    const pending = pendingAiGameRef.current;
+    if (pending) makeAIMove(pending);
+  }, [makeAIMove]);
+
+  const handleAbandonAi = useCallback(() => {
+    setAiError(false);
+    onLeave?.();
+  }, [onLeave]);
 
   const onMove = async (data: any) => {
     try {
@@ -330,6 +398,14 @@ export default function GameScreen({
         </View>
       </View>
 
+      {/* Área do oponente (IA): indicador "Pensando" não-bloqueante, fora do
+          tabuleiro. Altura reservada para não empurrar o layout ao aparecer. */}
+      <View style={styles.thinkingRow}>
+        {loading && (
+          <AiThinkingIndicator color={colors.accent} textColor={colors.secondary} />
+        )}
+      </View>
+
       <View style={styles.boardSection}>
         <CapturedPieces
           pieces={aiCaptures as any}
@@ -363,11 +439,15 @@ export default function GameScreen({
         />
       </View>
 
-      {loading && (
-        <View style={styles.loading}>
-          <ActivityIndicator size="large" />
-        </View>
-      )}
+      <ConfirmModal
+        visible={aiError}
+        title="A IA não respondeu"
+        message="Algo atrapalhou a jogada da IA. Você pode tentar de novo ou sair da partida."
+        confirmLabel="Tentar novamente"
+        cancelLabel="Sair"
+        onConfirm={handleRetryAi}
+        onCancel={handleAbandonAi}
+      />
 
       <GameOverModal
         result={gameResult}
@@ -442,10 +522,10 @@ const styles = StyleSheet.create({
   boardFlipped: {
     transform: [{ rotate: "180deg" }],
   },
-  loading: {
-    position: "absolute",
-    top: "50%",
-    left: "50%",
-    transform: [{ translateX: -25 }, { translateY: -25 }],
+  thinkingRow: {
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
   },
 });
