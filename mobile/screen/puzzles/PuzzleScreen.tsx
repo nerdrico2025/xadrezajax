@@ -15,6 +15,8 @@ import { Ionicons } from "@expo/vector-icons";
 import Button from "@/components/Button";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
+import { useBoardTheme } from "@/context/BoardThemeContext";
+import { toChessboardColors } from "@/constants/boardThemes";
 import { useAuth } from "@/context/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
 import { useChessSound } from "@/hooks/useChessSound";
@@ -58,6 +60,8 @@ const CATEGORY_LABELS: Record<string, string> = {
 export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
   const { theme } = useTheme();
   const colors = Colors[theme];
+  const { theme: boardTheme } = useBoardTheme();
+  const boardColors = toChessboardColors(boardTheme);
   const { token, user } = useAuth();
   const { profile, loading: profileLoading } = useProfile();
   const { play } = useChessSound();
@@ -350,6 +354,7 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
               ref={chessboardRef}
               fen={puzzle.fen}
               onMove={onMove}
+              colors={boardColors}
               gestureEnabled={state === "playing" && !replying}
             />
           </View>

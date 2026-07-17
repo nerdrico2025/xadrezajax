@@ -19,6 +19,8 @@ import { useChessSound } from "@/hooks/useChessSound";
 import { useChessClock } from "@/hooks/useChessClock";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
+import { useBoardTheme } from "@/context/BoardThemeContext";
+import { toChessboardColors } from "@/constants/boardThemes";
 import ChessClock from "@/components/ChessClock";
 import CapturedPieces from "./CapturedPieces";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -84,6 +86,8 @@ export default function OnlineGameScreen({
 }: Props) {
   const { theme } = useTheme();
   const colors = Colors[theme];
+  const { theme: boardTheme } = useBoardTheme();
+  const boardColors = toChessboardColors(boardTheme);
   const { play } = useChessSound();
   const chessboardRef = useRef<ChessboardRef>(null);
   const [squareSize, setSquareSize] = useState(0);
@@ -356,6 +360,7 @@ export default function OnlineGameScreen({
             ref={chessboardRef}
             fen={localFen}
             onMove={onMove}
+            colors={boardColors}
             withLetters={!isFlipped}
             withNumbers={!isFlipped}
             renderPiece={

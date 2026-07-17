@@ -35,8 +35,20 @@ index 601d1d5..2125573 100644
      }) => Promise<Move | undefined> | undefined;
      highlight: (_: {
          square: Square;
+diff --git a/node_modules/react-native-chessboard/lib/typescript/context/props-context/index.d.ts b/node_modules/react-native-chessboard/lib/typescript/context/props-context/index.d.ts
+index 42e9bea..c4d21b1 100644
+--- a/node_modules/react-native-chessboard/lib/typescript/context/props-context/index.d.ts
++++ b/node_modules/react-native-chessboard/lib/typescript/context/props-context/index.d.ts
+@@ -14,6 +14,7 @@ declare type ChessboardColorsType = {
+     lastMoveHighlight?: string;
+     checkmateHighlight?: string;
+     promotionPieceButton?: string;
++    selectedSquareHighlight?: string;
+ };
+ declare type ChessboardDurationsType = {
+     move?: number;
 diff --git a/node_modules/react-native-chessboard/src/components/piece/index.tsx b/node_modules/react-native-chessboard/src/components/piece/index.tsx
-index bbbd539..10be227 100644
+index bbbd539..59597bb 100644
 --- a/node_modules/react-native-chessboard/src/components/piece/index.tsx
 +++ b/node_modules/react-native-chessboard/src/components/piece/index.tsx
 @@ -1,4 +1,4 @@
@@ -57,7 +69,15 @@ index bbbd539..10be227 100644
    enable: (activate: boolean) => void;
  };
  
-@@ -70,14 +73,14 @@ const Piece = React.memo(
+@@ -43,6 +46,7 @@ const Piece = React.memo(
+       const {
+         durations: { move: moveDuration },
+         gestureEnabled: gestureEnabledFromChessboardProps,
++        colors: { selectedSquareHighlight },
+       } = useChessboardProps();
+ 
+       const gestureEnabled = useDerivedValue(
+@@ -70,14 +74,14 @@ const Piece = React.memo(
        );
  
        const wrappedOnMoveForJSThread = useCallback(
@@ -75,7 +95,7 @@ index bbbd539..10be227 100644
            return new Promise<Move | undefined>((resolve) => {
              const move = validateMove(from, to);
              const { x, y } = toTranslation(move ? move.to : from);
-@@ -92,7 +95,7 @@ const Piece = React.memo(
+@@ -92,7 +96,7 @@ const Piece = React.memo(
                  offsetY.value = translateY.value;
                  isGestureActive.value = false;
                  if (move) {
@@ -84,7 +104,7 @@ index bbbd539..10be227 100644
                    // Ideally I must call the resolve method
                    // inside the "wrappedOnMoveForJSThread" after
                    // the "onMove" function.
-@@ -131,8 +134,8 @@ const Piece = React.memo(
+@@ -131,8 +135,8 @@ const Piece = React.memo(
          ref,
          () => {
            return {
@@ -95,6 +115,23 @@ index bbbd539..10be227 100644
              },
              enable: (active: boolean) => {
                pieceEnabled.value = active;
+@@ -244,14 +248,14 @@ const Piece = React.memo(
+           borderRadius: size,
+           zIndex: 0,
+           backgroundColor: isGestureActive.value
+-            ? 'rgba(0, 0, 0, 0.1)'
++            ? selectedSquareHighlight ?? 'rgba(0, 0, 0, 0.1)'
+             : 'transparent',
+           transform: [
+             { translateX: translation.x - size / 2 },
+             { translateY: translation.y - size / 2 },
+           ],
+         };
+-      }, [size]);
++      }, [size, selectedSquareHighlight]);
+ 
+       return (
+         <>
 diff --git a/node_modules/react-native-chessboard/src/context/board-operations-context/index.tsx b/node_modules/react-native-chessboard/src/context/board-operations-context/index.tsx
 index 2fc9565..a7c4eae 100644
 --- a/node_modules/react-native-chessboard/src/context/board-operations-context/index.tsx
@@ -185,3 +222,25 @@ index 3966cd9..67a71ef 100644
        },
        highlight: ({ square, color }) => {
          squareRefs.current?.[square].current.highlight({
+diff --git a/node_modules/react-native-chessboard/src/context/props-context/index.tsx b/node_modules/react-native-chessboard/src/context/props-context/index.tsx
+index 448aa9c..6daf4b1 100644
+--- a/node_modules/react-native-chessboard/src/context/props-context/index.tsx
++++ b/node_modules/react-native-chessboard/src/context/props-context/index.tsx
+@@ -16,6 +16,9 @@ type ChessboardColorsType = {
+   lastMoveHighlight?: string;
+   checkmateHighlight?: string;
+   promotionPieceButton?: string;
++  // AJAX patch: cor do brilho sob a peça na casa selecionada/arrastada.
++  // Permite temas de tabuleiro (PR E) usarem o Dourado AJAX na seleção.
++  selectedSquareHighlight?: string;
+ };
+ 
+ type ChessboardDurationsType = {
+@@ -86,6 +89,7 @@ const defaultChessboardProps: ChessboardContextType = {
+     lastMoveHighlight: 'rgba(255,255,0, 0.5)',
+     checkmateHighlight: '#E84855',
+     promotionPieceButton: '#FF9B71',
++    selectedSquareHighlight: 'rgba(0, 0, 0, 0.1)',
+   },
+   durations: {
+     move: 150,

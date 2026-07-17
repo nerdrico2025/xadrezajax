@@ -18,6 +18,8 @@ import { useChessClock } from "@/hooks/useChessClock";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
+import { useBoardTheme } from "@/context/BoardThemeContext";
+import { toChessboardColors } from "@/constants/boardThemes";
 import GameOverModal, { type GameResult } from "./GameOverModal";
 import AiThinkingIndicator from "./AiThinkingIndicator";
 import CapturedPieces from "./CapturedPieces";
@@ -87,6 +89,8 @@ export default function GameScreen({
 }: GameScreenProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
+  const { theme: boardTheme } = useBoardTheme();
+  const boardColors = toChessboardColors(boardTheme);
   const { token: authToken } = useAuth();
   const isFlipped = playerColor === "b";
   const [squareSize, setSquareSize] = useState(0);
@@ -421,6 +425,7 @@ export default function GameScreen({
             ref={chessboardRef}
             fen={game.fen()}
             onMove={onMove}
+            colors={boardColors}
             withLetters={!isFlipped}
             withNumbers={!isFlipped}
             renderPiece={isFlipped && squareSize > 0 ? (piece) => (

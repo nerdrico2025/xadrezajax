@@ -11,6 +11,7 @@ import { useSoundSettings } from "@/hooks/useSoundSettings";
 import { useAuth } from "@/context/AuthContext";
 import { Colors } from "@/constants/theme";
 import { changePassword, deleteAccount } from "@/services/profile";
+import BoardThemePicker from "@/components/BoardThemePicker";
 
 interface Props {
   onBack: () => void;
@@ -148,6 +149,18 @@ export default function SettingsScreen({ onBack }: Props) {
               <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
             )}
           </Pressable>
+        </View>
+
+        {/* ── Tabuleiro ─── */}
+        <Text style={[styles.sectionLabel, { color: colors.secondary, marginTop: 24 }]}>Tabuleiro</Text>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.divider }]}>
+          <Text style={[styles.rowSub, { color: colors.secondary, paddingHorizontal: 16, paddingTop: 14 }]}>
+            Escolha o visual do tabuleiro. Vale para todas as partidas e é
+            independente do tema claro/escuro do app.
+          </Text>
+          <BoardThemePicker
+            colors={{ text: colors.text, secondary: colors.secondary, card: colors.background, divider: colors.divider }}
+          />
         </View>
 
         {/* ── Som ─── */}
