@@ -121,13 +121,13 @@ export default function Login() {
         )}
 
         <TouchableOpacity onPress={() => router.push("/forgot-password")}>
-          <Text style={[styles.forgot, { color: colors.tabIconDefault }]}>
+          <Text style={[styles.forgot, { color: colors.accentOnLight }]}>
             Esqueceu a senha?
           </Text>
         </TouchableOpacity>
       </View>
-      
-      <Button title="Acessar" onPress={handleLogin} loading={loading} />
+
+      <Button title="Acessar" onPress={handleLogin} loading={loading} variant="accent" />
 
       {isAvailable && isEnabled && (
         <TouchableOpacity
@@ -158,7 +158,7 @@ export default function Login() {
         iconName="logo-google"
       />
       <TouchableOpacity onPress={() => router.push("/register")}>
-        <Text style={[styles.link, { color: colors.tabIconDefault }]}>
+        <Text style={[styles.link, { color: colors.accentOnLight }]}>
           Ainda não possui conta? Cadastre-se
         </Text>
       </TouchableOpacity>

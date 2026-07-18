@@ -57,7 +57,7 @@ export default function ForgotPassword() {
         title="Enviar código"
         onPress={handleSendCode}
         loading={loading}
-        variant="primary"
+        variant="accent"
       />
     </AuthScreenLayout>
   );

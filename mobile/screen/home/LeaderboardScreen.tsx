@@ -77,8 +77,8 @@ export default function LeaderboardScreen({ onBack }: Props) {
             {item.games_played} partidas · {winRate}% vitórias
           </Text>
         </View>
-        {/* Destaque do próprio usuário em dourado (0.6-C) */}
-        <Text style={[styles.ratingText, { color: isMe ? colors.accent : colors.text }]}>
+        {/* Destaque do próprio usuário em dourado (R2). accentOnLight passa AA no claro. */}
+        <Text style={[styles.ratingText, { color: isMe ? colors.accentOnLight : colors.text }]}>
           {item.rating}
         </Text>
       </View>

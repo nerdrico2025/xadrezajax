@@ -87,11 +87,11 @@ export default function GameOverModal({
 
           <View style={styles.buttons}>
             <Pressable
-              style={[styles.button, { backgroundColor: colors.primary }]}
+              style={[styles.button, { backgroundColor: colors.accent }]}
               onPress={onNewGame}
             >
-              <Ionicons name="refresh" size={18} color="#fff" />
-              <Text style={styles.buttonText}>Novo jogo</Text>
+              <Ionicons name="refresh" size={18} color={colors.accentText} />
+              <Text style={[styles.buttonText, { color: colors.accentText }]}>Novo jogo</Text>
             </Pressable>
 
             <Pressable

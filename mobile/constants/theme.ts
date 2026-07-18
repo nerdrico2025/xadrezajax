@@ -7,6 +7,11 @@ const primaryColor = '#1B5F7A';
 // (contraste 2.17:1); para texto sobre dourado, usar accentText (8.5:1).
 const accentColor = '#C9A84C';
 const accentTextColor = '#0D0D0D';
+// Dourado com transparência (~12%) para fundos sutis de destaque. Overlay que
+// funciona sobre superfícies claras e escuras (PR F, Parte 1).
+const accentMutedColor = 'rgba(201, 168, 76, 0.12)';
+// Estado de toque (pressed) da CTA dourada — dourado levemente escurecido.
+const accentPressedColor = '#B39440';
 
 export const Colors = {
   light: {
@@ -20,6 +25,12 @@ export const Colors = {
     primaryText: '#FFFFFF',
     accent: accentColor,
     accentText: accentTextColor,
+    accentMuted: accentMutedColor,
+    accentPressed: accentPressedColor,
+    // Dourado como TEXTO/ícone sobre fundo claro: #C9A84C reprova WCAG no tema
+    // claro (2.17:1), então usamos um dourado escurecido dedicado. Passa AA
+    // (≥4.5:1) inclusive sobre accentMuted composto no card (4.8–5.5:1).
+    accentOnLight: '#826417',
 
     // Secundária (textos de apoio, placeholders)
     secondary: '#6B7280',
@@ -43,7 +54,8 @@ export const Colors = {
     // Estados
     error: '#EF4444',
     success: '#22C55E',
-    warning: '#F59E0B',
+    // Amarelo de cautela (não laranja — D4). Era #F59E0B (matiz laranja ~38°).
+    warning: '#EAB308',
 
     // Misc
     tint: primaryColor,
@@ -61,6 +73,11 @@ export const Colors = {
     primaryText: '#FFFFFF',
     accent: accentColor,
     accentText: accentTextColor,
+    accentMuted: accentMutedColor,
+    accentPressed: accentPressedColor,
+    // No tema escuro o dourado #C9A84C passa como texto (8.2:1), então
+    // accentOnLight = accent — o token existe nos dois temas para uso uniforme.
+    accentOnLight: accentColor,
 
     // Secundária (textos de apoio — legível no fundo escuro)
     secondary: '#94A3B8',

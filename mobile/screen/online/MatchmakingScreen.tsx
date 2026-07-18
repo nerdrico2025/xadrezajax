@@ -222,9 +222,16 @@ export default function MatchmakingScreen({
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Jogar com Amigos</Text>
         <View
+          accessibilityLabel={
+            isConnected ? "Conectado" : isConnecting ? "Conectando" : "Desconectado"
+          }
           style={[
             styles.statusDot,
-            { backgroundColor: isConnected ? "#22c55e" : isConnecting ? "#f59e0b" : "#ef4444" },
+            // Anel em colors.secondary: garante 3:1 (WCAG 1.4.11) do componente
+            // contra o fundo nos dois temas — o preenchimento sozinho
+            // (success/warning) não alcança 3:1 no tema claro.
+            { borderWidth: 1.5, borderColor: colors.secondary },
+            { backgroundColor: isConnected ? colors.success : isConnecting ? colors.warning : colors.error },
           ]}
         />
       </View>
@@ -236,11 +243,11 @@ export default function MatchmakingScreen({
             key={t}
             style={[
               styles.tab,
-              tab === t && { borderBottomColor: colors.primary, borderBottomWidth: 2 },
+              tab === t && { borderBottomColor: colors.accent, borderBottomWidth: 2 },
             ]}
             onPress={() => setTab(t)}
           >
-            <Text style={[styles.tabText, { color: tab === t ? colors.primary : colors.secondary }]}>
+            <Text style={[styles.tabText, { color: tab === t ? colors.accentOnLight : colors.secondary }]}>
               {t === "friend" ? "Amigo" : "Código"}
               {t === "friend" && pendingRequests.length > 0
                 ? ` (${pendingRequests.length})`
@@ -340,8 +347,8 @@ export default function MatchmakingScreen({
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>
                     Pedidos recebidos
                   </Text>
-                  <View style={[styles.badge, { backgroundColor: colors.primary }]}>
-                    <Text style={styles.badgeText}>{pendingRequests.length}</Text>
+                  <View style={[styles.badge, { backgroundColor: colors.accent }]}>
+                    <Text style={[styles.badgeText, { color: colors.accentText }]}>{pendingRequests.length}</Text>
                   </View>
                   <Ionicons
                     name={showPending ? "chevron-up" : "chevron-down"}

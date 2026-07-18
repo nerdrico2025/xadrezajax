@@ -201,7 +201,7 @@ export default function Register() {
         title="Cadastrar"
         onPress={handleRegister}
         loading={loading}
-        variant="primary"
+        variant="accent"
       />
 
       <Divider text="ou" />
@@ -215,7 +215,7 @@ export default function Register() {
       />
 
       <TouchableOpacity onPress={() => router.push("/login")}>
-        <Text style={[styles.link, { color: colors.tabIconDefault }]}>
+        <Text style={[styles.link, { color: colors.accentOnLight }]}>
           Já possui uma conta? Faça o login
         </Text>
       </TouchableOpacity>

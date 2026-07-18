@@ -175,11 +175,11 @@ export default function FriendsScreen({ onBack }: Props) {
           const active = tab === t;
           const label = t === "friends" ? `Amigos (${friends.length})` : `Pedidos${pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ""}`;
           return (
-            <Pressable key={t} onPress={() => setTab(t)} style={[styles.tab, active && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}>
-              <Text style={[styles.tabLabel, { color: active ? colors.primary : colors.secondary }]}>{label}</Text>
+            <Pressable key={t} onPress={() => setTab(t)} style={[styles.tab, active && { borderBottomColor: colors.accent, borderBottomWidth: 2 }]}>
+              <Text style={[styles.tabLabel, { color: active ? colors.accentOnLight : colors.secondary }]}>{label}</Text>
               {t === "requests" && pendingRequests.length > 0 && (
-                <View style={[styles.badge, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.badgeText}>{pendingRequests.length}</Text>
+                <View style={[styles.badge, { backgroundColor: colors.accent }]}>
+                  <Text style={[styles.badgeText, { color: colors.accentText }]}>{pendingRequests.length}</Text>
                 </View>
               )}
             </Pressable>

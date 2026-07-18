@@ -62,7 +62,7 @@ export default function ResetPassword() {
 
       {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
 
-      <Button title="Salvar" onPress={handleReset} loading={loading} variant="primary" />
+      <Button title="Salvar" onPress={handleReset} loading={loading} variant="accent" />
     </AuthScreenLayout>
   );
 }

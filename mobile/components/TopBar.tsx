@@ -7,7 +7,7 @@ interface TopBarProps {
   title?: string;
 }
 
-export default function TopBar({ title = "Xadrez Ajax" }: TopBarProps) {
+export default function TopBar({ title = "AJAX" }: TopBarProps) {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const colors = Colors[theme];

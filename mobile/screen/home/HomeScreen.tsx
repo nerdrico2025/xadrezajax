@@ -85,7 +85,7 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
         <View
           style={[
             styles.ratingBadge,
-            { backgroundColor: colors.accent + "22", borderColor: colors.accent + "55" },
+            { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
           ]}
           accessibilityLabel={
             blitzRating.provisional
@@ -93,10 +93,9 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
               : `Rating blitz ${blitzRating.rating}`
           }
         >
-          <Ionicons name="trophy-outline" size={14} color={colors.accent} />
-          {/* Número em colors.text: dourado como texto reprova contraste AA
-              no tema claro (2.17:1) — dourado fica no fundo/borda/ícone */}
-          <Text style={[styles.ratingText, { color: colors.text }]}>
+          <Ionicons name="trophy-outline" size={14} color={colors.accentOnLight} />
+          {/* Rating em dourado (R2). No claro usa accentOnLight (AA); no escuro = accent. */}
+          <Text style={[styles.ratingText, { color: colors.accentOnLight }]}>
             {blitzRating.provisional ? `~${blitzRating.rating}` : blitzRating.rating}
           </Text>
         </View>
@@ -115,20 +114,20 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
         Modos de jogo
       </Text>
 
-      {/* Card: vs IA */}
+      {/* Card: vs IA — CTA primária da Home (Dourado AJAX, texto preto — R1) */}
       <Pressable
-        style={[styles.card, styles.cardElevated, { backgroundColor: colors.primary }]}
+        style={[styles.card, styles.cardElevated, { backgroundColor: colors.accent }]}
         onPress={onPlayAI}
-        android_ripple={{ color: "rgba(255,255,255,0.15)" }}
+        android_ripple={{ color: "rgba(13,13,13,0.12)" }}
       >
         <View style={styles.cardLeft}>
-          <Text style={styles.cardPieceWhite}>♖</Text>
+          <Text style={[styles.cardPieceWhite, { color: colors.accentText }]}>♖</Text>
           <View>
-            <Text style={styles.cardTitleWhite}>Jogar vs IA</Text>
-            <Text style={styles.cardSubWhite}>Escolha a dificuldade</Text>
+            <Text style={[styles.cardTitleWhite, { color: colors.accentText }]}>Jogar vs IA</Text>
+            <Text style={[styles.cardSubWhite, { color: colors.accentText, opacity: 0.7 }]}>Escolha a dificuldade</Text>
           </View>
         </View>
-        <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+        <Ionicons name="chevron-forward" size={20} color="rgba(13,13,13,0.6)" />
       </Pressable>
 
       {/* Card: Online */}
@@ -183,12 +182,13 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
             <View
               style={[
                 styles.streakChip,
-                { backgroundColor: colors.accent + "22", borderColor: colors.accent + "55" },
+                { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
               ]}
               accessibilityLabel={`Sequência de ${puzzleStreak} dias de puzzle`}
             >
-              <Ionicons name="flame" size={13} color={colors.accent} />
-              <Text style={[styles.streakText, { color: colors.text }]}>{puzzleStreak}</Text>
+              {/* Streak em dourado (R2). No claro usa accentOnLight (AA); no escuro = accent. */}
+              <Ionicons name="flame" size={13} color={colors.accentOnLight} />
+              <Text style={[styles.streakText, { color: colors.accentOnLight }]}>{puzzleStreak}</Text>
             </View>
           )}
           <Ionicons name="chevron-forward" size={20} color={colors.secondary} />

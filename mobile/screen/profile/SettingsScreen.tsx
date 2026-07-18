@@ -121,8 +121,8 @@ export default function SettingsScreen({ onBack }: Props) {
             <Switch
               value={isDark}
               onValueChange={toggleTheme}
-              trackColor={{ false: colors.buttonSecondary, true: colors.primary + "88" }}
-              thumbColor={isDark ? colors.primary : colors.secondary}
+              trackColor={{ false: colors.buttonSecondary, true: colors.accent + "88" }}
+              thumbColor={isDark ? colors.accent : colors.secondary}
             />
           </View>
 
@@ -179,8 +179,8 @@ export default function SettingsScreen({ onBack }: Props) {
             <Switch
               value={soundEnabled}
               onValueChange={toggleSound}
-              trackColor={{ false: colors.buttonSecondary, true: colors.primary + "88" }}
-              thumbColor={soundEnabled ? colors.primary : colors.secondary}
+              trackColor={{ false: colors.buttonSecondary, true: colors.accent + "88" }}
+              thumbColor={soundEnabled ? colors.accent : colors.secondary}
             />
           </View>
         </View>
@@ -203,8 +203,8 @@ export default function SettingsScreen({ onBack }: Props) {
                 <Switch
                   value={biometricEnabled}
                   onValueChange={handleBiometricToggle}
-                  trackColor={{ false: colors.buttonSecondary, true: colors.primary + "88" }}
-                  thumbColor={biometricEnabled ? colors.primary : colors.secondary}
+                  trackColor={{ false: colors.buttonSecondary, true: colors.accent + "88" }}
+                  thumbColor={biometricEnabled ? colors.accent : colors.secondary}
                 />
               </View>
             </View>
@@ -277,10 +277,10 @@ export default function SettingsScreen({ onBack }: Props) {
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.divider }]}>
           <View style={styles.row}>
-            <View style={[styles.rowIcon, { backgroundColor: "#F59E0B18" }]}>
+            <View style={[styles.rowIcon, { backgroundColor: colors.accentMuted }]}>
               <Text style={{ fontSize: 16 }}>♟</Text>
             </View>
-            <Text style={[styles.rowLabel, { color: colors.text }]}>Xadrez Ajax</Text>
+            <Text style={[styles.rowLabel, { color: colors.text }]}>Clube de Xadrez AJAX</Text>
             <Text style={[styles.rowSub, { color: colors.secondary }]}>v1.0.0</Text>
           </View>
         </View>

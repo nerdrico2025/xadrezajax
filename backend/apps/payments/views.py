@@ -188,7 +188,7 @@ class StripeReturnView(APIView):
         html = f"""<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="utf-8">
 <meta http-equiv="refresh" content="0;url={deep_link}">
-<title>Xadrez AJAX</title></head>
+<title>Clube de Xadrez AJAX</title></head>
 <body style="font-family:sans-serif;text-align:center;padding-top:40px">
 <p>{message}</p>
 <p><a href="{deep_link}">Toque aqui se não voltar automaticamente</a></p>
