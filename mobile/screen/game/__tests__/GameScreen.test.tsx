@@ -142,6 +142,41 @@ describe("percepção de travamento na jogada da IA (PR D, item 8)", () => {
     expect(hasText(tree.root, "Pensando")).toBe(true);
   });
 
+  // Regressão do fix 90665fa: o setTimeout de 10s do withTimeout ficava
+  // pendente após o unmount (era o handle aberto que derrubava o worker do
+  // Jest no CI). Fake timers não servem aqui: com a promise da engine
+  // pendente, o act assíncrono do mount trava esperando um relógio que não
+  // anda — por isso o teste roda com timers reais e observa a limpeza pelo
+  // spy em clearTimeout, comparando o handle exato criado com delay de 10s.
+  it("limpa o timer de 10s (ai_timeout) no unmount da tela", async () => {
+    const setTimeoutSpy = jest.spyOn(global, "setTimeout");
+    const clearTimeoutSpy = jest.spyOn(global, "clearTimeout");
+    try {
+      getBestMove.mockReturnValueOnce(new Promise(() => {})); // nunca resolve
+
+      let tree!: renderer.ReactTestRenderer;
+      await act(async () => {
+        tree = renderer.create(
+          <GameScreen difficulty="medium" playerColor="b" timeControl={null} />
+        );
+      });
+
+      const aiTimeoutIndex = setTimeoutSpy.mock.calls.findIndex(
+        ([, ms]) => ms === 10000
+      );
+      expect(aiTimeoutIndex).toBeGreaterThanOrEqual(0);
+      const aiTimeoutHandle = setTimeoutSpy.mock.results[aiTimeoutIndex].value;
+      expect(clearTimeoutSpy).not.toHaveBeenCalledWith(aiTimeoutHandle);
+
+      act(() => tree.unmount());
+
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(aiTimeoutHandle);
+    } finally {
+      setTimeoutSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+    }
+  });
+
   it("piso humanizado: a jogada da IA não aparece antes de 400ms", async () => {
     jest.useFakeTimers();
     getBestMove.mockResolvedValueOnce("e2e4"); // responde na hora
