@@ -359,7 +359,7 @@ export default function Home() {
               Você tem uma partida em andamento. Deseja continuar de onde parou?
             </Text>
             <Pressable
-              style={[styles.continueButton, { backgroundColor: colors.primary }]}
+              style={[styles.continueButton, { backgroundColor: colors.accent }]}
               onPress={() => {
                 if (pendingSavedGame) {
                   setDifficulty(pendingSavedGame.difficulty);
@@ -373,7 +373,7 @@ export default function Home() {
                 setShowContinueModal(false);
               }}
             >
-              <Text style={styles.continueButtonText}>Continuar</Text>
+              <Text style={[styles.continueButtonText, { color: colors.accentText }]}>Continuar</Text>
             </Pressable>
             <Pressable
               style={[styles.cancelButton, { borderColor: colors.error }]}

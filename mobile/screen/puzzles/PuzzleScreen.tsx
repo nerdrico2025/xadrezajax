@@ -284,7 +284,7 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
           <Text style={[styles.messageSub, { color: colors.secondary }]}>
             Verifique sua conexão e tente novamente.
           </Text>
-          <Button title="Tentar novamente" onPress={loadPuzzle} />
+          <Button title="Tentar novamente" variant="accent" onPress={loadPuzzle} />
         </View>
       )}
 
@@ -365,11 +365,11 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
               <View
                 style={[
                   styles.solvedStreak,
-                  { backgroundColor: colors.accent + "22", borderColor: colors.accent + "55" },
+                  { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
                 ]}
               >
-                <Ionicons name="flame" size={18} color={colors.accent} />
-                <Text style={[styles.solvedStreakText, { color: colors.text }]}>
+                <Ionicons name="flame" size={18} color={colors.accentOnLight} />
+                <Text style={[styles.solvedStreakText, { color: colors.accentOnLight }]}>
                   {stats?.streak === 1
                     ? "1 dia de sequência"
                     : `${stats?.streak ?? 0} dias de sequência`}
@@ -378,6 +378,7 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
               <Button
                 title="Próximo puzzle"
                 iconName="arrow-forward"
+                variant="accent"
                 onPress={loadPuzzle}
               />
             </View>

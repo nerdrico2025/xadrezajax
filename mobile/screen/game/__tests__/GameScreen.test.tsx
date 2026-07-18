@@ -41,6 +41,11 @@ jest.mock("@/utils/savedGame", () => ({
 
 const { reportAiResult } = jest.requireMock("@/services/profile");
 
+// O primeiro render do GameScreen (árvore inteira: tabuleiro, relógio,
+// indicador) custa ~600ms local e multiplica no runner do CI — o primeiro
+// teste do arquivo estourava o default de 5s. Folga para máquinas lentas.
+jest.setTimeout(20000);
+
 // Partida em andamento (moveCount > 0) com as brancas (jogador) a jogar —
 // deixa os botões de Empate/Desistir habilitados sem disparar lance da IA.
 const ACTIVE_GAME: SavedAiGame = {
@@ -52,6 +57,10 @@ const ACTIVE_GAME: SavedAiGame = {
   playerColor: "w",
 };
 
+// Árvores criadas nos testes — desmontadas no afterEach para cancelar timers
+// pendentes (piso humanizado, timeout de 10s da IA) antes do teardown do Jest.
+const mountedTrees: renderer.ReactTestRenderer[] = [];
+
 function render() {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
@@ -59,6 +68,7 @@ function render() {
       <GameScreen savedGame={ACTIVE_GAME} difficulty="medium" playerColor="w" timeControl={null} />
     );
   });
+  mountedTrees.push(tree);
   return tree;
 }
 
@@ -91,6 +101,11 @@ function pressText(root: ReactTestInstance, text: string) {
 }
 
 afterEach(() => {
+  // Desmonta antes de restaurar timers: os cleanups dos effects cancelam
+  // setTimeout/interval pendentes e nada dispara após o fim do teste.
+  for (const tree of mountedTrees.splice(0)) {
+    act(() => tree.unmount());
+  }
   jest.clearAllMocks();
   jest.useRealTimers();
 });
@@ -106,6 +121,7 @@ async function renderAiTurn(difficulty = "medium") {
       <GameScreen difficulty={difficulty as any} playerColor="b" timeControl={null} />
     );
   });
+  mountedTrees.push(tree);
   return tree;
 }
 
@@ -114,6 +130,9 @@ function hasLabel(root: ReactTestInstance, label: string) {
 }
 
 describe("percepção de travamento na jogada da IA (PR D, item 8)", () => {
+  // Timers reais aqui: fake timers travam o act assíncrono do mount quando a
+  // promise da engine nunca resolve. O timer de 10s (ai_timeout) não vaza
+  // porque o unmount do afterEach o limpa (aiTimeoutRef no GameScreen).
   it("mostra o indicador 'Pensando' enquanto a IA calcula (sem overlay)", async () => {
     getBestMove.mockReturnValueOnce(new Promise(() => {})); // nunca resolve
     const tree = await renderAiTurn();
@@ -121,6 +140,41 @@ describe("percepção de travamento na jogada da IA (PR D, item 8)", () => {
     // Indicador não-bloqueante presente; o tabuleiro segue montado.
     expect(hasLabel(tree.root, "A IA está pensando")).toBe(true);
     expect(hasText(tree.root, "Pensando")).toBe(true);
+  });
+
+  // Regressão do fix 90665fa: o setTimeout de 10s do withTimeout ficava
+  // pendente após o unmount (era o handle aberto que derrubava o worker do
+  // Jest no CI). Fake timers não servem aqui: com a promise da engine
+  // pendente, o act assíncrono do mount trava esperando um relógio que não
+  // anda — por isso o teste roda com timers reais e observa a limpeza pelo
+  // spy em clearTimeout, comparando o handle exato criado com delay de 10s.
+  it("limpa o timer de 10s (ai_timeout) no unmount da tela", async () => {
+    const setTimeoutSpy = jest.spyOn(global, "setTimeout");
+    const clearTimeoutSpy = jest.spyOn(global, "clearTimeout");
+    try {
+      getBestMove.mockReturnValueOnce(new Promise(() => {})); // nunca resolve
+
+      let tree!: renderer.ReactTestRenderer;
+      await act(async () => {
+        tree = renderer.create(
+          <GameScreen difficulty="medium" playerColor="b" timeControl={null} />
+        );
+      });
+
+      const aiTimeoutIndex = setTimeoutSpy.mock.calls.findIndex(
+        ([, ms]) => ms === 10000
+      );
+      expect(aiTimeoutIndex).toBeGreaterThanOrEqual(0);
+      const aiTimeoutHandle = setTimeoutSpy.mock.results[aiTimeoutIndex].value;
+      expect(clearTimeoutSpy).not.toHaveBeenCalledWith(aiTimeoutHandle);
+
+      act(() => tree.unmount());
+
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(aiTimeoutHandle);
+    } finally {
+      setTimeoutSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+    }
   });
 
   it("piso humanizado: a jogada da IA não aparece antes de 400ms", async () => {

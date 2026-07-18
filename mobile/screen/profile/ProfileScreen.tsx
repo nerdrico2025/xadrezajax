@@ -115,7 +115,7 @@ export default function ProfileScreen() {
             {saving ? (
               <ActivityIndicator size="small" color={colors.primary} />
             ) : (
-              <Text style={[styles.headerAction, { color: colors.primary }]}>Salvar</Text>
+              <Text style={[styles.headerAction, { color: colors.accentOnLight }]}>Salvar</Text>
             )}
           </Pressable>
         ) : (
@@ -179,9 +179,10 @@ export default function ProfileScreen() {
 
       {/* Rating + Amigos */}
       <View style={styles.badgeRow}>
-        <View style={[styles.ratingBadge, { backgroundColor: colors.primary + "20" }]}>
+        {/* Rating = coração do produto → Dourado AJAX (R2). accentOnLight passa AA no claro. */}
+        <View style={[styles.ratingBadge, { backgroundColor: colors.accentMuted }]}>
           <Text style={styles.ratingIcon}>♟</Text>
-          <Text style={[styles.ratingValue, { color: colors.primary }]}>
+          <Text style={[styles.ratingValue, { color: colors.accentOnLight }]}>
             {profile?.rating ?? 1200}
           </Text>
           <Text style={[styles.ratingLabel, { color: colors.secondary }]}>ELO</Text>

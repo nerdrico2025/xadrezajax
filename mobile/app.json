@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "ajax",
+    "name": "AJAX",
     "slug": "xadrez-ajax",
     "version": "1.2.0",
     "orientation": "portrait",
@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Use o Face ID para entrar no aplicativo Xadrez Ajax"
+        "NSFaceIDUsageDescription": "Use o Face ID para entrar no aplicativo Clube de Xadrez AJAX"
       }
     },
     "android": {

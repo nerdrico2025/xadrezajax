@@ -58,13 +58,25 @@ function aiFloorMs(difficulty: Difficulty): number {
   return lo === hi ? lo : lo + Math.random() * (hi - lo);
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  timerRef: { current: ReturnType<typeof setTimeout> | null }
+): Promise<T> {
   return Promise.race([
     promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error("ai_timeout")), ms)
-    ),
-  ]);
+    new Promise<T>((_, reject) => {
+      timerRef.current = setTimeout(() => reject(new Error("ai_timeout")), ms);
+    }),
+  ]).finally(() => {
+    // Sem isso o timer de 10s fica pendente após cada jogada (e após o
+    // unmount), segurando o processo vivo — era o vazamento que derrubava
+    // o worker do Jest no CI.
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  });
 }
 
 function detectGameOver(game: Chess, playerColor: PlayerColor): GameResult | null {
@@ -104,6 +116,15 @@ export default function GameScreen({
   const [aiError, setAiError] = useState(false);
   // Posição pendente para o "Tentar novamente" quando a IA falha/expira.
   const pendingAiGameRef = useRef<Chess | null>(null);
+  // Timer do timeout de 10s da jogada da IA — limpo no unmount para não
+  // deixar reject/setState disparando depois que a tela morreu.
+  const aiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (aiTimeoutRef.current) {
+      clearTimeout(aiTimeoutRef.current);
+      aiTimeoutRef.current = null;
+    }
+  }, []);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [showDrawConfirm, setShowDrawConfirm] = useState(false);
@@ -169,7 +190,8 @@ export default function GameScreen({
     try {
       bestMove = await withTimeout(
         getBestMove(currentGame.fen(), difficulty),
-        AI_TIMEOUT_MS
+        AI_TIMEOUT_MS,
+        aiTimeoutRef
       );
     } catch {
       bestMove = null;

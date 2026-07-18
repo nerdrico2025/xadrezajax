@@ -22,9 +22,11 @@ export interface AiLevel {
 export const AI_LEVELS: AiLevel[] = [
   { id: "beginner", label: "Iniciante", elo: 800, description: "Primeiros passos no xadrez", icon: "egg-outline", color: "#4CAF50" },
   { id: "easy", label: "Fácil", elo: 1100, description: "Para quem está pegando o jeito", icon: "leaf-outline", color: "#8BC34A" },
-  { id: "medium", label: "Médio", elo: 1400, description: "Um bom desafio", icon: "flame-outline", color: "#FFB300" },
-  { id: "hard", label: "Difícil", elo: 1700, description: "Exige atenção e cálculo", icon: "flash-outline", color: "#FB8C00" },
-  { id: "master", label: "Mestre", elo: 2000, description: "A IA no máximo da força", icon: "skull-outline", color: "#E53935" },
+  // Escalada verde→amarelo→vermelho SEM laranja (D4: laranja proibido). Os antigos
+  // #FFB300/#FB8C00 eram laranja; substituídos por amarelo (#EAB308) e vermelhos.
+  { id: "medium", label: "Médio", elo: 1400, description: "Um bom desafio", icon: "flame-outline", color: "#EAB308" },
+  { id: "hard", label: "Difícil", elo: 1700, description: "Exige atenção e cálculo", icon: "flash-outline", color: "#E53935" },
+  { id: "master", label: "Mestre", elo: 2000, description: "A IA no máximo da força", icon: "skull-outline", color: "#B71C1C" },
 ];
 
 export const AI_LEVEL_BY_ID: Record<Difficulty, AiLevel> = AI_LEVELS.reduce(

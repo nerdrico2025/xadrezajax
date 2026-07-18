@@ -58,7 +58,7 @@ export default function VerifyCode() {
 
       {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
 
-      <Button title="Validar código" onPress={handleVerify} loading={loading} variant="primary" />
+      <Button title="Validar código" onPress={handleVerify} loading={loading} variant="accent" />
 
       <TouchableOpacity onPress={() => alert("Código reenviado!")}>
         <Text style={[styles.resend, { color: colors.tint }]}>Reenviar código</Text>
