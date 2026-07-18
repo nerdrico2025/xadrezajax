@@ -52,6 +52,10 @@ const ACTIVE_GAME: SavedAiGame = {
   playerColor: "w",
 };
 
+// Árvores criadas nos testes — desmontadas no afterEach para cancelar timers
+// pendentes (piso humanizado, timeout de 10s da IA) antes do teardown do Jest.
+const mountedTrees: renderer.ReactTestRenderer[] = [];
+
 function render() {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
@@ -59,6 +63,7 @@ function render() {
       <GameScreen savedGame={ACTIVE_GAME} difficulty="medium" playerColor="w" timeControl={null} />
     );
   });
+  mountedTrees.push(tree);
   return tree;
 }
 
@@ -91,6 +96,11 @@ function pressText(root: ReactTestInstance, text: string) {
 }
 
 afterEach(() => {
+  // Desmonta antes de restaurar timers: os cleanups dos effects cancelam
+  // setTimeout/interval pendentes e nada dispara após o fim do teste.
+  for (const tree of mountedTrees.splice(0)) {
+    act(() => tree.unmount());
+  }
   jest.clearAllMocks();
   jest.useRealTimers();
 });
@@ -106,6 +116,7 @@ async function renderAiTurn(difficulty = "medium") {
       <GameScreen difficulty={difficulty as any} playerColor="b" timeControl={null} />
     );
   });
+  mountedTrees.push(tree);
   return tree;
 }
 
@@ -115,6 +126,7 @@ function hasLabel(root: ReactTestInstance, label: string) {
 
 describe("percepção de travamento na jogada da IA (PR D, item 8)", () => {
   it("mostra o indicador 'Pensando' enquanto a IA calcula (sem overlay)", async () => {
+    jest.useFakeTimers(); // impede o setTimeout real de 10s (ai_timeout) de vazar
     getBestMove.mockReturnValueOnce(new Promise(() => {})); // nunca resolve
     const tree = await renderAiTurn();
 

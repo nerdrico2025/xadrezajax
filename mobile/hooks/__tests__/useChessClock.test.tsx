@@ -9,13 +9,29 @@ function Harness({ base, inc }: { base: number | null; inc: number }) {
   return null;
 }
 
+let tree: renderer.ReactTestRenderer | null = null;
+
 function mount(base: number | null, inc: number) {
-  let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(<Harness base={base} inc={inc} />);
   });
-  return tree;
+  return tree!;
 }
+
+// O switchTurn liga o interval de 100ms do relógio. Sem unmount + fake timers,
+// o interval continua vivo após a suíte e derruba o worker do Jest (crash
+// intermitente que contaminava outras suítes no CI).
+beforeEach(() => {
+  jest.useFakeTimers();
+});
+
+afterEach(() => {
+  if (tree) {
+    act(() => tree!.unmount());
+    tree = null;
+  }
+  jest.useRealTimers();
+});
 
 describe("useChessClock — incremento Fischer", () => {
   it("adiciona o incremento a quem acabou de jogar, não ao próximo", () => {
