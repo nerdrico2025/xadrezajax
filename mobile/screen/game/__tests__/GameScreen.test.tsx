@@ -41,6 +41,11 @@ jest.mock("@/utils/savedGame", () => ({
 
 const { reportAiResult } = jest.requireMock("@/services/profile");
 
+// O primeiro render do GameScreen (árvore inteira: tabuleiro, relógio,
+// indicador) custa ~600ms local e multiplica no runner do CI — o primeiro
+// teste do arquivo estourava o default de 5s. Folga para máquinas lentas.
+jest.setTimeout(20000);
+
 // Partida em andamento (moveCount > 0) com as brancas (jogador) a jogar —
 // deixa os botões de Empate/Desistir habilitados sem disparar lance da IA.
 const ACTIVE_GAME: SavedAiGame = {
