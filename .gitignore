@@ -34,6 +34,8 @@ expo-env.d.ts
 # ─────────────────────────────────────────
 .env
 .env.prod
+# .env.local na raiz guarda segredos reais de dev (Stripe etc.) — nunca versionar
+.env.local
 mobile/.env*.local
 
 # ─────────────────────────────────────────
