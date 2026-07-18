@@ -125,8 +125,10 @@ function hasLabel(root: ReactTestInstance, label: string) {
 }
 
 describe("percepção de travamento na jogada da IA (PR D, item 8)", () => {
+  // Timers reais aqui: fake timers travam o act assíncrono do mount quando a
+  // promise da engine nunca resolve. O timer de 10s (ai_timeout) não vaza
+  // porque o unmount do afterEach o limpa (aiTimeoutRef no GameScreen).
   it("mostra o indicador 'Pensando' enquanto a IA calcula (sem overlay)", async () => {
-    jest.useFakeTimers(); // impede o setTimeout real de 10s (ai_timeout) de vazar
     getBestMove.mockReturnValueOnce(new Promise(() => {})); // nunca resolve
     const tree = await renderAiTurn();
 
