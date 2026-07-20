@@ -11,7 +11,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.users.models import Profile
+from apps.users.models import get_or_create_profile, get_or_create_profile_by_user_id
 
 from .access import FREE_DAILY_GAME_LIMIT, can_play_game, has_paid_access
 from .models import PaymentEvent, Subscription
@@ -112,7 +112,7 @@ class CheckoutSessionView(APIView):
             )
 
         stripe.api_key = settings.STRIPE_SECRET_KEY
-        profile = Profile.objects.get(user=request.user)
+        profile = get_or_create_profile(request.user)
 
         subscription = getattr(profile, "subscription", None)
         if subscription and subscription.is_paid:
@@ -272,9 +272,11 @@ class StripeWebhookView(APIView):
         user_id = (session.get("metadata") or {}).get("user_id")
         plan = (session.get("metadata") or {}).get("plan")
         stripe_subscription_id = session.get("subscription") or ""
-        try:
-            profile = Profile.objects.get(user_id=user_id)
-        except Profile.DoesNotExist:
+        # Perfil ausente para um user_id válido se autocorrige
+        # (get_or_create_profile_by_user_id); só desiste se o user_id nem
+        # corresponder a um User real.
+        profile = get_or_create_profile_by_user_id(user_id)
+        if profile is None:
             logger.error("Webhook: perfil não encontrado (user_id=%s)", user_id)
             return
 
@@ -302,7 +304,7 @@ class StripeWebhookView(APIView):
             # Checkout pode ainda não ter sido processado (ordem de entrega
             # de webhooks não é garantida) — tenta pelo metadata.
             user_id = (stripe_sub.get("metadata") or {}).get("user_id")
-            profile = Profile.objects.filter(user_id=user_id).first()
+            profile = get_or_create_profile_by_user_id(user_id) if user_id else None
             if profile is None:
                 logger.warning(
                     "Webhook: assinatura desconhecida %s", stripe_sub.get("id")
@@ -374,7 +376,7 @@ class CanPlayView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        profile = Profile.objects.get(user=request.user)
+        profile = get_or_create_profile(request.user)
         return Response(_can_play_payload(profile))
 
 
@@ -405,9 +407,8 @@ class InternalCanPlayView(APIView):
                 {"detail": "user_id é obrigatório."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            profile = Profile.objects.get(user_id=user_id)
-        except Profile.DoesNotExist:
+        profile = get_or_create_profile_by_user_id(user_id)
+        if profile is None:
             return Response(
                 {"detail": "Perfil não encontrado."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -425,7 +426,7 @@ class MySubscriptionView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        profile = Profile.objects.get(user=request.user)
+        profile = get_or_create_profile(request.user)
         subscription = getattr(profile, "subscription", None)
         paid = has_paid_access(profile)
         _, remaining = can_play_game(profile)

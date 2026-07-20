@@ -46,7 +46,7 @@ describe("getNextPuzzle — mapeamento do gating", () => {
     }) as unknown as typeof fetch;
 
     await expect(getNextPuzzle("token", "easy")).rejects.toThrow(
-      "Falha ao carregar o próximo puzzle"
+      "Falha ao carregar o próximo problema"
     );
   });
 });

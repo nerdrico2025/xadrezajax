@@ -171,7 +171,7 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
         <View style={styles.cardLeft}>
           <Ionicons name="extension-puzzle" size={28} color={colors.accent} style={styles.cardIcon} />
           <View>
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Puzzle do dia</Text>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Problema do dia</Text>
             <Text style={[styles.cardSub, { color: colors.secondary }]}>Treine táticas em poucos lances</Text>
           </View>
         </View>
@@ -184,7 +184,7 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
                 styles.streakChip,
                 { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
               ]}
-              accessibilityLabel={`Sequência de ${puzzleStreak} dias de puzzle`}
+              accessibilityLabel={`Sequência de ${puzzleStreak} dias de problema`}
             >
               {/* Streak em dourado (R2). No claro usa accentOnLight (AA); no escuro = accent. */}
               <Ionicons name="flame" size={13} color={colors.accentOnLight} />

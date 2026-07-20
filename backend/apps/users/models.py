@@ -76,6 +76,44 @@ class Profile(models.Model):
         return f"Perfil de {self.user.email}"
 
 
+def get_or_create_profile(user):
+    """Ponto único de acesso a Profile a partir de um User autenticado.
+
+    Um usuário autenticado sem Profile é um estado que o sistema deve
+    autocorrigir (nunca aconteceria em cadastros novos — o signal
+    `create_user_profile` cobre isso — mas contas anteriores a 27/jun/2026
+    podem ter escapado; a migration 0013 já fez o backfill, este helper é a
+    segunda camada de defesa). Nunca deixar um endpoint autenticado 500/404
+    só porque o Profile está faltando.
+    """
+    profile, _created = Profile.objects.get_or_create(user=user)
+    return profile
+
+
+def get_or_create_profile_by_user_id(user_id, *, for_update=False):
+    """Variante de `get_or_create_profile()` para os endpoints internos que só
+    têm um `user_id` cru (webhook do Stripe, chamadas do node-api) — sem
+    instanciar `User`, sob lock opcional (select_for_update, para os
+    caminhos que já rodam dentro de uma transação com lock, ex.: resultado
+    de partida).
+
+    Confere a existência do User ANTES do get_or_create de propósito: uma
+    FK inválida (user_id que não existe) levanta IntegrityError no INSERT,
+    mas em Postgres, dentro de um savepoint aninhado, essa violação só é
+    detectada no fechamento do savepoint — tarde demais para um
+    try/except de escopo estreito. Checar a existência antes evita depender
+    desse timing.
+
+    Retorna None se `user_id` não corresponder a nenhum User (nada a
+    autocorrigir nesse caso).
+    """
+    if not User.objects.filter(id=user_id).exists():
+        return None
+    qs = Profile.objects.select_for_update() if for_update else Profile.objects
+    profile, _created = qs.get_or_create(user_id=user_id)
+    return profile
+
+
 class ModalityRating(models.Model):
     """
     Rating Glicko-2 de um perfil em uma modalidade (RF-PERF-02).

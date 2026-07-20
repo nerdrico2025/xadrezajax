@@ -28,6 +28,7 @@ interface Props {
 
 const FEATURES = [
   { icon: "infinite-outline",     label: "Partidas ilimitadas",          sub: "Sem o limite de 5 partidas por dia" },
+  { icon: "extension-puzzle-outline", label: "Problemas ilimitados",     sub: "Sem o limite diário de problemas" },
   { icon: "trophy-outline",       label: "Torneios exclusivos",          sub: "Participe de competições mensais" },
   { icon: "analytics-outline",    label: "Análise avançada de partidas", sub: "Revisão completa com sugestões" },
   { icon: "color-palette-outline",label: "Temas e peças premium",        sub: "Personalize o tabuleiro" },

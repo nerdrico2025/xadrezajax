@@ -163,8 +163,9 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    height: 36,
+    minHeight: 44,
     paddingHorizontal: 0,
+    paddingVertical: 8,
     position: "relative",
   },
   iconWrapper: {
@@ -192,18 +193,17 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
+    lineHeight: 22,
     paddingRight: 36,
-    marginTop: 19,
-    height: "100%",
-    margin: 0,
+    paddingVertical: 0,
     includeFontPadding: false,
   },
   visibilityToggle: {
     position: "absolute",
     right: 6,
+    top: 0,
+    bottom: 0,
     width: 32,
-    height: 32,
-    marginTop: 18,
     alignItems: "flex-end",
     justifyContent: "center",
   },
