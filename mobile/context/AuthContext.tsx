@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import { Alert } from "react-native";
 import { getItem, setItem, removeItem } from "@/utils/storage";
+import { setSessionListener, setSessionAccessToken } from "@/services/session";
 
 const ACCESS_TOKEN_KEY = "accessToken";
 const REFRESH_TOKEN_KEY = "refreshToken";
@@ -36,6 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     Promise.all([getItem(ACCESS_TOKEN_KEY), getItem(USER_KEY)]).then(
       ([storedToken, storedUser]) => {
+        setSessionAccessToken(storedToken);
         setToken(storedToken);
         if (storedUser) {
           try { setUser(JSON.parse(storedUser)); } catch {}
@@ -45,12 +48,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  // Liga o módulo de sessão ao estado React: access renovado atualiza o
+  // token do contexto; refresh expirado desloga com aviso claro (o
+  // RouteGuard do _layout manda para /login quando o token vira null).
+  useEffect(() => {
+    setSessionListener({
+      onAccessTokenRefreshed: (access) => setToken(access),
+      onSessionExpired: () => {
+        signOut();
+        Alert.alert("Sessão expirada", "Sua sessão expirou. Entre novamente.");
+      },
+    });
+    return () => setSessionListener({});
+  }, []);
+
   const signIn = async (access: string, refresh: string, authUser: AuthUser) => {
     await Promise.all([
       setItem(ACCESS_TOKEN_KEY, access),
       setItem(REFRESH_TOKEN_KEY, refresh),
       setItem(USER_KEY, JSON.stringify(authUser)),
     ]);
+    setSessionAccessToken(access);
     setToken(access);
     setUser(authUser);
   };
@@ -61,6 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       removeItem(REFRESH_TOKEN_KEY),
       removeItem(USER_KEY),
     ]);
+    setSessionAccessToken(null);
     setToken(null);
     setUser(null);
   };

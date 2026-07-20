@@ -1,4 +1,5 @@
 import { API_URL } from "./api";
+import { authFetch } from "./session";
 import type {
   OnboardingExperience,
   OnboardingFrequency,
@@ -23,12 +24,9 @@ export async function submitOnboarding(
   token: string,
   answers: OnboardingAnswers
 ): Promise<OnboardingResult> {
-  const res = await fetch(`${API_URL}/api/v1/auth/onboarding/`, {
+  const res = await authFetch(`${API_URL}/api/v1/auth/onboarding/`, token, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       experience: answers.experience,
       found_mate: answers.foundMate,

@@ -1,4 +1,5 @@
-import { API_URL } from "./api";
+import { API_URL, apiErrorMessage } from "./api";
+import { authFetch } from "./session";
 import type { Difficulty } from "@/constants/aiGame";
 
 export type RatingModality = "bullet" | "blitz" | "rapid";
@@ -47,16 +48,15 @@ export interface UpdateProfileData {
   bio?: string;
 }
 
-const headers = (token: string) => ({
-  Authorization: `Bearer ${token}`,
-  "Content-Type": "application/json",
-});
+const JSON_HEADERS = { "Content-Type": "application/json" };
 
 export async function getProfile(token: string): Promise<UserProfile> {
-  const res = await fetch(`${API_URL}/api/v1/auth/profile/`, {
-    headers: headers(token),
+  const res = await authFetch(`${API_URL}/api/v1/auth/profile/`, token, {
+    headers: JSON_HEADERS,
   });
-  if (!res.ok) throw new Error("Falha ao carregar perfil");
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, "Falha ao carregar o perfil"));
+  }
   return res.json();
 }
 
@@ -64,15 +64,13 @@ export async function updateProfile(
   token: string,
   data: UpdateProfileData
 ): Promise<UserProfile> {
-  const res = await fetch(`${API_URL}/api/v1/auth/profile/`, {
+  const res = await authFetch(`${API_URL}/api/v1/auth/profile/`, token, {
     method: "PATCH",
-    headers: headers(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const detail = body?.detail ?? body?.username?.[0] ?? body?.full_name?.[0] ?? `Erro ${res.status}`;
-    throw new Error(detail);
+    throw new Error(await apiErrorMessage(res, "Falha ao salvar o perfil"));
   }
   return res.json();
 }
@@ -86,12 +84,13 @@ export async function uploadAvatar(
   const formData = new FormData();
   formData.append("avatar", { uri, name: filename, type: `image/${ext}` } as any);
 
-  const res = await fetch(`${API_URL}/api/v1/auth/profile/`, {
+  const res = await authFetch(`${API_URL}/api/v1/auth/profile/`, token, {
     method: "PATCH",
-    headers: { Authorization: `Bearer ${token}` },
     body: formData,
   });
-  if (!res.ok) throw new Error("Falha ao enviar avatar");
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, "Falha ao enviar a foto"));
+  }
   return res.json();
 }
 
@@ -117,9 +116,10 @@ export async function getGameHistory(
   offset = 0,
   filter: HistoryFilter = "all"
 ): Promise<GameHistoryEntry[]> {
-  const res = await fetch(
+  const res = await authFetch(
     `${API_URL}/api/v1/auth/game/history/?limit=${limit}&offset=${offset}&filter=${filter}`,
-    { headers: headers(token) }
+    token,
+    { headers: JSON_HEADERS }
   );
   if (!res.ok) throw new Error("Falha ao carregar histórico");
   return res.json();
@@ -133,9 +133,9 @@ export async function reportAiResult(
   // Glicko-2 no backend (bullet < 3 min, blitz 3–10 min, rápido > 10/sem limite)
   timeControl: number | null = null
 ): Promise<{ rating: number; provisional: boolean; modality: RatingModality }> {
-  const res = await fetch(`${API_URL}/api/v1/auth/game/ai-result/`, {
+  const res = await authFetch(`${API_URL}/api/v1/auth/game/ai-result/`, token, {
     method: "POST",
-    headers: headers(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ result, difficulty, time_control: timeControl }),
   });
   if (!res.ok) throw new Error("Falha ao salvar resultado");
@@ -165,29 +165,36 @@ export async function changePassword(
   oldPassword: string,
   newPassword: string
 ): Promise<void> {
-  const res = await fetch(`${API_URL}/api/v1/auth/password/change/`, {
+  const res = await authFetch(`${API_URL}/api/v1/auth/password/change/`, token, {
     method: "POST",
-    headers: headers(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail ?? "Falha ao trocar senha");
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, "Falha ao trocar a senha"));
+  }
 }
 
 export async function deleteAccount(token: string, password: string): Promise<void> {
-  const res = await fetch(`${API_URL}/api/v1/auth/account/`, {
+  const res = await authFetch(`${API_URL}/api/v1/auth/account/`, token, {
     method: "DELETE",
-    headers: headers(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ password }),
   });
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail ?? "Falha ao excluir conta");
+    throw new Error(await apiErrorMessage(res, "Falha ao excluir a conta"));
   }
 }
 
 export function avatarUrl(path: string | null): string | null {
   if (!path) return null;
-  if (path.startsWith("http")) return path;
+  if (path.startsWith("http")) {
+    // Backend atrás de proxy pode montar a URL absoluta em http:// (mixed
+    // content — o device recusa a imagem). Se a API é https, o media também é.
+    if (API_URL.startsWith("https://") && path.startsWith("http://")) {
+      return `https://${path.slice("http://".length)}`;
+    }
+    return path;
+  }
   return `${API_URL}${path}`;
 }
