@@ -23,8 +23,9 @@ export function useProfile() {
       const data = await getProfile(token);
       setProfile(data);
       updateUser({ full_name: data.full_name, username: data.username, rating: data.rating });
-    } catch {
-      setError("Falha ao carregar perfil");
+    } catch (e: any) {
+      // Preserva a causa real (validação, rede, sessão) para a tela exibir.
+      setError(e?.message ?? "Falha ao carregar o perfil");
     } finally {
       setLoading(false);
     }
@@ -36,7 +37,9 @@ export function useProfile() {
 
   const update = useCallback(
     async (data: UpdateProfileData) => {
-      if (!token) return;
+      // Sem token não há como salvar — falhar visivelmente, nunca retornar em
+      // silêncio (a tela saía do modo edição como se tivesse salvado).
+      if (!token) throw new Error("Sessão indisponível. Entre novamente.");
       setSaving(true);
       try {
         const updated = await updateProfile(token, data);
@@ -52,7 +55,7 @@ export function useProfile() {
 
   const changeAvatar = useCallback(
     async (uri: string) => {
-      if (!token) return;
+      if (!token) throw new Error("Sessão indisponível. Entre novamente.");
       setSaving(true);
       try {
         const updated = await uploadAvatar(token, uri);

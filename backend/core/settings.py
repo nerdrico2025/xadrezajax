@@ -211,6 +211,11 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# O TLS termina no proxy (nginx/Cloudflare); sem honrar o X-Forwarded-Proto
+# que o nginx envia, request.build_absolute_uri() monta URLs absolutas (ex.:
+# avatar) com http:// — e o app recusa a imagem por mixed content.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 # ========================
 # DEFAULT AUTO FIELD
 # ========================

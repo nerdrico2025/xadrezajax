@@ -1,4 +1,5 @@
 import { API_URL } from "./api";
+import { authFetch as sessionFetch } from "./session";
 
 export type Friend = {
   friendship_id: number;
@@ -20,11 +21,11 @@ export type FriendRequest = {
 };
 
 async function authFetch(url: string, token: string, options: RequestInit = {}) {
-  return fetch(url, {
+  // Delegado ao módulo de sessão: renova o access token expirado e retenta.
+  return sessionFetch(url, token, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
       ...(options.headers ?? {}),
     },
   });

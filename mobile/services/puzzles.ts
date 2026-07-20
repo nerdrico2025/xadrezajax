@@ -1,4 +1,5 @@
 import { API_URL } from "./api";
+import { authFetch } from "./session";
 
 export type PuzzleDifficulty = "easy" | "medium" | "hard";
 
@@ -54,14 +55,11 @@ export function difficultyForRating(rating: number): PuzzleDifficulty {
   return "hard";
 }
 
-const headers = (token: string) => ({
-  Authorization: `Bearer ${token}`,
-  "Content-Type": "application/json",
-});
+const JSON_HEADERS = { "Content-Type": "application/json" };
 
 export async function getPuzzleStats(token: string): Promise<PuzzleStats> {
-  const res = await fetch(`${API_URL}/api/v1/puzzles/stats/`, {
-    headers: headers(token),
+  const res = await authFetch(`${API_URL}/api/v1/puzzles/stats/`, token, {
+    headers: JSON_HEADERS,
   });
   if (!res.ok) throw new Error("Falha ao carregar estatísticas de puzzles");
   return res.json();
@@ -71,9 +69,10 @@ export async function getNextPuzzle(
   token: string,
   difficulty: PuzzleDifficulty
 ): Promise<PuzzleData> {
-  const res = await fetch(
+  const res = await authFetch(
     `${API_URL}/api/v1/puzzles/next/?difficulty=${difficulty}`,
-    { headers: headers(token) }
+    token,
+    { headers: JSON_HEADERS }
   );
   if (res.status === 403) {
     const body = await res.json().catch(() => ({}));
@@ -92,9 +91,9 @@ export async function reportPuzzleProgress(
   solved: boolean,
   attempts: number
 ): Promise<{ puzzle_id: number; solved: boolean; attempts: number }> {
-  const res = await fetch(`${API_URL}/api/v1/puzzles/${puzzleId}/progress/`, {
+  const res = await authFetch(`${API_URL}/api/v1/puzzles/${puzzleId}/progress/`, token, {
     method: "POST",
-    headers: headers(token),
+    headers: JSON_HEADERS,
     body: JSON.stringify({ solved, attempts }),
   });
   if (res.status === 403) {

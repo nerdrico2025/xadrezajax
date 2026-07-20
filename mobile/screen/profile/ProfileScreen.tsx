@@ -19,6 +19,7 @@ import { useProfile } from "@/hooks/useProfile";
 import { useAuth } from "@/context/AuthContext";
 import { Colors } from "@/constants/theme";
 import { avatarUrl, type StatsBlock } from "@/services/profile";
+import { isSessionExpired } from "@/services/session";
 import GameHistoryScreen from "./GameHistoryScreen";
 import FriendsScreen from "./FriendsScreen";
 import MenuBottomSheet from "@/presentation/components/MenuBottomSheet";
@@ -28,7 +29,7 @@ export default function ProfileScreen() {
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
   const { signOut } = useAuth();
-  const { profile, loading, saving, update, changeAvatar } = useProfile();
+  const { profile, loading, saving, error, refresh, update, changeAvatar } = useProfile();
 
   const [showHistory, setShowHistory] = useState(false);
   const [showFriends, setShowFriends] = useState(false);
@@ -54,7 +55,9 @@ export default function ProfileScreen() {
       await update({ full_name: fullName, username: username || undefined, bio });
       setIsEditing(false);
     } catch (e: any) {
-      Alert.alert("Erro", e.message ?? "Falha ao salvar");
+      // Sessão expirada já dispara o alerta global + redirect do AuthContext.
+      if (isSessionExpired(e)) return;
+      Alert.alert("Erro ao salvar", e?.message || "Falha ao salvar o perfil");
     }
   }, [update, fullName, username, bio]);
 
@@ -73,8 +76,10 @@ export default function ProfileScreen() {
     if (!result.canceled && result.assets[0]) {
       try {
         await changeAvatar(result.assets[0].uri);
-      } catch {
-        Alert.alert("Erro", "Falha ao enviar foto");
+      } catch (e: any) {
+        if (isSessionExpired(e)) return;
+        // Expor a causa real — o catch vazio aqui escondia o erro do upload.
+        Alert.alert("Erro ao enviar a foto", e?.message || "Falha ao enviar a foto");
       }
     }
   }, [changeAvatar]);
@@ -85,6 +90,27 @@ export default function ProfileScreen() {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  // Perfil não carregou: mostrar a causa real e oferecer retry, em vez de
+  // renderizar a tela vazia ("—") como se nada tivesse acontecido.
+  if (!profile && error) {
+    return (
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <Ionicons name="cloud-offline-outline" size={40} color={colors.secondary} />
+        <Text style={[styles.errorTitle, { color: colors.text }]}>
+          Não foi possível carregar o perfil
+        </Text>
+        <Text style={[styles.errorDetail, { color: colors.secondary }]}>{error}</Text>
+        <Pressable
+          onPress={refresh}
+          style={[styles.retryButton, { backgroundColor: colors.primary }]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.retryButtonText}>Tentar novamente</Text>
+        </Pressable>
       </View>
     );
   }
@@ -311,7 +337,13 @@ function StatsBlockView({
 }
 
 const styles = StyleSheet.create({
-  centered: { flex: 1, alignItems: "center", justifyContent: "center" },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 8 },
+  errorTitle: { fontSize: 16, fontWeight: "700", textAlign: "center" },
+  errorDetail: { fontSize: 13, lineHeight: 18, textAlign: "center" },
+  retryButton: {
+    marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12,
+  },
+  retryButtonText: { color: "#fff", fontSize: 14, fontWeight: "600" },
   container: { alignItems: "center", paddingTop: 12, paddingHorizontal: 20 },
   header: {
     flexDirection: "row",
