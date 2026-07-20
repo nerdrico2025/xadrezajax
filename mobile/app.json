@@ -2,7 +2,7 @@
   "expo": {
     "name": "AJAX",
     "slug": "xadrez-ajax",
-    "version": "1.3.0",
+    "version": "1.3.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon_new.png",
     "scheme": "ajax",
