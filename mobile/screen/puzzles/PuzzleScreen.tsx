@@ -251,7 +251,7 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
         >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Puzzles</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Problemas</Text>
         <View style={styles.headerRight}>
           {/* Streak em dourado (0.6-D) — número em colors.text (contraste AA) */}
           <View
@@ -292,7 +292,7 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
         <View style={styles.center}>
           <Ionicons name="extension-puzzle-outline" size={40} color={colors.secondary} />
           <Text style={[styles.messageTitle, { color: colors.text }]}>
-            Puzzles chegando em breve
+            Problemas chegando em breve
           </Text>
           <Text style={[styles.messageSub, { color: colors.secondary }]}>
             Estamos preparando novos desafios táticos. Volte logo!
@@ -316,10 +316,10 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
             <Ionicons name="lock-closed" size={28} color={colors.accent} />
           </View>
           <Text style={[styles.messageTitle, { color: colors.text }]}>
-            Você completou os puzzles de hoje!
+            Você completou os problemas de hoje!
           </Text>
           <Text style={[styles.messageSub, { color: colors.secondary }]}>
-            O plano Grátis inclui {stats?.daily_puzzle_limit ?? 3} puzzles por dia.
+            O plano Grátis inclui {stats?.daily_puzzle_limit ?? 3} problemas por dia.
             Assine o Premium para treinar sem limites.
           </Text>
           <Button
@@ -344,7 +344,7 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
               {isFree ? ` · ${solvedToday}/${stats?.daily_puzzle_limit} hoje` : null}
             </Text>
             <Text style={[styles.feedback, { color: feedback === "wrong" ? colors.error : colors.text }]}>
-              {state === "solved" ? "Puzzle resolvido! 🎉" : feedbackText}
+              {state === "solved" ? "Problema resolvido! 🎉" : feedbackText}
             </Text>
           </View>
 
@@ -376,7 +376,7 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
                 </Text>
               </View>
               <Button
-                title="Próximo puzzle"
+                title="Próximo problema"
                 iconName="arrow-forward"
                 variant="accent"
                 onPress={loadPuzzle}

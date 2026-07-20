@@ -31,7 +31,7 @@ export interface PuzzleStats {
 export class DailyPuzzleLimitError extends Error {
   code = "daily_limit_reached" as const;
   constructor() {
-    super("Limite diário de puzzles do plano Grátis atingido");
+    super("Limite diário de problemas do plano Grátis atingido");
   }
 }
 
@@ -43,7 +43,7 @@ export class DailyPuzzleLimitError extends Error {
 export class NoPuzzlesAvailableError extends Error {
   code = "no_puzzles" as const;
   constructor() {
-    super("Nenhum puzzle disponível");
+    super("Nenhum problema disponível");
   }
 }
 
@@ -61,7 +61,7 @@ export async function getPuzzleStats(token: string): Promise<PuzzleStats> {
   const res = await authFetch(`${API_URL}/api/v1/puzzles/stats/`, token, {
     headers: JSON_HEADERS,
   });
-  if (!res.ok) throw new Error("Falha ao carregar estatísticas de puzzles");
+  if (!res.ok) throw new Error("Falha ao carregar estatísticas de problemas");
   return res.json();
 }
 
@@ -81,7 +81,7 @@ export async function getNextPuzzle(
   // 404 = banco sem puzzles ("Nenhum puzzle disponível"): não é erro de rede,
   // é ausência de conteúdo → estado vazio na tela.
   if (res.status === 404) throw new NoPuzzlesAvailableError();
-  if (!res.ok) throw new Error("Falha ao carregar o próximo puzzle");
+  if (!res.ok) throw new Error("Falha ao carregar o próximo problema");
   return res.json();
 }
 
@@ -100,6 +100,6 @@ export async function reportPuzzleProgress(
     const body = await res.json().catch(() => ({}));
     if (body?.code === "daily_limit_reached") throw new DailyPuzzleLimitError();
   }
-  if (!res.ok) throw new Error("Falha ao registrar progresso do puzzle");
+  if (!res.ok) throw new Error("Falha ao registrar progresso do problema");
   return res.json();
 }

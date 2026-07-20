@@ -27,7 +27,7 @@ from .glicko2 import (
     Rating as GlickoRating,
     rate as glicko2_rate,
 )
-from .models import ModalityRating
+from .models import ModalityRating, get_or_create_profile
 from .serializers import (
     ChessTokenObtainPairSerializer,
     ProfileSerializer,
@@ -293,12 +293,12 @@ class ProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        profile = request.user.profile
+        profile = get_or_create_profile(request.user)
         serializer = ProfileSerializer(profile, context={"request": request})
         return Response(serializer.data)
 
     def patch(self, request):
-        profile = request.user.profile
+        profile = get_or_create_profile(request.user)
         serializer = ProfileSerializer(
             profile, data=request.data, partial=True, context={"request": request}
         )
@@ -481,104 +481,100 @@ class GameResultView(APIView):
                 {"detail": "Dados inválidos."}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            from .models import GameHistory, Profile
+        from .models import GameHistory, get_or_create_profile_by_user_id
 
-            with transaction.atomic():
-                white_profile = Profile.objects.select_for_update().get(
-                    user_id=white_id
+        with transaction.atomic():
+            # Um usuário sem Profile se autocorrige (get_or_create), nunca
+            # 404 — mas só quando white_id/black_id de fato existem como
+            # User (a checagem de existência mora no helper, ver models.py).
+            white_profile = get_or_create_profile_by_user_id(white_id, for_update=True)
+            black_profile = get_or_create_profile_by_user_id(black_id, for_update=True)
+            if white_profile is None or black_profile is None:
+                return Response(
+                    {"detail": "Perfil não encontrado."},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-                black_profile = Profile.objects.select_for_update().get(
-                    user_id=black_id
-                )
-                if unrated:
-                    # Partida sem relógio não mexe no rating: leitura sem
-                    # lock/criação, só para histórico e resposta.
-                    white_rating = _modality_rating_snapshot(white_profile, modality)
-                    black_rating = _modality_rating_snapshot(black_profile, modality)
-                else:
-                    white_rating = _locked_modality_rating(white_profile, modality)
-                    black_rating = _locked_modality_rating(black_profile, modality)
+            if unrated:
+                # Partida sem relógio não mexe no rating: leitura sem
+                # lock/criação, só para histórico e resposta.
+                white_rating = _modality_rating_snapshot(white_profile, modality)
+                black_rating = _modality_rating_snapshot(black_profile, modality)
+            else:
+                white_rating = _locked_modality_rating(white_profile, modality)
+                black_rating = _locked_modality_rating(black_profile, modality)
 
-                w_before = round(white_rating.rating)
-                b_before = round(black_rating.rating)
-                # Snapshot pré-partida: os dois updates usam os valores
-                # antigos do oponente, nunca os recém-calculados.
-                white_pre = GlickoRating(
-                    white_rating.rating,
-                    white_rating.deviation,
-                    white_rating.volatility,
-                )
-                black_pre = GlickoRating(
-                    black_rating.rating,
-                    black_rating.deviation,
-                    black_rating.volatility,
-                )
+            w_before = round(white_rating.rating)
+            b_before = round(black_rating.rating)
+            # Snapshot pré-partida: os dois updates usam os valores
+            # antigos do oponente, nunca os recém-calculados.
+            white_pre = GlickoRating(
+                white_rating.rating,
+                white_rating.deviation,
+                white_rating.volatility,
+            )
+            black_pre = GlickoRating(
+                black_rating.rating,
+                black_rating.deviation,
+                black_rating.volatility,
+            )
 
-                if result == "white":
-                    score_white, score_black = WIN, LOSS
-                    white_profile.wins += 1
-                    black_profile.losses += 1
-                    w_result, b_result = "win", "loss"
-                elif result == "black":
-                    score_white, score_black = LOSS, WIN
-                    white_profile.losses += 1
-                    black_profile.wins += 1
-                    w_result, b_result = "loss", "win"
-                else:
-                    score_white = score_black = DRAW
-                    white_profile.draws += 1
-                    black_profile.draws += 1
-                    w_result = b_result = "draw"
+            if result == "white":
+                score_white, score_black = WIN, LOSS
+                white_profile.wins += 1
+                black_profile.losses += 1
+                w_result, b_result = "win", "loss"
+            elif result == "black":
+                score_white, score_black = LOSS, WIN
+                white_profile.losses += 1
+                black_profile.wins += 1
+                w_result, b_result = "loss", "win"
+            else:
+                score_white = score_black = DRAW
+                white_profile.draws += 1
+                black_profile.draws += 1
+                w_result = b_result = "draw"
 
-                if not unrated:
-                    _apply_glicko2_result(white_rating, black_pre, score_white)
-                    _apply_glicko2_result(black_rating, white_pre, score_black)
+            if not unrated:
+                _apply_glicko2_result(white_rating, black_pre, score_white)
+                _apply_glicko2_result(black_rating, white_pre, score_black)
 
-                    _sync_rating_mirror(white_profile, white_rating)
-                    _sync_rating_mirror(black_profile, black_rating)
-                white_profile.games_played += 1
-                black_profile.games_played += 1
+                _sync_rating_mirror(white_profile, white_rating)
+                _sync_rating_mirror(black_profile, black_rating)
+            white_profile.games_played += 1
+            black_profile.games_played += 1
 
-                white_profile.save(
-                    update_fields=["rating", "wins", "losses", "draws", "games_played"]
-                )
-                black_profile.save(
-                    update_fields=["rating", "wins", "losses", "draws", "games_played"]
-                )
+            white_profile.save(
+                update_fields=["rating", "wins", "losses", "draws", "games_played"]
+            )
+            black_profile.save(
+                update_fields=["rating", "wins", "losses", "draws", "games_played"]
+            )
 
-                w_name = (
-                    getattr(black_profile, "username", None)
-                    or black_profile.user.full_name
-                )
-                b_name = (
-                    getattr(white_profile, "username", None)
-                    or white_profile.user.full_name
-                )
-                GameHistory.objects.create(
-                    user=white_profile.user,
-                    opponent_name=w_name,
-                    result=w_result,
-                    mode=GameHistory.MODE_ONLINE,
-                    modality=modality,
-                    rating_before=w_before,
-                    rating_after=round(white_rating.rating),
-                    rated=not unrated,
-                )
-                GameHistory.objects.create(
-                    user=black_profile.user,
-                    opponent_name=b_name,
-                    result=b_result,
-                    mode=GameHistory.MODE_ONLINE,
-                    modality=modality,
-                    rating_before=b_before,
-                    rating_after=round(black_rating.rating),
-                    rated=not unrated,
-                )
-
-        except Profile.DoesNotExist:
-            return Response(
-                {"detail": "Perfil não encontrado."}, status=status.HTTP_404_NOT_FOUND
+            w_name = (
+                getattr(black_profile, "username", None) or black_profile.user.full_name
+            )
+            b_name = (
+                getattr(white_profile, "username", None) or white_profile.user.full_name
+            )
+            GameHistory.objects.create(
+                user=white_profile.user,
+                opponent_name=w_name,
+                result=w_result,
+                mode=GameHistory.MODE_ONLINE,
+                modality=modality,
+                rating_before=w_before,
+                rating_after=round(white_rating.rating),
+                rated=not unrated,
+            )
+            GameHistory.objects.create(
+                user=black_profile.user,
+                opponent_name=b_name,
+                result=b_result,
+                mode=GameHistory.MODE_ONLINE,
+                modality=modality,
+                rating_before=b_before,
+                rating_after=round(black_rating.rating),
+                rated=not unrated,
             )
 
         return Response(
@@ -638,69 +634,71 @@ class AiGameResultView(APIView):
 
         from .models import GameHistory, Profile
 
-        try:
-            with transaction.atomic():
-                profile = Profile.objects.select_for_update().get(user=request.user)
+        with transaction.atomic():
+            # Autenticado sem Profile se autocorrige (get_or_create), nunca
+            # 404 — era a causa real de partidas vs IA sumirem para contas
+            # órfãs. `user=request.user` sempre existe, então não há FK
+            # inválida a temer aqui (diferente do GameResultView, que recebe
+            # ids crus do node-api).
+            profile, _ = Profile.objects.select_for_update().get_or_create(
+                user=request.user
+            )
 
-                # Gating do plano Grátis (RF-MON-05, item 0.1): 5 partidas/dia
-                # (IA + online somadas). Plano pago (trialing/active) é
-                # ilimitado. Defesa em profundidade: a checagem principal é
-                # pré-jogo (GET /payments/can-play/, consultado pelo app antes
-                # de abrir o tabuleiro) — aqui é a rede de segurança contra
-                # clients que burlem o início. Partidas sem relógio (unrated,
-                # decisão do PR #68) não são gateadas, mas continuam contando
-                # no GameHistory (a regra de contagem não muda).
-                allowed, remaining = can_play_game(profile)
-                if not no_clock and not allowed:
-                    return Response(
-                        {
-                            "detail": (
-                                "Limite diário do plano Grátis atingido "
-                                f"({FREE_DAILY_GAME_LIMIT} partidas/dia). "
-                                "Assine o Premium para jogar sem limites."
-                            ),
-                            "code": "daily_limit_reached",
-                            "remaining_games_today": remaining,
-                        },
-                        status=status.HTTP_403_FORBIDDEN,
-                    )
-
-                # D1: rating SEMPRE congelado numa partida vs IA — leitura sem
-                # lock/criação, só para preencher histórico e resposta. Nada de
-                # Glicko-2 nem de espelho Profile.rating aqui.
-                modality_rating = _modality_rating_snapshot(profile, modality)
-                rating_before = round(modality_rating.rating)
-
-                if result == "win":
-                    profile.wins += 1
-                elif result == "loss":
-                    profile.losses += 1
-                else:
-                    profile.draws += 1
-
-                profile.games_played += 1
-                profile.save(update_fields=["wins", "losses", "draws", "games_played"])
-
-                difficulty_label = {
-                    "beginner": "IA Iniciante",
-                    "easy": "IA Fácil",
-                    "medium": "IA Médio",
-                    "hard": "IA Difícil",
-                    "master": "IA Mestre",
-                }
-                GameHistory.objects.create(
-                    user=request.user,
-                    opponent_name=difficulty_label[difficulty],
-                    result=result,
-                    mode=GameHistory.MODE_AI,
-                    modality=modality,
-                    rating_before=rating_before,
-                    rating_after=rating_before,  # D1: rating não muda
-                    rated=False,
+            # Gating do plano Grátis (RF-MON-05, item 0.1): 5 partidas/dia
+            # (IA + online somadas). Plano pago (trialing/active) é
+            # ilimitado. Defesa em profundidade: a checagem principal é
+            # pré-jogo (GET /payments/can-play/, consultado pelo app antes
+            # de abrir o tabuleiro) — aqui é a rede de segurança contra
+            # clients que burlem o início. Partidas sem relógio (unrated,
+            # decisão do PR #68) não são gateadas, mas continuam contando
+            # no GameHistory (a regra de contagem não muda).
+            allowed, remaining = can_play_game(profile)
+            if not no_clock and not allowed:
+                return Response(
+                    {
+                        "detail": (
+                            "Limite diário do plano Grátis atingido "
+                            f"({FREE_DAILY_GAME_LIMIT} partidas/dia). "
+                            "Assine o Premium para jogar sem limites."
+                        ),
+                        "code": "daily_limit_reached",
+                        "remaining_games_today": remaining,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
                 )
-        except Profile.DoesNotExist:
-            return Response(
-                {"detail": "Perfil não encontrado."}, status=status.HTTP_404_NOT_FOUND
+
+            # D1: rating SEMPRE congelado numa partida vs IA — leitura sem
+            # lock/criação, só para preencher histórico e resposta. Nada de
+            # Glicko-2 nem de espelho Profile.rating aqui.
+            modality_rating = _modality_rating_snapshot(profile, modality)
+            rating_before = round(modality_rating.rating)
+
+            if result == "win":
+                profile.wins += 1
+            elif result == "loss":
+                profile.losses += 1
+            else:
+                profile.draws += 1
+
+            profile.games_played += 1
+            profile.save(update_fields=["wins", "losses", "draws", "games_played"])
+
+            difficulty_label = {
+                "beginner": "IA Iniciante",
+                "easy": "IA Fácil",
+                "medium": "IA Médio",
+                "hard": "IA Difícil",
+                "master": "IA Mestre",
+            }
+            GameHistory.objects.create(
+                user=request.user,
+                opponent_name=difficulty_label[difficulty],
+                result=result,
+                mode=GameHistory.MODE_AI,
+                modality=modality,
+                rating_before=rating_before,
+                rating_after=rating_before,  # D1: rating não muda
+                rated=False,
             )
 
         return Response(
@@ -766,7 +764,9 @@ class OnboardingView(APIView):
         frequency = request.data.get("frequency")
 
         with transaction.atomic():
-            profile = Profile.objects.select_for_update().get(user=request.user)
+            profile, _ = Profile.objects.select_for_update().get_or_create(
+                user=request.user
+            )
 
             if profile.onboarding_completed_at is not None:
                 blitz = _modality_rating_snapshot(

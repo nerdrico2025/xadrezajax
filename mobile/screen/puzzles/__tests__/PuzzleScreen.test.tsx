@@ -146,7 +146,7 @@ describe("resolução do puzzle", () => {
 
     await makeMove("a1", "a8");
 
-    expect(hasText(tree.root, "Puzzle resolvido! 🎉")).toBe(true);
+    expect(hasText(tree.root, "Problema resolvido! 🎉")).toBe(true);
     expect(mockReportProgress).toHaveBeenCalledWith("test-token", 1, true, 1);
     expect(
       getBufferedEvents().some((e) => e.name === "puzzle_solved")
@@ -174,7 +174,7 @@ describe("resolução do puzzle", () => {
     expect(mockReportProgress).not.toHaveBeenCalled();
 
     await makeMove("h5", "d5");
-    expect(hasText(tree.root, "Puzzle resolvido! 🎉")).toBe(true);
+    expect(hasText(tree.root, "Problema resolvido! 🎉")).toBe(true);
     expect(mockReportProgress).toHaveBeenCalledWith("test-token", 2, true, 1);
   });
 });
@@ -189,7 +189,7 @@ describe("gating de 3 puzzles/dia do plano Grátis", () => {
     const tree = await render({ onUpgrade });
 
     expect(mockGetNext).not.toHaveBeenCalled();
-    expect(hasText(tree.root, "Você completou os puzzles de hoje!")).toBe(true);
+    expect(hasText(tree.root, "Você completou os problemas de hoje!")).toBe(true);
     expect(
       getBufferedEvents().some((e) => e.name === "paywall_shown")
     ).toBe(true);
@@ -210,7 +210,7 @@ describe("gating de 3 puzzles/dia do plano Grátis", () => {
     mockGetNext.mockRejectedValue(new DailyPuzzleLimitError());
     const tree = await render();
 
-    expect(hasText(tree.root, "Você completou os puzzles de hoje!")).toBe(true);
+    expect(hasText(tree.root, "Você completou os problemas de hoje!")).toBe(true);
   });
 });
 
@@ -219,7 +219,7 @@ describe("banco de puzzles sem conteúdo (404)", () => {
     mockGetNext.mockRejectedValue(new NoPuzzlesAvailableError());
     const tree = await render();
 
-    expect(hasText(tree.root, "Puzzles chegando em breve")).toBe(true);
+    expect(hasText(tree.root, "Problemas chegando em breve")).toBe(true);
     // Não é o estado de erro de rede
     expect(hasText(tree.root, "Não foi possível carregar")).toBe(false);
   });

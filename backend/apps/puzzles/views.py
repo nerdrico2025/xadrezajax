@@ -12,7 +12,7 @@ from apps.payments.access import (
     can_solve_puzzle,
     has_paid_access,
 )
-from apps.users.models import Profile
+from apps.users.models import get_or_create_profile
 
 from .models import Puzzle, UserPuzzleProgress
 
@@ -22,7 +22,7 @@ def _daily_limit_response(remaining):
         {
             "detail": (
                 "Limite diário do plano Grátis atingido "
-                f"({FREE_DAILY_PUZZLE_LIMIT} puzzles/dia). "
+                f"({FREE_DAILY_PUZZLE_LIMIT} problemas/dia). "
                 "Assine o Premium para treinar sem limites."
             ),
             "code": "daily_limit_reached",
@@ -102,7 +102,7 @@ class PuzzleDetailView(APIView):
             puzzle = Puzzle.objects.get(pk=pk, is_active=True)
         except Puzzle.DoesNotExist:
             return Response(
-                {"detail": "Puzzle não encontrado."}, status=status.HTTP_404_NOT_FOUND
+                {"detail": "Problema não encontrado."}, status=status.HTTP_404_NOT_FOUND
             )
 
         prog = UserPuzzleProgress.objects.filter(
@@ -136,7 +136,7 @@ class NextPuzzleView(APIView):
         # Gating do plano Grátis (RF-MON-05, item 0.2): pré-gate antes de
         # entregar um novo puzzle. A tela consulta stats/ para o contador;
         # aqui é a trava de quem pede o próximo puzzle já sem cota.
-        profile = Profile.objects.get(user=request.user)
+        profile = get_or_create_profile(request.user)
         allowed, remaining = can_solve_puzzle(profile)
         if not allowed:
             return _daily_limit_response(remaining)
@@ -160,7 +160,7 @@ class NextPuzzleView(APIView):
 
         if not puzzle:
             return Response(
-                {"detail": "Nenhum puzzle disponível."},
+                {"detail": "Nenhum problema disponível."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -198,7 +198,7 @@ class PuzzleProgressView(APIView):
             puzzle = Puzzle.objects.get(id=pk, is_active=True)
         except Puzzle.DoesNotExist:
             return Response(
-                {"detail": "Puzzle não encontrado."}, status=status.HTTP_404_NOT_FOUND
+                {"detail": "Problema não encontrado."}, status=status.HTTP_404_NOT_FOUND
             )
 
         solved = bool(request.data.get("solved", False))
@@ -212,7 +212,7 @@ class PuzzleProgressView(APIView):
         ).first()
         records_new_solve = solved and not (existing and existing.solved)
         if records_new_solve:
-            profile = Profile.objects.get(user=request.user)
+            profile = get_or_create_profile(request.user)
             allowed, remaining = can_solve_puzzle(profile)
             if not allowed:
                 return _daily_limit_response(remaining)
@@ -257,7 +257,7 @@ class PuzzleStatsView(APIView):
         total = Puzzle.objects.filter(is_active=True).count()
         attempts = progress_qs.aggregate(total=Sum("attempts"))["total"] or 0
 
-        profile = Profile.objects.get(user=request.user)
+        profile = get_or_create_profile(request.user)
         paid = has_paid_access(profile)
         _, remaining = can_solve_puzzle(profile)
 

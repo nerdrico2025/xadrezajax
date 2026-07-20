@@ -40,8 +40,8 @@ class Puzzle(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "Puzzle"
-        verbose_name_plural = "Puzzles"
+        verbose_name = "Problema"
+        verbose_name_plural = "Problemas"
         ordering = ["rating", "id"]
 
     def __str__(self):
@@ -62,8 +62,8 @@ class UserPuzzleProgress(models.Model):
 
     class Meta:
         unique_together = ("user", "puzzle")
-        verbose_name = "Progresso de Puzzle"
-        verbose_name_plural = "Progressos de Puzzle"
+        verbose_name = "Progresso de Problema"
+        verbose_name_plural = "Progressos de Problema"
 
     def __str__(self):
         status = "✓" if self.solved else "✗"
