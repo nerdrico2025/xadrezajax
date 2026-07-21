@@ -3,6 +3,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
     AiGameResultView,
+    CampaignProgressView,
     ChangePasswordView,
     ChessTokenObtainPairView,
     DeleteAccountView,
@@ -46,6 +47,7 @@ urlpatterns = [
     path("onboarding/", OnboardingView.as_view(), name="onboarding"),
     path("game/result/", GameResultView.as_view(), name="game-result"),
     path("game/ai-result/", AiGameResultView.as_view(), name="game-ai-result"),
+    path("campaign/", CampaignProgressView.as_view(), name="campaign-progress"),
     path("game/history/", GameHistoryView.as_view(), name="game-history"),
     path("leaderboard/", LeaderboardView.as_view(), name="leaderboard"),
     path("password/change/", ChangePasswordView.as_view(), name="password-change"),
