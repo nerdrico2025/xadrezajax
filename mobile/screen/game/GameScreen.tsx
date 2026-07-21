@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { getBestMove } from "@/services/game";
 import { parseUciMove } from "@/utils/chessSpecialMoves";
 import { reportAiResult } from "@/services/profile";
+import { getCampaignProgress } from "@/services/campaign";
 import { logEvent } from "@/services/analytics";
 import { saveGame, clearSavedGame, type SavedAiGame } from "@/utils/savedGame";
 import { useChessSound } from "@/hooks/useChessSound";
@@ -20,12 +21,15 @@ import { Colors } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
 import { useBoardTheme } from "@/context/BoardThemeContext";
 import { toChessboardColors } from "@/constants/boardThemes";
-import GameOverModal, { type GameResult } from "./GameOverModal";
+import GameOverModal, {
+  type GameResult,
+  type CampaignUnlockInfo,
+} from "./GameOverModal";
 import AiThinkingIndicator from "./AiThinkingIndicator";
 import CapturedPieces from "./CapturedPieces";
 import ConfirmModal from "@/components/ConfirmModal";
 import ChessClock from "@/components/ChessClock";
-import type { Difficulty, PlayerColor } from "@/constants/aiGame";
+import { AI_LEVELS, type Difficulty, type PlayerColor } from "@/constants/aiGame";
 
 interface GameScreenProps {
   onLeave?: () => void;
@@ -126,6 +130,7 @@ export default function GameScreen({
     }
   }, []);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
+  const [campaignUnlock, setCampaignUnlock] = useState<CampaignUnlockInfo | null>(null);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [showDrawConfirm, setShowDrawConfirm] = useState(false);
   const [moveCount, setMoveCount] = useState(savedGame?.moveCount ?? 0);
@@ -151,20 +156,41 @@ export default function GameScreen({
     clock.pause();
     clearSavedGame().catch(() => {});
     setGameResult(result);
+    setCampaignUnlock(null);
     if (authToken) {
       // Persiste a partida vs IA no histórico/estatísticas (decisão D1: nunca
       // altera o rating). Falha não pode ser silenciosa — era a causa provável
       // de partidas "sumirem" do Perfil (diagnóstico do PR B).
-      reportAiResult(authToken, result.outcome, difficulty, timeControl).catch(
-        (e) => {
+      reportAiResult(authToken, result.outcome, difficulty, timeControl)
+        .then(async () => {
+          // Modo Campanha: só vitória progride. Busca o estado pós-partida
+          // para detectar se ESTA vitória cruzou o limiar de desbloqueio —
+          // vitorias === vitorias_para_desbloquear é o sinal exato (o
+          // contador só sobe de 1 em 1, nunca pula), sem precisar de um
+          // "antes" separado nem de mudança no retorno do ai-result.
+          // Decorativo: se falhar, só não mostra a comemoração — não é
+          // motivo para travar o fim de jogo nem para erro visível aqui.
+          if (result.outcome !== "win") return;
+          try {
+            const progress = await getCampaignProgress(authToken);
+            const row = progress.find((p) => p.nivel === difficulty);
+            if (row && row.vitorias === row.vitorias_para_desbloquear && row.selo_concedido) {
+              const idx = AI_LEVELS.findIndex((l) => l.id === difficulty);
+              const next = AI_LEVELS[idx + 1] ?? null;
+              setCampaignUnlock({ dominatedLevel: difficulty, nextLevel: next?.id ?? null });
+            }
+          } catch {
+            // silencioso de propósito — ver comentário acima.
+          }
+        })
+        .catch((e) => {
           console.error("[ai-result] falha ao registrar partida vs IA", e);
           logEvent("ai_result_error", {
             difficulty,
             time_control: timeControl,
             message: (e as Error)?.message,
           });
-        }
-      );
+        });
     }
   }, [authToken, difficulty, clock, timeControl]);
 
@@ -273,6 +299,7 @@ export default function GameScreen({
     setPlayerCaptures([]);
     setAiCaptures([]);
     setGameResult(null);
+    setCampaignUnlock(null);
     setMoveCount(0);
     setClockTimedOut(null);
     clock.reset();
@@ -480,6 +507,7 @@ export default function GameScreen({
         result={gameResult}
         onNewGame={handleNewGame}
         onLeave={() => onLeave?.()}
+        campaignUnlock={campaignUnlock}
       />
 
       <ConfirmModal

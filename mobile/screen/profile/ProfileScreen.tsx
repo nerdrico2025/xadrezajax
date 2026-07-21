@@ -16,10 +16,13 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { useTheme } from "@/hooks/useTheme";
 import { useProfile } from "@/hooks/useProfile";
+import { useCampaignProgress } from "@/hooks/useCampaignProgress";
 import { useAuth } from "@/context/AuthContext";
 import { Colors } from "@/constants/theme";
 import { avatarUrl, type StatsBlock } from "@/services/profile";
+import type { CampaignLevelProgress } from "@/services/campaign";
 import { isSessionExpired } from "@/services/session";
+import { AI_LEVEL_BY_ID, AI_LEVELS } from "@/constants/aiGame";
 import GameHistoryScreen from "./GameHistoryScreen";
 import FriendsScreen from "./FriendsScreen";
 import MenuBottomSheet from "@/presentation/components/MenuBottomSheet";
@@ -30,6 +33,12 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { signOut } = useAuth();
   const { profile, loading, saving, error, refresh, update, changeAvatar } = useProfile();
+  const {
+    progress: campaignProgress,
+    loading: campaignLoading,
+    error: campaignError,
+    refresh: refreshCampaign,
+  } = useCampaignProgress();
 
   const [showHistory, setShowHistory] = useState(false);
   const [showFriends, setShowFriends] = useState(false);
@@ -236,6 +245,15 @@ export default function ProfileScreen() {
         footnote="Partidas contra a IA entram no seu histórico, mas não alteram seu rating."
       />
 
+      {/* Selos do Modo Campanha — um por nível dominado (3 vitórias). */}
+      <CampaignBadgesRow
+        progress={campaignProgress}
+        loading={campaignLoading}
+        error={campaignError}
+        onRetry={refreshCampaign}
+        colors={colors}
+      />
+
       {/* Bio */}
       <View style={styles.bioSection}>
         <Text style={[styles.sectionLabel, { color: colors.secondary }]}>Bio</Text>
@@ -336,6 +354,99 @@ function StatsBlockView({
   );
 }
 
+function CampaignBadgesRow({
+  progress,
+  loading,
+  error,
+  onRetry,
+  colors,
+}: {
+  progress: CampaignLevelProgress[] | null;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+  colors: Record<string, string>;
+}) {
+  const showBadge = (level: CampaignLevelProgress) => {
+    const label = AI_LEVEL_BY_ID[level.nivel].label;
+    Alert.alert(
+      label,
+      level.selo_concedido
+        ? `Selo conquistado — nível dominado (3 vitórias vs IA).`
+        : `Ainda não conquistado — ${level.vitorias}/${level.vitorias_para_desbloquear} vitórias.`
+    );
+  };
+
+  return (
+    <View style={styles.statsBlock}>
+      <Text style={[styles.blockTitle, { color: colors.accent }]}>
+        Selos da Campanha
+      </Text>
+
+      {loading && (
+        <View style={styles.campaignBadgesStatus}>
+          <ActivityIndicator size="small" color={colors.accent} />
+        </View>
+      )}
+
+      {!loading && error && !progress && (
+        <View style={styles.campaignBadgesStatus}>
+          <Text style={[styles.blockFootnote, { color: colors.secondary }]}>{error}</Text>
+          <Pressable
+            onPress={onRetry}
+            accessibilityRole="button"
+            accessibilityLabel="Tentar novamente"
+          >
+            <Text style={[styles.campaignBadgesRetry, { color: colors.accentOnLight }]}>
+              Tentar novamente
+            </Text>
+          </Pressable>
+        </View>
+      )}
+
+      {!loading && progress && (
+        <View style={styles.campaignBadgesRow}>
+          {AI_LEVELS.map((l) => {
+            const level = progress.find((p) => p.nivel === l.id);
+            const conquered = level?.selo_concedido ?? false;
+            return (
+              <Pressable
+                key={l.id}
+                onPress={() => level && showBadge(level)}
+                style={[
+                  styles.campaignBadge,
+                  {
+                    backgroundColor: conquered ? colors.accentMuted : "transparent",
+                    borderColor: conquered ? colors.accent : colors.divider,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`Selo de ${l.label}, ${
+                  conquered ? "conquistado" : "não conquistado"
+                }`}
+              >
+                <Ionicons
+                  name={conquered ? "ribbon" : "ribbon-outline"}
+                  size={22}
+                  color={conquered ? colors.accentOnLight : colors.secondary}
+                />
+                <Text
+                  style={[
+                    styles.campaignBadgeLabel,
+                    { color: conquered ? colors.accentOnLight : colors.secondary },
+                  ]}
+                >
+                  {l.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 8 },
   errorTitle: { fontSize: 16, fontWeight: "700", textAlign: "center" },
@@ -402,6 +513,24 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8, marginBottom: 8,
   },
   blockFootnote: { fontSize: 12, lineHeight: 16, marginTop: 6 },
+  campaignBadgesStatus: { alignItems: "center", gap: 8, paddingVertical: 8 },
+  campaignBadgesRetry: { fontSize: 13, fontWeight: "600", marginTop: 2 },
+  campaignBadgesRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  campaignBadge: {
+    flex: 1,
+    minHeight: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
+  campaignBadgeLabel: { fontSize: 10, fontWeight: "700", textAlign: "center" },
   statsCard: {
     flexDirection: "row", width: "100%", borderRadius: 16,
     paddingVertical: 16,
