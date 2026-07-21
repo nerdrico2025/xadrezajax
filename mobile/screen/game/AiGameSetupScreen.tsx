@@ -22,9 +22,12 @@ import {
 import {
   AI_LEVELS,
   AI_LEVEL_BY_ID,
-  AI_TIME_CONTROLS,
   AI_TIME_BY_ID,
-  AI_TIME_GROUP_ORDER,
+  AI_TIME_CATEGORIES,
+  AI_TIME_CONTROLS,
+  DEFAULT_TIME_ID,
+  THOUGHTFUL_DEFAULT_ID,
+  THOUGHTFUL_OPTIONS,
   type AiTimeControl,
   type ColorChoice,
   type Difficulty,
@@ -59,20 +62,34 @@ const COLOR_LABEL: Record<ColorChoice, string> = {
   random: "Aleatório",
 };
 
-const STEP_TITLES = ["Dificuldade", "Cor das peças", "Controle de tempo"];
+/** Opções de tempo agrupadas por categoria — para resolver o toque direto
+ *  nas categorias de valor único (Relâmpago/Rápido/Sem tempo). */
+const AI_TIME_CONTROLS_BY_CATEGORY = AI_TIME_CONTROLS.reduce(
+  (acc, t) => {
+    (acc[t.category] ??= []).push(t);
+    return acc;
+  },
+  {} as Record<string, AiTimeControl[]>
+);
+
+// Wizard de 2 passos: dificuldade → cor + tempo na mesma tela.
+const STEP_TITLES = ["Dificuldade", "Cor e tempo"];
+const LAST_STEP = 2;
 
 export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2>(1);
   const [difficulty, setDifficulty] = useState<Difficulty>(
     initial?.difficulty ?? "medium"
   );
   const [color, setColor] = useState<ColorChoice>(initial?.color ?? "w");
+  // Config salva de versões anteriores pode apontar para um id que não existe
+  // mais (a nomenclatura de tempo mudou) — o fallback cobre isso.
   const [timeId, setTimeId] = useState<string>(
-    initial && AI_TIME_BY_ID[initial.timeId] ? initial.timeId : "blitz_5_0"
+    initial && AI_TIME_BY_ID[initial.timeId] ? initial.timeId : DEFAULT_TIME_ID
   );
 
   // Modo Campanha: níveis travados viram cadeado no passo 1. Erro sempre
@@ -101,14 +118,12 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
 
   const summary = useMemo(
     () =>
-      `${level.label} · ~${level.elo}  ·  ${COLOR_LABEL[color]}  ·  ${
-        time.base === null ? "Sem limite" : time.label
-      }`,
+      `${level.label} · ~${level.elo}  ·  ${COLOR_LABEL[color]}  ·  ${time.label}`,
     [level, color, time]
   );
 
   const goBack = () => {
-    if (step > 1) setStep((s) => (s - 1) as 1 | 2 | 3);
+    if (step > 1) setStep((s) => (s - 1) as 1 | 2);
     else onBack();
   };
 
@@ -119,13 +134,24 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
 
   const handlePrimary = () => {
     if (campaignBlocking) return;
-    if (step < 3) {
-      setStep((s) => (s + 1) as 1 | 2 | 3);
+    if (step < LAST_STEP) {
+      setStep((s) => (s + 1) as 1 | 2);
       return;
     }
     const playerColor: PlayerColor =
       color === "random" ? (Math.random() < 0.5 ? "w" : "b") : color;
     onStart({ difficulty, playerColor, color, timeControl: time });
+  };
+
+  /** Toque numa categoria de tempo. "Pensado" abre as durações na própria
+   *  tela e já deixa uma selecionada (o resumo precisa de valor válido). */
+  const handleTimeCategoryPress = (category: (typeof AI_TIME_CATEGORIES)[number]) => {
+    if (!category.expandable) {
+      const option = AI_TIME_CONTROLS_BY_CATEGORY[category.id]?.[0];
+      if (option) setTimeId(option.id);
+      return;
+    }
+    if (time.category !== category.id) setTimeId(THOUGHTFUL_DEFAULT_ID);
   };
 
   const handleLockedLevelPress = (l: (typeof AI_LEVELS)[number], index: number) => {
@@ -140,14 +166,6 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
     );
   };
 
-  const timeGroups = useMemo(
-    () =>
-      AI_TIME_GROUP_ORDER.map((group) => ({
-        group,
-        options: AI_TIME_CONTROLS.filter((t) => t.group === group),
-      })),
-    []
-  );
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -161,7 +179,7 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
       </View>
 
       <View style={styles.stepRow}>
-        {[1, 2, 3].map((s) => (
+        {[1, 2].map((s) => (
           <View key={s} style={styles.stepItem}>
             <View
               style={[
@@ -176,7 +194,7 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
                 {s}
               </Text>
             </View>
-            {s < 3 && (
+            {s < LAST_STEP && (
               <View style={[styles.stepBar, { backgroundColor: s < step ? colors.accent : colors.divider }]} />
             )}
           </View>
@@ -314,78 +332,137 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
             );
           })}
 
-        {/* Passo 2 — Cor */}
-        {step === 2 &&
-          COLOR_OPTIONS.map((c) => {
-            const selected = color === c.id;
-            return (
-              <Pressable
-                key={c.id}
-                onPress={() => setColor(c.id)}
-                style={[
-                  styles.optionCard,
-                  {
-                    borderColor: selected ? colors.accent : colors.divider,
-                    backgroundColor: selected ? colors.accent + "18" : colors.card,
-                    borderWidth: selected ? 2 : 1,
-                  },
-                ]}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                accessibilityLabel={c.label}
-              >
-                <Ionicons name={c.icon as any} size={24} color={selected ? colors.accent : colors.text} />
-                <View style={styles.optionText}>
-                  <Text style={[styles.optionLabel, { color: colors.text }]}>{c.label}</Text>
-                  <Text style={[styles.optionSub, { color: colors.secondary }]}>{c.sub}</Text>
-                </View>
-                {selected && <Ionicons name="checkmark-circle" size={22} color={colors.accent} />}
-              </Pressable>
-            );
-          })}
+        {/* Passo 2 — Cor das peças + controle de tempo na MESMA tela */}
+        {step === 2 && (
+          <>
+            <Text style={[styles.sectionLabel, { color: colors.secondary }]}>
+              Cor das peças
+            </Text>
+            {COLOR_OPTIONS.map((c) => {
+              const selected = color === c.id;
+              return (
+                <Pressable
+                  key={c.id}
+                  onPress={() => setColor(c.id)}
+                  style={[
+                    styles.optionCard,
+                    {
+                      borderColor: selected ? colors.accent : colors.divider,
+                      backgroundColor: selected ? colors.accent + "18" : colors.card,
+                      borderWidth: selected ? 2 : 1,
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={c.label}
+                >
+                  <Ionicons name={c.icon as any} size={24} color={selected ? colors.accent : colors.text} />
+                  <View style={styles.optionText}>
+                    <Text style={[styles.optionLabel, { color: colors.text }]}>{c.label}</Text>
+                    <Text style={[styles.optionSub, { color: colors.secondary }]}>{c.sub}</Text>
+                  </View>
+                  {selected && <Ionicons name="checkmark-circle" size={22} color={colors.accent} />}
+                </Pressable>
+              );
+            })}
 
-        {/* Passo 3 — Controle de tempo */}
-        {step === 3 &&
-          timeGroups.map(({ group, options }) => (
-            <View key={group} style={styles.timeGroup}>
-              <Text style={[styles.groupLabel, { color: colors.secondary }]}>{group}</Text>
-              <View style={styles.chips}>
-                {options.map((t) => {
-                  const selected = timeId === t.id;
-                  return (
-                    <Pressable
-                      key={t.id}
-                      onPress={() => setTimeId(t.id)}
-                      style={[
-                        styles.chip,
-                        {
-                          borderColor: selected ? colors.accent : colors.divider,
-                          backgroundColor: selected ? colors.accent + "22" : colors.card,
-                        },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      accessibilityLabel={`${group} ${t.label}`}
-                    >
-                      <Text
-                        style={[
-                          styles.chipText,
-                          { color: selected ? colors.accent : colors.text, fontWeight: selected ? "800" : "600" },
-                        ]}
-                      >
-                        {t.label}
+            <Text
+              style={[styles.sectionLabel, styles.sectionLabelSpaced, { color: colors.secondary }]}
+            >
+              Tempo de partida
+            </Text>
+            {AI_TIME_CATEGORIES.map((category) => {
+              const selected = time.category === category.id;
+              return (
+                <View key={category.id}>
+                  <Pressable
+                    onPress={() => handleTimeCategoryPress(category)}
+                    style={[
+                      styles.optionCard,
+                      {
+                        borderColor: selected ? colors.accent : colors.divider,
+                        backgroundColor: selected ? colors.accent + "18" : colors.card,
+                        borderWidth: selected ? 2 : 1,
+                      },
+                      // Cola a expansão do "Pensado" no card que a abriu.
+                      selected && category.expandable && styles.optionCardExpanded,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={category.label}
+                  >
+                    <Ionicons
+                      name={category.icon as any}
+                      size={24}
+                      color={selected ? colors.accent : colors.text}
+                    />
+                    <View style={styles.optionText}>
+                      <Text style={[styles.optionLabel, { color: colors.text }]}>
+                        {category.label}
                       </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          ))}
+                      <Text style={[styles.optionSub, { color: colors.secondary }]}>
+                        {category.sub}
+                      </Text>
+                    </View>
+                    {selected && (
+                      <Ionicons name="checkmark-circle" size={22} color={colors.accent} />
+                    )}
+                  </Pressable>
 
-        {step === 3 && time.base === null && (
-          <Text style={[styles.note, { color: colors.secondary }]}>
-            Partidas sem limite de tempo não valem rating.
-          </Text>
+                  {/* "Pensado": durações expandem inline, sem modal nem
+                      segundo nível de navegação. */}
+                  {selected && category.expandable && (
+                    <View
+                      style={[
+                        styles.durationRow,
+                        { borderColor: colors.accent, backgroundColor: colors.card },
+                      ]}
+                    >
+                      {THOUGHTFUL_OPTIONS.map((option) => {
+                        const durationSelected = timeId === option.id;
+                        return (
+                          <Pressable
+                            key={option.id}
+                            onPress={() => setTimeId(option.id)}
+                            style={[
+                              styles.durationChip,
+                              {
+                                borderColor: durationSelected ? colors.accent : colors.divider,
+                                backgroundColor: durationSelected
+                                  ? colors.accent + "22"
+                                  : "transparent",
+                              },
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: durationSelected }}
+                            accessibilityLabel={`Pensado ${option.label}`}
+                          >
+                            <Text
+                              style={[
+                                styles.durationChipText,
+                                {
+                                  color: durationSelected ? colors.accent : colors.text,
+                                  fontWeight: durationSelected ? "800" : "600",
+                                },
+                              ]}
+                            >
+                              {option.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+
+            {time.base === null && (
+              <Text style={[styles.note, { color: colors.secondary }]}>
+                Partidas sem relógio não valem rating.
+              </Text>
+            )}
+          </>
         )}
       </ScrollView>
 
@@ -402,10 +479,10 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
             { backgroundColor: colors.accent, opacity: campaignBlocking ? 0.5 : 1 },
           ]}
           accessibilityRole="button"
-          accessibilityLabel={step < 3 ? "Continuar" : "Iniciar partida"}
+          accessibilityLabel={step < LAST_STEP ? "Continuar" : "Iniciar partida"}
         >
           <Text style={[styles.ctaText, { color: colors.accentText }]}>
-            {step < 3 ? "Continuar" : "Iniciar partida"}
+            {step < LAST_STEP ? "Continuar" : "Iniciar partida"}
           </Text>
         </Pressable>
       </View>
@@ -479,21 +556,43 @@ const styles = StyleSheet.create({
   },
   campaignProgressText: { fontSize: 12, fontWeight: "700" },
 
-  timeGroup: { marginBottom: 18 },
-  groupLabel: {
-    fontSize: 12, fontWeight: "700", textTransform: "uppercase",
-    letterSpacing: 0.8, marginBottom: 10,
+  // Rótulos das duas seções do passo 2 (cor / tempo) na mesma tela.
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 10,
   },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  chip: {
-    minWidth: 64, minHeight: 44,
-    paddingHorizontal: 16,
+  sectionLabelSpaced: { marginTop: 20 },
+
+  // "Pensado" expandido: o card perde o arredondamento de baixo para
+  // encostar na faixa de durações.
+  optionCardExpanded: {
+    marginBottom: 0,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0,
+  },
+  durationRow: {
+    flexDirection: "row",
+    gap: 10,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderTopWidth: 0,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+  },
+  durationChip: {
+    flex: 1,
+    minHeight: 44,
     borderRadius: 12,
     borderWidth: 1.5,
     alignItems: "center",
     justifyContent: "center",
   },
-  chipText: { fontSize: 15 },
+  durationChipText: { fontSize: 15 },
   note: { fontSize: 13, marginTop: 4, textAlign: "center" },
 
   footer: {

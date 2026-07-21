@@ -97,8 +97,8 @@ beforeEach(() => {
   mockQaUnlock = false;
 });
 
-describe("AiGameSetupScreen (wizard de 3 passos)", () => {
-  it("nenhuma escolha isolada inicia a partida — só 'Iniciar partida' no passo 3", async () => {
+describe("AiGameSetupScreen (wizard de 2 passos)", () => {
+  it("nenhuma escolha isolada inicia a partida — só 'Iniciar partida' no passo 2", async () => {
     const onStart = jest.fn();
     const tree = await render({ onStart });
 
@@ -106,14 +106,11 @@ describe("AiGameSetupScreen (wizard de 3 passos)", () => {
     await pressLabel(tree.root, "Iniciante, aproximadamente 800 de rating");
     expect(onStart).not.toHaveBeenCalled();
 
-    // Avança para o passo 2 (cor) — escolher cor NÃO inicia
+    // Passo 2: cor e tempo na MESMA tela — nenhum dos dois inicia sozinho
     await pressLabel(tree.root, "Continuar");
     await pressLabel(tree.root, "Pretas");
     expect(onStart).not.toHaveBeenCalled();
-
-    // Avança para o passo 3 (tempo) — escolher tempo NÃO inicia
-    await pressLabel(tree.root, "Continuar");
-    await pressLabel(tree.root, "Rápido 15+10");
+    await pressLabel(tree.root, "Relâmpago");
     expect(onStart).not.toHaveBeenCalled();
 
     // Só agora inicia
@@ -123,32 +120,128 @@ describe("AiGameSetupScreen (wizard de 3 passos)", () => {
     expect(cfg.difficulty).toBe("beginner");
     expect(cfg.playerColor).toBe("b");
     expect(cfg.color).toBe("b");
-    expect(cfg.timeControl.id).toBe("rapid_15_10");
-    expect(cfg.timeControl.increment).toBe(10);
+    expect(cfg.timeControl.id).toBe("flash_1");
+    expect(cfg.timeControl.base).toBe(60);
   });
 
-  it("15+10 está disponível na lista de tempos", async () => {
+  it("cor e tempo ficam na mesma tela (passo 2)", async () => {
     const tree = await render();
     await pressLabel(tree.root, "Continuar");
+
+    // Ambas as seções presentes simultaneamente.
+    expect(hasText(tree.root, "Cor das peças")).toBe(true);
+    expect(hasText(tree.root, "Tempo de partida")).toBe(true);
+    expect(hasText(tree.root, "Brancas")).toBe(true);
+    expect(hasText(tree.root, "Relâmpago")).toBe(true);
+    expect(hasText(tree.root, "Pensado")).toBe(true);
+    expect(hasText(tree.root, "Sem tempo")).toBe(true);
+  });
+
+  it("voltar do passo 2 para o 1 preserva as escolhas", async () => {
+    const onStart = jest.fn();
+    const tree = await render({ onStart });
+
+    await pressLabel(tree.root, "Mestre, aproximadamente 2000 de rating");
     await pressLabel(tree.root, "Continuar");
-    expect(hasText(tree.root, "15+10")).toBe(true);
+    await pressLabel(tree.root, "Pretas");
+
+    // Volta ao passo 1 e avança de novo: dificuldade e cor mantidas.
+    await pressLabel(tree.root, "Voltar");
+    expect(hasText(tree.root, "1. Dificuldade")).toBe(true);
+    await pressLabel(tree.root, "Continuar");
+    await pressLabel(tree.root, "Iniciar partida");
+
+    const cfg = onStart.mock.calls[0][0];
+    expect(cfg.difficulty).toBe("master");
+    expect(cfg.color).toBe("b");
   });
 
   it("pré-seleciona a última configuração (initial)", async () => {
     const onStart = jest.fn();
     const tree = await render({
-      initial: { difficulty: "master", color: "w", timeId: "bullet_1_0" },
+      initial: { difficulty: "master", color: "w", timeId: "thoughtful_15" },
       onStart,
     });
-    // Pula direto para o passo 3 e inicia — deve refletir o initial
-    await pressLabel(tree.root, "Continuar");
     await pressLabel(tree.root, "Continuar");
     await pressLabel(tree.root, "Iniciar partida");
 
     const cfg = onStart.mock.calls[0][0];
     expect(cfg.difficulty).toBe("master");
     expect(cfg.color).toBe("w");
-    expect(cfg.timeControl.id).toBe("bullet_1_0");
+    expect(cfg.timeControl.id).toBe("thoughtful_15");
+  });
+
+  it("config salva com id de tempo antigo cai no padrão, sem quebrar", async () => {
+    const onStart = jest.fn();
+    const tree = await render({
+      // "blitz_5_0" era da nomenclatura antiga e não existe mais.
+      initial: { difficulty: "medium", color: "w", timeId: "blitz_5_0" },
+      onStart,
+    });
+    await pressLabel(tree.root, "Continuar");
+    await pressLabel(tree.root, "Iniciar partida");
+
+    expect(onStart.mock.calls[0][0].timeControl.id).toBe("quick_3");
+  });
+});
+
+describe("AiGameSetupScreen — tempo em linguagem simples", () => {
+  async function goToStep2() {
+    const tree = await render();
+    await pressLabel(tree.root, "Continuar");
+    return tree;
+  }
+
+  it("'Pensado' expande as 3 durações na própria tela, sem modal", async () => {
+    const tree = await goToStep2();
+
+    // Fechado: as durações não estão visíveis.
+    expect(hasText(tree.root, "5 min")).toBe(false);
+
+    await pressLabel(tree.root, "Pensado");
+
+    expect(hasText(tree.root, "5 min")).toBe(true);
+    expect(hasText(tree.root, "10 min")).toBe(true);
+    expect(hasText(tree.root, "15 min")).toBe(true);
+  });
+
+  it("'Pensado' já vem com 10 min selecionado (resumo precisa de valor válido)", async () => {
+    const onStart = jest.fn();
+    const tree = await render({ onStart });
+    await pressLabel(tree.root, "Continuar");
+    await pressLabel(tree.root, "Pensado");
+    await pressLabel(tree.root, "Iniciar partida");
+
+    expect(onStart.mock.calls[0][0].timeControl.id).toBe("thoughtful_10");
+    expect(onStart.mock.calls[0][0].timeControl.base).toBe(600);
+  });
+
+  it("dentro de 'Pensado' dá para trocar a duração", async () => {
+    const onStart = jest.fn();
+    const tree = await render({ onStart });
+    await pressLabel(tree.root, "Continuar");
+    await pressLabel(tree.root, "Pensado");
+    await pressLabel(tree.root, "Pensado 5 min");
+    await pressLabel(tree.root, "Iniciar partida");
+
+    expect(onStart.mock.calls[0][0].timeControl.base).toBe(300);
+  });
+
+  it("'Sem tempo' resulta em partida sem relógio (base null)", async () => {
+    const onStart = jest.fn();
+    const tree = await render({ onStart });
+    await pressLabel(tree.root, "Continuar");
+    await pressLabel(tree.root, "Sem tempo");
+    await pressLabel(tree.root, "Iniciar partida");
+
+    expect(onStart.mock.calls[0][0].timeControl.base).toBeNull();
+  });
+
+  it("não expõe mais a nomenclatura técnica antiga", async () => {
+    const tree = await goToStep2();
+    for (const antigo of ["Bullet", "Blitz", "Clássico", "3+2", "15+10"]) {
+      expect(hasText(tree.root, antigo)).toBe(false);
+    }
   });
 });
 
@@ -212,7 +305,6 @@ describe("AiGameSetupScreen — Modo Campanha (cadeado + progresso)", () => {
 
     // Tocar num nível travado não seleciona nem avança o wizard sozinho.
     await pressLabel(tree.root, "Continuar");
-    await pressLabel(tree.root, "Continuar");
     await pressLabel(tree.root, "Iniciar partida");
     expect(onStart.mock.calls[0][0].difficulty).toBe("beginner");
   });
@@ -234,7 +326,6 @@ describe("AiGameSetupScreen — Modo Campanha (cadeado + progresso)", () => {
     });
 
     await pressLabel(tree.root, "Continuar");
-    await pressLabel(tree.root, "Continuar");
     await pressLabel(tree.root, "Iniciar partida");
     expect(onStart.mock.calls[0][0].difficulty).toBe("beginner");
   });
@@ -253,7 +344,6 @@ describe("AiGameSetupScreen — destravamento de QA (teste da calibragem em devi
     ).toHaveLength(0);
 
     await pressLabel(tree.root, "Mestre, aproximadamente 2000 de rating");
-    await pressLabel(tree.root, "Continuar");
     await pressLabel(tree.root, "Continuar");
     await pressLabel(tree.root, "Iniciar partida");
     expect(onStart.mock.calls[0][0].difficulty).toBe("master");

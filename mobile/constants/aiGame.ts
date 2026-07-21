@@ -34,28 +34,34 @@ export const AI_LEVEL_BY_ID: Record<Difficulty, AiLevel> = AI_LEVELS.reduce(
   {} as Record<Difficulty, AiLevel>
 );
 
-// ── Controles de tempo (item 7) ─────────────────────────────────────────────
+// ── Controles de tempo ──────────────────────────────────────────────────────
+// Linguagem simples no lugar do jargão (Bullet/Blitz/Rápido/Clássico), que não
+// dizia nada para quem está começando. Cada categoria é uma escolha de toque
+// direto, exceto "Pensado", que expande as três durações na própria tela.
+//
+// Isto vale SÓ para o modo vs IA. O modo online tem seu próprio tempo fixo
+// (ONLINE_TIME_CONTROL em app/home.tsx) e não usa nada deste arquivo.
+//
 // base em segundos (null = sem limite), increment em segundos (Fischer).
-export type TimeGroup = "Bullet" | "Blitz" | "Rápido" | "Clássico" | "Livre";
+export type AiTimeCategory = "flash" | "quick" | "thoughtful" | "untimed";
 
 export interface AiTimeControl {
   id: string;
-  label: string; // "3+2"
-  group: TimeGroup;
+  label: string; // "10 min"
+  category: AiTimeCategory;
   base: number | null; // segundos; null = sem limite
   increment: number;
 }
 
+// Incremento 0 em todos: a UI nova não expõe incremento Fischer, e o relógio
+// (useChessClock) trata 0 como "sem incremento" sem caso especial.
 export const AI_TIME_CONTROLS: AiTimeControl[] = [
-  { id: "bullet_1_0", label: "1+0", group: "Bullet", base: 60, increment: 0 },
-  { id: "bullet_2_1", label: "2+1", group: "Bullet", base: 120, increment: 1 },
-  { id: "blitz_3_0", label: "3+0", group: "Blitz", base: 180, increment: 0 },
-  { id: "blitz_3_2", label: "3+2", group: "Blitz", base: 180, increment: 2 },
-  { id: "blitz_5_0", label: "5+0", group: "Blitz", base: 300, increment: 0 },
-  { id: "rapid_10_0", label: "10+0", group: "Rápido", base: 600, increment: 0 },
-  { id: "rapid_15_10", label: "15+10", group: "Rápido", base: 900, increment: 10 },
-  { id: "classic_30_0", label: "30+0", group: "Clássico", base: 1800, increment: 0 },
-  { id: "unlimited", label: "Sem limite", group: "Livre", base: null, increment: 0 },
+  { id: "flash_1", label: "1 min", category: "flash", base: 60, increment: 0 },
+  { id: "quick_3", label: "3 min", category: "quick", base: 180, increment: 0 },
+  { id: "thoughtful_5", label: "5 min", category: "thoughtful", base: 300, increment: 0 },
+  { id: "thoughtful_10", label: "10 min", category: "thoughtful", base: 600, increment: 0 },
+  { id: "thoughtful_15", label: "15 min", category: "thoughtful", base: 900, increment: 0 },
+  { id: "untimed", label: "Sem tempo", category: "untimed", base: null, increment: 0 },
 ];
 
 export const AI_TIME_BY_ID: Record<string, AiTimeControl> = AI_TIME_CONTROLS.reduce(
@@ -63,15 +69,35 @@ export const AI_TIME_BY_ID: Record<string, AiTimeControl> = AI_TIME_CONTROLS.red
   {} as Record<string, AiTimeControl>
 );
 
-export const AI_TIME_GROUP_ORDER: TimeGroup[] = [
-  "Bullet",
-  "Blitz",
-  "Rápido",
-  "Clássico",
-  "Livre",
+export interface AiTimeCategoryOption {
+  id: AiTimeCategory;
+  label: string;
+  sub: string;
+  icon: string;
+  /** True quando a categoria abre durações na própria tela ("Pensado"). */
+  expandable: boolean;
+}
+
+export const AI_TIME_CATEGORIES: AiTimeCategoryOption[] = [
+  { id: "flash", label: "Relâmpago", sub: "1 minuto", icon: "flash-outline", expandable: false },
+  { id: "quick", label: "Rápido", sub: "3 minutos", icon: "timer-outline", expandable: false },
+  { id: "thoughtful", label: "Pensado", sub: "5, 10 ou 15 minutos", icon: "hourglass-outline", expandable: true },
+  { id: "untimed", label: "Sem tempo", sub: "Partida sem relógio", icon: "infinite-outline", expandable: false },
 ];
+
+/** Duração pré-selecionada ao escolher "Pensado" — o resumo e o início
+ *  precisam de um valor válido desde o primeiro toque. */
+export const THOUGHTFUL_DEFAULT_ID = "thoughtful_10";
+
+/** Tempo padrão do wizard quando não há configuração salva. */
+export const DEFAULT_TIME_ID = "quick_3";
+
+/** Durações de "Pensado", na ordem em que aparecem expandidas. */
+export const THOUGHTFUL_OPTIONS: AiTimeControl[] = AI_TIME_CONTROLS.filter(
+  (t) => t.category === "thoughtful"
+);
 
 /** Resumo curto para o rodapé do wizard. */
 export function timeControlSummary(tc: AiTimeControl): string {
-  return tc.base === null ? "Sem limite" : `${tc.group} ${tc.label}`;
+  return tc.label;
 }
