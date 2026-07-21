@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useCampaignProgress } from "@/hooks/useCampaignProgress";
+import { QA_UNLOCK_ALL_AI_LEVELS } from "@/constants/qaFlags";
 import {
   currentCampaignLevel,
   resolvePreselectedLevel,
@@ -225,7 +226,14 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
           AI_LEVELS.map((l, index) => {
             const selected = difficulty === l.id;
             const progressRow = campaign?.find((p) => p.nivel === l.id);
-            const locked = progressRow ? !progressRow.desbloqueado : false;
+            // Flag de QA (só fora de produção): destrava a seleção para
+            // permitir testar a calibragem dos 5 níveis em device sem ter
+            // de vencer a campanha antes. Não altera o progresso real.
+            const locked = QA_UNLOCK_ALL_AI_LEVELS
+              ? false
+              : progressRow
+                ? !progressRow.desbloqueado
+                : false;
             const isActiveLevel = activeCampaignLevel === l.id;
 
             return (

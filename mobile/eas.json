@@ -11,7 +11,8 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "http://localhost:8000",
         "EXPO_PUBLIC_NODE_URL": "http://localhost:3000",
-        "EXPO_PUBLIC_ENV": "development"
+        "EXPO_PUBLIC_ENV": "development",
+        "EXPO_PUBLIC_QA_UNLOCK_LEVELS": "true"
       }
     },
     "preview": {
@@ -23,7 +24,9 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://django.ajaxclube.com.br",
         "EXPO_PUBLIC_NODE_URL": "https://node.ajaxclube.com.br",
-        "EXPO_PUBLIC_ENV": "preview"
+        "EXPO_PUBLIC_ENV": "preview",
+        "_comment_qa": "Destrava os 5 níveis da IA no wizard para teste manual da calibragem. Não afeta o progresso real da campanha, e é ignorado em builds de produção (dupla trava em constants/qaFlags.ts).",
+        "EXPO_PUBLIC_QA_UNLOCK_LEVELS": "true"
       }
     },
     "production": {
