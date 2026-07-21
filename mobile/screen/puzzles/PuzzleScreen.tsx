@@ -251,6 +251,27 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
 
   const title = isDaily ? "Problema do dia" : "Treino";
 
+  // Lance certo em notação legível (SAN), a partir da FEN + primeiro lance da
+  // solução. Mostrado só na tela de esgotamento (revelação de aprendizado). O
+  // servidor entrega a solução no estado terminal; aqui só a traduzimos.
+  const solutionSan = (() => {
+    const first = puzzle?.solution?.[0];
+    if (!puzzle || !first) return null;
+    try {
+      const parsed = parseUciMove(first);
+      if (!parsed) return null;
+      const board = new Chess(puzzle.fen);
+      const move = board.move({
+        from: parsed.from,
+        to: parsed.to,
+        promotion: parsed.promotion ?? "q",
+      });
+      return move?.san ?? first;
+    } catch {
+      return first;
+    }
+  })();
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* ── Header ─────────────────────────────────────────────── */}
@@ -358,11 +379,26 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
             <Ionicons name="hourglass-outline" size={28} color={colors.accentOnLight} />
           </View>
           <Text style={[styles.messageTitle, { color: colors.text }]}>
-            Tentativas de hoje esgotadas
+            Você não conseguiu desta vez
           </Text>
+          {solutionSan ? (
+            <View
+              style={[
+                styles.solutionReveal,
+                { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
+              ]}
+              accessibilityLabel={`A jogada certa era ${solutionSan}`}
+            >
+              <Text style={[styles.solutionLabel, { color: colors.secondary }]}>
+                A jogada certa era
+              </Text>
+              <Text style={[styles.solutionMove, { color: colors.accentOnLight }]}>
+                {solutionSan}
+              </Text>
+            </View>
+          ) : null}
           <Text style={[styles.messageSub, { color: colors.secondary }]}>
-            Você usou suas {maxAttempts} tentativas neste problema. Amanhã tem
-            um problema novo esperando por você.
+            Volte amanhã para um novo desafio.
           </Text>
           <Button title="Voltar ao início" variant="accent" onPress={onBack} />
         </View>
@@ -543,6 +579,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   backLink: { fontSize: 14, fontWeight: "600", padding: 8 },
+  solutionReveal: {
+    alignItems: "center",
+    gap: 2,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginVertical: 4,
+  },
+  solutionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  solutionMove: { fontSize: 24, fontWeight: "800" },
 
   body: { flex: 1 },
   puzzleInfo: {

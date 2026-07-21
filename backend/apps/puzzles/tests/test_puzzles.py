@@ -282,8 +282,18 @@ class ProgressGatingTests(CleanPuzzleBankMixin, APITestCase):
             )
             self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertNotIn("exhausted", response.data)
+        # Sem esgotamento, sem revelação: no treino a solução só sai ao acertar.
+        self.assertNotIn("solution", response.data)
         progress = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.training)
         self.assertIsNone(progress.exhausted_at)
+
+    def test_treino_revela_solucao_ao_acertar(self):
+        make_paid(self.user)
+        response = self.client.post(
+            progress_url(self.training), {"solved": True, "attempts": 1}, format="json"
+        )
+        self.assertTrue(response.data["solved"])
+        self.assertIn("solution", response.data)
 
 
 class DailyExhaustionTests(CleanPuzzleBankMixin, APITestCase):
@@ -315,13 +325,43 @@ class DailyExhaustionTests(CleanPuzzleBankMixin, APITestCase):
         progress = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
         self.assertIsNotNone(progress.exhausted_at)
 
-    def test_esgotado_o_daily_nao_entrega_mais_a_solucao(self):
+    def test_progress_nao_revela_a_solucao_antes_de_esgotar(self):
+        """A resposta do progress/ NÃO traz a solução enquanto ainda há
+        tentativas (canal onde a garantia 'não antes' é observável)."""
+        for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS - 1):
+            response = self.fail_once()
+            self.assertFalse(response.data["exhausted"])
+            self.assertNotIn("solution", response.data)
+
+    def test_esgotar_revela_a_solucao_na_resposta_do_progress(self):
+        """Decisão de produto: esgotar as 4 tentativas sem acertar REVELA a
+        solução (aprendizado, padrão de sites de xadrez)."""
+        for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS - 1):
+            self.fail_once()
+        final = self.fail_once()
+        self.assertTrue(final.data["exhausted"])
+        self.assertIn("solution", final.data)
+        self.assertEqual(
+            final.data["solution"],
+            Puzzle.objects.get(id=self.daily.id).solution,
+        )
+
+    def test_acertar_tambem_revela_a_solucao_para_revisao(self):
+        response = self.client.post(
+            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
+        )
+        self.assertTrue(response.data["solved"])
+        self.assertIn("solution", response.data)
+
+    def test_daily_esgotado_revela_a_solucao_ao_reabrir(self):
+        """Reabrir o diário esgotado (nova sessão) mostra a solução — por isso
+        o daily/ precisa incluí-la no estado esgotado."""
         for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS):
             self.fail_once()
         response = self.client.get(DAILY_URL)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["exhausted"])
-        self.assertNotIn("solution", response.data)
+        self.assertIn("solution", response.data)
 
     def test_esgotamento_persiste_entre_sessoes_no_mesmo_dia(self):
         """Fechar e reabrir o app não devolve tentativas — o estado é do

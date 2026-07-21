@@ -104,9 +104,12 @@ class DailyPuzzleView(APIView):
         solved = bool(progress and progress.solved)
         attempts_used = progress.attempts_used_today() if progress else 0
 
-        # Esgotado: não devolve a solução — quem gastou as tentativas não
-        # ganha a resposta de graça; volta amanhã, com outro problema.
-        payload = _puzzle_payload(puzzle, include_solution=not exhausted)
+        # A solução acompanha o payload porque a validação de lance é feita no
+        # cliente (ver PuzzleScreen). Quem decide MOSTRAR a solução ao usuário
+        # é a tela — só ao resolver ou ao esgotar (decisão de produto). No
+        # esgotamento ela é revelada de propósito, como aprendizado; por isso
+        # o reabrir de um diário esgotado precisa dela aqui também.
+        payload = _puzzle_payload(puzzle)
         payload.update(
             {
                 "already_solved": solved,
@@ -196,9 +199,9 @@ class PuzzleDetailView(APIView):
         prog = UserPuzzleProgress.objects.filter(
             user=request.user, puzzle=puzzle
         ).first()
-        # No diário esgotado a solução também não vai — mesma regra do daily/.
-        exhausted = bool(is_daily and prog and prog.is_exhausted_today())
-        payload = _puzzle_payload(puzzle, include_solution=not exhausted)
+        # Solução no payload por causa da validação client-side (mesma razão
+        # do daily/); a tela decide quando mostrá-la ao usuário.
+        payload = _puzzle_payload(puzzle)
         payload["already_solved"] = bool(prog and prog.solved)
         return Response(payload)
 
@@ -294,8 +297,9 @@ class PuzzleProgressView(APIView):
         )
 
         if is_daily and progress.is_exhausted_today():
-            # Já esgotou hoje: nada muda, nem solve tardio conta.
-            return Response(self._state(progress, is_daily, today))
+            # Já esgotou hoje: nada muda, nem solve tardio conta. A solução vai
+            # na resposta (estado terminal) — reabrir esgotado revela o lance.
+            return Response(self._state(progress, puzzle, is_daily, today))
 
         progress.attempts += attempts
 
@@ -315,15 +319,16 @@ class PuzzleProgressView(APIView):
             progress.solved_at = timezone.now()
 
         progress.save()
-        return Response(self._state(progress, is_daily, today))
+        return Response(self._state(progress, puzzle, is_daily, today))
 
-    def _state(self, progress, is_daily, today):
+    def _state(self, progress, puzzle, is_daily, today):
         data = {
             "puzzle_id": progress.puzzle_id,
             "solved": progress.solved,
             "attempts": progress.attempts,
             "mode": "daily" if is_daily else "training",
         }
+        exhausted = is_daily and progress.is_exhausted_today(today)
         if is_daily:
             used = progress.attempts_used_today(today)
             data.update(
@@ -331,9 +336,16 @@ class PuzzleProgressView(APIView):
                     "attempts_used": used,
                     "max_attempts": DAILY_PUZZLE_MAX_ATTEMPTS,
                     "attempts_left": max(0, DAILY_PUZZLE_MAX_ATTEMPTS - used),
-                    "exhausted": progress.is_exhausted_today(today),
+                    "exhausted": exhausted,
                 }
             )
+        # Revela a solução SÓ no estado terminal: ao resolver (revisão) ou ao
+        # esgotar as tentativas do diário (aprendizado). Antes disso, a
+        # resposta do progress/ nunca a inclui — é o canal onde a garantia
+        # "não antes de resolver/esgotar" é observável e testável (a validação
+        # em si usa a solução que o daily/ já entregou ao cliente).
+        if progress.solved or exhausted:
+            data["solution"] = puzzle.solution
         return data
 
 

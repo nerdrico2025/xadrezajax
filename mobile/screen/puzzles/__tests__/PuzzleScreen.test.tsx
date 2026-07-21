@@ -189,6 +189,13 @@ describe("Problema do dia (mode=daily)", () => {
     expect(hasText(tree.root, "Tentativa 1 de 4")).toBe(true);
   });
 
+  it("NÃO revela a solução ao usuário durante o jogo", async () => {
+    const tree = await render({ mode: "daily" });
+    // A tela tem a solução em mãos (validação client-side), mas não a mostra.
+    expect(hasText(tree.root, "A jogada certa era")).toBe(false);
+    expect(hasText(tree.root, "Ra8#")).toBe(false);
+  });
+
   it("registra puzzle_started com o modo", async () => {
     await render({ mode: "daily" });
     const started = getBufferedEvents().find((e) => e.name === "puzzle_started");
@@ -241,7 +248,7 @@ describe("Problema do dia (mode=daily)", () => {
     expect(solved?.properties?.mode).toBe("daily");
   });
 
-  it("esgotar as tentativas mostra a mensagem de voltar amanhã", async () => {
+  it("esgotar as tentativas revela a solução e diz para voltar amanhã", async () => {
     mockReportProgress.mockResolvedValue({
       puzzle_id: 1,
       solved: false,
@@ -250,27 +257,34 @@ describe("Problema do dia (mode=daily)", () => {
       attempts_used: 4,
       attempts_left: 0,
       exhausted: true,
+      solution: ["a1a8"],
     });
     const tree = await render({ mode: "daily" });
 
     await makeMove("a1", "a2");
 
-    expect(hasText(tree.root, "Tentativas de hoje esgotadas")).toBe(true);
+    expect(hasText(tree.root, "Você não conseguiu desta vez")).toBe(true);
+    // Solução revelada (SAN do primeiro lance) como aprendizado.
+    expect(hasText(tree.root, "A jogada certa era")).toBe(true);
+    expect(hasText(tree.root, "Ra8#")).toBe(true);
+    expect(hasText(tree.root, "Volte amanhã para um novo desafio.")).toBe(true);
     expect(
       getBufferedEvents().some((e) => e.name === "puzzle_exhausted")
     ).toBe(true);
   });
 
-  it("chega esgotado do servidor já abre no estado de esgotado", async () => {
+  it("reabrir o diário esgotado mostra a solução (veio do servidor)", async () => {
+    // O backend inclui a solução no estado esgotado justamente para isto.
     mockGetDaily.mockResolvedValue({
       ...DAILY,
       exhausted: true,
       attempts_used: 4,
       attempts_left: 0,
-      solution: undefined,
+      solution: ["a1a8"],
     });
     const tree = await render({ mode: "daily" });
-    expect(hasText(tree.root, "Tentativas de hoje esgotadas")).toBe(true);
+    expect(hasText(tree.root, "Você não conseguiu desta vez")).toBe(true);
+    expect(hasText(tree.root, "Ra8#")).toBe(true);
   });
 
   it("botão de voltar ao início leva para a Home", async () => {
