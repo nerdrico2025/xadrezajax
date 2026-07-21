@@ -33,6 +33,9 @@ jest.mock("@/services/game", () => ({
 jest.mock("@/services/profile", () => ({
   reportAiResult: jest.fn(() => Promise.resolve()),
 }));
+jest.mock("@/services/campaign", () => ({
+  getCampaignProgress: jest.fn(() => Promise.resolve([])),
+}));
 jest.mock("@/utils/savedGame", () => ({
   saveGame: jest.fn(() => Promise.resolve()),
   clearSavedGame: jest.fn(() => Promise.resolve()),
@@ -40,6 +43,7 @@ jest.mock("@/utils/savedGame", () => ({
 }));
 
 const { reportAiResult } = jest.requireMock("@/services/profile");
+const { getCampaignProgress } = jest.requireMock("@/services/campaign");
 
 // O primeiro render do GameScreen (árvore inteira: tabuleiro, relógio,
 // indicador) custa ~600ms local e multiplica no runner do CI — o primeiro
@@ -83,7 +87,13 @@ function findByLabel(root: ReactTestInstance, label: string) {
 }
 
 function hasText(root: ReactTestInstance, text: string) {
-  return root.findAll((n) => n.props?.children === text).length > 0;
+  return (
+    root.findAll((n) => {
+      const c = n.props?.children;
+      if (c === text) return true;
+      return Array.isArray(c) && c.join("") === text;
+    }).length > 0
+  );
 }
 
 function pressText(root: ReactTestInstance, text: string) {
@@ -296,5 +306,119 @@ describe("empate por acordo vs IA (aceito imediatamente)", () => {
 
     expect(hasText(tree.root, "Empate!")).toBe(false);
     expect(reportAiResult).not.toHaveBeenCalled();
+  });
+});
+
+describe("Modo Campanha — feedback de desbloqueio na vitória vs IA (PR 2)", () => {
+  function getBoard(tree: renderer.ReactTestRenderer) {
+    const nodes = tree.root.findAll((n) => typeof n.props?.onMove === "function");
+    expect(nodes.length).toBeGreaterThan(0);
+    return nodes[0];
+  }
+
+  async function playerMoveAndWaitAi(
+    tree: renderer.ReactTestRenderer,
+    from: string,
+    to: string
+  ) {
+    await act(async () => {
+      getBoard(tree).props.onMove({ move: { from, to } });
+    });
+    // Passa do piso humanizado (medium: 600–1200ms) para a IA responder.
+    await act(async () => {
+      jest.advanceTimersByTime(1300);
+    });
+  }
+
+  // Mate do pastor (Scholar's mate): 1.e4 e5 2.Bc4 Nc6 3.Qh5 Nf6?? 4.Qxf7# —
+  // a IA joga exatamente o que o mock manda, então o mate é garantido.
+  async function playScholarsMate(tree: renderer.ReactTestRenderer) {
+    getBestMove
+      .mockResolvedValueOnce("e7e5")
+      .mockResolvedValueOnce("b8c6")
+      .mockResolvedValueOnce("g8f6");
+
+    await playerMoveAndWaitAi(tree, "e2", "e4");
+    await playerMoveAndWaitAi(tree, "f1", "c4");
+    await playerMoveAndWaitAi(tree, "d1", "h5");
+    // Lance final: Qxf7# — mate, a partida acaba aqui (sem resposta da IA).
+    await act(async () => {
+      getBoard(tree).props.onMove({ move: { from: "h5", to: "f7" } });
+    });
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  it("vitória que cruza o limiar de 3 mostra selo do nível + próximo desbloqueado", async () => {
+    getCampaignProgress.mockResolvedValue([
+      {
+        nivel: "medium",
+        desbloqueado: true,
+        vitorias: 3,
+        vitorias_para_desbloquear: 3,
+        selo_concedido: true,
+      },
+      {
+        nivel: "hard",
+        desbloqueado: true,
+        vitorias: 0,
+        vitorias_para_desbloquear: 3,
+        selo_concedido: false,
+      },
+    ]);
+
+    const tree = render();
+    await playScholarsMate(tree);
+
+    expect(hasText(tree.root, "Você venceu!")).toBe(true);
+    expect(reportAiResult).toHaveBeenCalledWith("test-token", "win", "medium", null);
+
+    // Deixa o .then() assíncrono (busca do progresso pós-vitória) resolver.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getCampaignProgress).toHaveBeenCalledWith("test-token");
+    expect(hasText(tree.root, "Nível Médio dominado!")).toBe(true);
+    expect(hasText(tree.root, "Nível Difícil desbloqueado")).toBe(true);
+  });
+
+  it("vitória que NÃO cruza o limiar não mostra comemoração", async () => {
+    getCampaignProgress.mockResolvedValue([
+      {
+        nivel: "medium",
+        desbloqueado: true,
+        vitorias: 1,
+        vitorias_para_desbloquear: 3,
+        selo_concedido: false,
+      },
+    ]);
+
+    const tree = render();
+    await playScholarsMate(tree);
+
+    expect(hasText(tree.root, "Você venceu!")).toBe(true);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(hasText(tree.root, "dominado!")).toBe(false);
+  });
+
+  it("falha ao buscar o progresso pós-vitória não trava a tela de resultado", async () => {
+    getCampaignProgress.mockRejectedValue(new Error("Sem conexão"));
+
+    const tree = render();
+    await playScholarsMate(tree);
+
+    expect(hasText(tree.root, "Você venceu!")).toBe(true);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(hasText(tree.root, "dominado!")).toBe(false);
   });
 });

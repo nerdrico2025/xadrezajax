@@ -2,6 +2,15 @@ import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
+import { AI_LEVEL_BY_ID, type Difficulty } from "@/constants/aiGame";
+
+/** Modo Campanha: preenchido quando a vitória atual cruzou o limiar de 3
+ * vitórias no nível jogado — dominatedLevel ganhou o selo; nextLevel é o
+ * próximo tier desbloqueado (null no Mestre, que não tem próximo). */
+export interface CampaignUnlockInfo {
+  dominatedLevel: Difficulty;
+  nextLevel: Difficulty | null;
+}
 
 export type GameOutcome = "win" | "loss" | "draw";
 export type GameEndReason =
@@ -47,12 +56,15 @@ interface GameOverModalProps {
   result: GameResult | null;
   onNewGame: () => void;
   onLeave: () => void;
+  /** Modo Campanha: presente só quando esta vitória dominou um nível. */
+  campaignUnlock?: CampaignUnlockInfo | null;
 }
 
 export default function GameOverModal({
   result,
   onNewGame,
   onLeave,
+  campaignUnlock,
 }: GameOverModalProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
@@ -84,6 +96,29 @@ export default function GameOverModal({
           <Text style={[styles.ratingNote, { color: colors.secondary }]}>
             Partida contra a IA — seu rating não mudou.
           </Text>
+
+          {/* Modo Campanha: comemoração discreta, nunca bloqueia o fluxo —
+              dourado é a cor de conquista (sem laranja). */}
+          {campaignUnlock && (
+            <View
+              style={[
+                styles.campaignBanner,
+                { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
+              ]}
+            >
+              <Ionicons name="ribbon" size={22} color={colors.accentOnLight} />
+              <View style={styles.campaignBannerText}>
+                <Text style={[styles.campaignBannerTitle, { color: colors.accentOnLight }]}>
+                  Nível {AI_LEVEL_BY_ID[campaignUnlock.dominatedLevel].label} dominado!
+                </Text>
+                <Text style={[styles.campaignBannerSub, { color: colors.accentOnLight }]}>
+                  {campaignUnlock.nextLevel
+                    ? `Nível ${AI_LEVEL_BY_ID[campaignUnlock.nextLevel].label} desbloqueado`
+                    : "Conquista final da campanha!"}
+                </Text>
+              </View>
+            </View>
+          )}
 
           <View style={styles.buttons}>
             <Pressable
@@ -141,6 +176,20 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 28,
   },
+  campaignBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: -16,
+    marginBottom: 20,
+  },
+  campaignBannerText: { flex: 1 },
+  campaignBannerTitle: { fontSize: 14, fontWeight: "800" },
+  campaignBannerSub: { fontSize: 12, marginTop: 2 },
   buttons: {
     width: "100%",
     gap: 12,
