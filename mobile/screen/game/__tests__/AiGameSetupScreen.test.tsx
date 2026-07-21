@@ -17,6 +17,15 @@ jest.mock("@/services/campaign", () => ({
   getCampaignProgress: (...args: unknown[]) => mockGetCampaignProgress(...args),
 }));
 
+// Flag de QA: getter para poder alternar por teste (o componente lê o valor
+// no momento do render). Default desligado = comportamento de produção.
+let mockQaUnlock = false;
+jest.mock("@/constants/qaFlags", () => ({
+  get QA_UNLOCK_ALL_AI_LEVELS() {
+    return mockQaUnlock;
+  },
+}));
+
 // Estado "tudo desbloqueado" — mantém o comportamento pré-Modo Campanha nos
 // testes que não são sobre cadeado/progresso.
 function allUnlocked(): CampaignLevelProgress[] {
@@ -85,6 +94,7 @@ async function render(
 beforeEach(() => {
   mockGetCampaignProgress.mockReset();
   mockGetCampaignProgress.mockResolvedValue(allUnlocked());
+  mockQaUnlock = false;
 });
 
 describe("AiGameSetupScreen (wizard de 3 passos)", () => {
@@ -227,5 +237,46 @@ describe("AiGameSetupScreen — Modo Campanha (cadeado + progresso)", () => {
     await pressLabel(tree.root, "Continuar");
     await pressLabel(tree.root, "Iniciar partida");
     expect(onStart.mock.calls[0][0].difficulty).toBe("beginner");
+  });
+});
+
+describe("AiGameSetupScreen — destravamento de QA (teste da calibragem em device)", () => {
+  it("com a flag ligada, nível travado pela campanha fica selecionável", async () => {
+    mockQaUnlock = true;
+    mockGetCampaignProgress.mockResolvedValue(onlyBeginnerUnlocked());
+    const onStart = jest.fn();
+    const tree = await render({ onStart });
+
+    // Sem cadeado: o rótulo "travado" não existe e o card responde ao toque.
+    expect(
+      tree.root.findAll((n) => n.props?.accessibilityLabel === "Mestre, travado")
+    ).toHaveLength(0);
+
+    await pressLabel(tree.root, "Mestre, aproximadamente 2000 de rating");
+    await pressLabel(tree.root, "Continuar");
+    await pressLabel(tree.root, "Continuar");
+    await pressLabel(tree.root, "Iniciar partida");
+    expect(onStart.mock.calls[0][0].difficulty).toBe("master");
+  });
+
+  it("com a flag desligada (produção), o cadeado da campanha continua valendo", async () => {
+    mockQaUnlock = false;
+    mockGetCampaignProgress.mockResolvedValue(onlyBeginnerUnlocked());
+    const tree = await render();
+
+    expect(
+      tree.root.findAll((n) => n.props?.accessibilityLabel === "Mestre, travado")
+        .length
+    ).toBeGreaterThan(0);
+  });
+
+  it("a flag NÃO falsifica o progresso: a barra do nível atual segue a API", async () => {
+    mockQaUnlock = true;
+    mockGetCampaignProgress.mockResolvedValue(
+      onlyBeginnerUnlocked({ beginner: { vitorias: 1 } })
+    );
+    const tree = await render();
+    // Progresso real continua sendo exibido como veio do backend.
+    expect(hasText(tree.root, "1/3 vitórias")).toBe(true);
   });
 });
