@@ -1,10 +1,11 @@
 import renderer, { act, type ReactTestInstance } from "react-test-renderer";
 
 import PuzzleScreen from "../PuzzleScreen";
-import {
-  clearBufferedEvents,
-  getBufferedEvents,
-} from "@/services/analytics";
+import { clearBufferedEvents, getBufferedEvents } from "@/services/analytics";
+
+// Redesenho de 2026-07-21: a tela é parametrizada por `mode`.
+//   - "daily"    → Problema do dia: grátis, 4 tentativas, esgota.
+//   - "training" → Treino: exige plano pago, tentativas ilimitadas.
 
 // Captura as props do tabuleiro para dirigir onMove nos testes
 let boardProps: any = null;
@@ -42,6 +43,7 @@ jest.mock("@/hooks/useProfile", () => ({
 }));
 
 const mockGetStats = jest.fn();
+const mockGetDaily = jest.fn();
 const mockGetNext = jest.fn();
 const mockReportProgress = jest.fn();
 jest.mock("@/services/puzzles", () => {
@@ -49,21 +51,25 @@ jest.mock("@/services/puzzles", () => {
   return {
     ...actual,
     getPuzzleStats: (...args: unknown[]) => mockGetStats(...args),
+    getDailyPuzzle: (...args: unknown[]) => mockGetDaily(...args),
     getNextPuzzle: (...args: unknown[]) => mockGetNext(...args),
     reportPuzzleProgress: (...args: unknown[]) => mockReportProgress(...args),
   };
 });
 
-const { DailyPuzzleLimitError, NoPuzzlesAvailableError } =
+const { TrainingRequiresPremiumError, NoPuzzlesAvailableError } =
   jest.requireActual("@/services/puzzles");
 
-const FREE_STATS = {
+const STATS = {
   solved: 1,
   total: 7,
   attempts: 2,
   streak: 2,
-  daily_puzzle_limit: 3,
-  remaining_puzzles_today: 2,
+  daily_available: true,
+  daily_solved: false,
+  daily_exhausted: false,
+  daily_max_attempts: 4,
+  training_unlocked: false,
 };
 
 const MATE_IN_1 = {
@@ -78,6 +84,14 @@ const MATE_IN_1 = {
   already_solved: false,
 };
 
+const DAILY = {
+  ...MATE_IN_1,
+  exhausted: false,
+  attempts_used: 0,
+  attempts_left: 4,
+  max_attempts: 4,
+};
+
 const SKEWER = {
   id: 2,
   title: "Espeto com Torre",
@@ -90,11 +104,14 @@ const SKEWER = {
   already_solved: false,
 };
 
-async function render(props: Partial<Record<"onBack" | "onUpgrade", jest.Mock>> = {}) {
+async function render(
+  props: { mode?: "daily" | "training"; onBack?: jest.Mock; onUpgrade?: jest.Mock } = {}
+) {
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {
     tree = renderer.create(
       <PuzzleScreen
+        mode={props.mode ?? "daily"}
         onBack={props.onBack ?? jest.fn()}
         onUpgrade={props.onUpgrade ?? jest.fn()}
       />
@@ -113,6 +130,29 @@ function hasText(root: ReactTestInstance, text: string) {
   );
 }
 
+function pressLabel(root: ReactTestInstance, label: string) {
+  const nodes = root.findAll(
+    (n) => n.props?.accessibilityLabel === label && typeof n.props?.onPress === "function"
+  );
+  expect(nodes.length).toBeGreaterThan(0);
+  return act(async () => {
+    nodes[0].props.onPress();
+  });
+}
+
+function pressText(root: ReactTestInstance, text: string) {
+  const candidates = root.findAll((n) => n.props?.children === text);
+  expect(candidates.length).toBeGreaterThan(0);
+  let node: ReactTestInstance | null = candidates[0];
+  while (node && typeof node.props?.onPress !== "function") {
+    node = node.parent as ReactTestInstance | null;
+  }
+  if (!node) throw new Error(`Nenhum botão pressionável com o texto "${text}"`);
+  return act(async () => {
+    node!.props.onPress();
+  });
+}
+
 async function makeMove(from: string, to: string, promotion?: string) {
   await act(async () => {
     await boardProps.onMove({ move: { from, to, promotion } });
@@ -123,116 +163,184 @@ beforeEach(() => {
   jest.clearAllMocks();
   clearBufferedEvents();
   boardProps = null;
-  mockGetStats.mockResolvedValue(FREE_STATS);
+  mockGetStats.mockResolvedValue(STATS);
+  mockGetDaily.mockResolvedValue(DAILY);
   mockGetNext.mockResolvedValue(MATE_IN_1);
-  mockReportProgress.mockResolvedValue({ puzzle_id: 1, solved: true, attempts: 1 });
-});
-
-describe("carregamento com dificuldade adaptativa", () => {
-  it("pede o próximo puzzle na dificuldade do rating blitz (1200 → medium)", async () => {
-    const tree = await render();
-
-    expect(mockGetNext).toHaveBeenCalledWith("test-token", "medium");
-    expect(hasText(tree.root, "Mate em 1 · 1/3 hoje")).toBe(true);
-    expect(
-      getBufferedEvents().some((e) => e.name === "puzzle_started")
-    ).toBe(true);
+  mockReportProgress.mockResolvedValue({
+    puzzle_id: 1,
+    solved: true,
+    attempts: 1,
+    mode: "daily",
+    attempts_used: 1,
+    attempts_left: 3,
+    exhausted: false,
   });
 });
 
-describe("resolução do puzzle", () => {
-  it("lance correto único resolve e registra o progresso", async () => {
-    const tree = await render();
-
-    await makeMove("a1", "a8");
-
-    expect(hasText(tree.root, "Problema resolvido! 🎉")).toBe(true);
-    expect(mockReportProgress).toHaveBeenCalledWith("test-token", 1, true, 1);
-    expect(
-      getBufferedEvents().some((e) => e.name === "puzzle_solved")
-    ).toBe(true);
-    expect(hasText(tree.root, "2 dias de sequência")).toBe(true);
+describe("Problema do dia (mode=daily)", () => {
+  it("busca o diário, não o treino, e não usa dificuldade adaptativa", async () => {
+    await render({ mode: "daily" });
+    expect(mockGetDaily).toHaveBeenCalledWith("test-token");
+    expect(mockGetNext).not.toHaveBeenCalled();
   });
 
-  it("lance errado não resolve e soma tentativa ao acerto seguinte", async () => {
-    const tree = await render();
+  it("mostra o contador de tentativas", async () => {
+    const tree = await render({ mode: "daily" });
+    expect(hasText(tree.root, "Tentativa 1 de 4")).toBe(true);
+  });
+
+  it("registra puzzle_started com o modo", async () => {
+    await render({ mode: "daily" });
+    const started = getBufferedEvents().find((e) => e.name === "puzzle_started");
+    expect(started?.properties?.mode).toBe("daily");
+  });
+
+  it("lance errado reporta a falha ao servidor e oferece retry", async () => {
+    mockReportProgress.mockResolvedValue({
+      puzzle_id: 1,
+      solved: false,
+      attempts: 1,
+      mode: "daily",
+      attempts_used: 1,
+      attempts_left: 3,
+      exhausted: false,
+    });
+    const tree = await render({ mode: "daily" });
 
     await makeMove("a1", "a2");
-    expect(hasText(tree.root, "Não é esse — tente outro lance")).toBe(true);
-    expect(mockReportProgress).not.toHaveBeenCalled();
 
-    await makeMove("a1", "a8");
-    expect(mockReportProgress).toHaveBeenCalledWith("test-token", 1, true, 2);
+    expect(mockReportProgress).toHaveBeenCalledWith("test-token", 1, false, 1);
+    expect(hasText(tree.root, "Esse não é o melhor lance. Tente outra ideia.")).toBe(
+      true
+    );
+    expect(hasText(tree.root, "Tentar novamente")).toBe(true);
   });
 
-  it("responde automaticamente pelo oponente nos lances ímpares da solução", async () => {
-    mockGetNext.mockResolvedValue(SKEWER);
-    const tree = await render();
+  it("contador avança conforme o servidor responde", async () => {
+    mockReportProgress.mockResolvedValue({
+      puzzle_id: 1,
+      solved: false,
+      attempts: 1,
+      mode: "daily",
+      attempts_used: 2,
+      attempts_left: 2,
+      exhausted: false,
+    });
+    const tree = await render({ mode: "daily" });
+    await makeMove("a1", "a2");
+    expect(hasText(tree.root, "Tentativa 3 de 4")).toBe(true);
+  });
 
-    await makeMove("h1", "h5");
-    // Oponente respondeu a5a4 sozinho — a vez volta ao jogador
-    expect(mockReportProgress).not.toHaveBeenCalled();
+  it("acerto comemora e registra o solve", async () => {
+    const tree = await render({ mode: "daily" });
+    await makeMove("a1", "a8");
 
-    await makeMove("h5", "d5");
-    expect(hasText(tree.root, "Problema resolvido! 🎉")).toBe(true);
-    expect(mockReportProgress).toHaveBeenCalledWith("test-token", 2, true, 1);
+    expect(hasText(tree.root, "Muito bem! Problema resolvido!")).toBe(true);
+    expect(mockReportProgress).toHaveBeenCalledWith("test-token", 1, true, 1);
+    const solved = getBufferedEvents().find((e) => e.name === "puzzle_solved");
+    expect(solved?.properties?.mode).toBe("daily");
+  });
+
+  it("esgotar as tentativas mostra a mensagem de voltar amanhã", async () => {
+    mockReportProgress.mockResolvedValue({
+      puzzle_id: 1,
+      solved: false,
+      attempts: 4,
+      mode: "daily",
+      attempts_used: 4,
+      attempts_left: 0,
+      exhausted: true,
+    });
+    const tree = await render({ mode: "daily" });
+
+    await makeMove("a1", "a2");
+
+    expect(hasText(tree.root, "Tentativas de hoje esgotadas")).toBe(true);
+    expect(
+      getBufferedEvents().some((e) => e.name === "puzzle_exhausted")
+    ).toBe(true);
+  });
+
+  it("chega esgotado do servidor já abre no estado de esgotado", async () => {
+    mockGetDaily.mockResolvedValue({
+      ...DAILY,
+      exhausted: true,
+      attempts_used: 4,
+      attempts_left: 0,
+      solution: undefined,
+    });
+    const tree = await render({ mode: "daily" });
+    expect(hasText(tree.root, "Tentativas de hoje esgotadas")).toBe(true);
+  });
+
+  it("botão de voltar ao início leva para a Home", async () => {
+    mockGetDaily.mockResolvedValue({ ...DAILY, exhausted: true });
+    const onBack = jest.fn();
+    const tree = await render({ mode: "daily", onBack });
+    await pressText(tree.root, "Voltar ao início");
+    expect(onBack).toHaveBeenCalled();
   });
 });
 
-describe("gating de 3 puzzles/dia do plano Grátis", () => {
-  it("cota esgotada mostra o bloqueio com CTA de upgrade sem pedir puzzle", async () => {
-    mockGetStats.mockResolvedValue({
-      ...FREE_STATS,
-      remaining_puzzles_today: 0,
-    });
+describe("Treino (mode=training)", () => {
+  it("busca o próximo do treino com a dificuldade do rating blitz", async () => {
+    await render({ mode: "training" });
+    expect(mockGetNext).toHaveBeenCalledWith("test-token", "medium");
+    expect(mockGetDaily).not.toHaveBeenCalled();
+  });
+
+  it("NÃO mostra contador de tentativas (ilimitado)", async () => {
+    const tree = await render({ mode: "training" });
+    expect(hasText(tree.root, "Tentativa 1 de 4")).toBe(false);
+  });
+
+  it("lance errado não reporta falha nem esgota", async () => {
+    const tree = await render({ mode: "training" });
+    await makeMove("a1", "a2");
+    expect(mockReportProgress).not.toHaveBeenCalled();
+    expect(hasText(tree.root, "Tentativas de hoje esgotadas")).toBe(false);
+  });
+
+  it("sem plano pago mostra o paywall do Treino", async () => {
+    mockGetNext.mockRejectedValue(new TrainingRequiresPremiumError());
     const onUpgrade = jest.fn();
-    const tree = await render({ onUpgrade });
+    const tree = await render({ mode: "training", onUpgrade });
 
-    expect(mockGetNext).not.toHaveBeenCalled();
-    expect(hasText(tree.root, "Você completou os problemas de hoje!")).toBe(true);
-    expect(
-      getBufferedEvents().some((e) => e.name === "paywall_shown")
-    ).toBe(true);
-
-    const cta = tree.root.findAll(
-      (n) =>
-        n.props?.accessibilityLabel === "Assinar Premium" &&
-        typeof n.props?.onPress === "function"
-    );
-    expect(cta.length).toBeGreaterThan(0);
-    await act(async () => {
-      cta[0].props.onPress();
-    });
+    expect(hasText(tree.root, "O Treino é exclusivo do Premium")).toBe(true);
+    await pressLabel(tree.root, "Assinar Premium");
     expect(onUpgrade).toHaveBeenCalled();
   });
 
-  it("403 do backend no next/ também cai no bloqueio", async () => {
-    mockGetNext.mockRejectedValue(new DailyPuzzleLimitError());
-    const tree = await render();
+  it("resolvido oferece o próximo problema", async () => {
+    mockGetNext.mockResolvedValue(SKEWER);
+    mockReportProgress.mockResolvedValue({
+      puzzle_id: 2,
+      solved: true,
+      attempts: 1,
+      mode: "training",
+    });
+    const tree = await render({ mode: "training" });
 
-    expect(hasText(tree.root, "Você completou os problemas de hoje!")).toBe(true);
+    await makeMove("h1", "h5");
+    await makeMove("h5", "d5");
+
+    expect(hasText(tree.root, "Muito bem! Problema resolvido!")).toBe(true);
+    expect(hasText(tree.root, "Próximo problema")).toBe(true);
   });
 });
 
-describe("banco de puzzles sem conteúdo (404)", () => {
-  it("mostra estado vazio decente em vez de erro/tela branca", async () => {
-    mockGetNext.mockRejectedValue(new NoPuzzlesAvailableError());
-    const tree = await render();
-
+describe("estados de erro (sempre visíveis)", () => {
+  it("banco sem conteúdo mostra estado vazio, não erro de rede", async () => {
+    mockGetDaily.mockRejectedValue(new NoPuzzlesAvailableError());
+    const tree = await render({ mode: "daily" });
     expect(hasText(tree.root, "Problemas chegando em breve")).toBe(true);
-    // Não é o estado de erro de rede
     expect(hasText(tree.root, "Não foi possível carregar")).toBe(false);
   });
 
-  it("plano pago não mostra contador de cota", async () => {
-    mockGetStats.mockResolvedValue({
-      ...FREE_STATS,
-      daily_puzzle_limit: null,
-      remaining_puzzles_today: null,
-    });
-    const tree = await render();
-
-    expect(hasText(tree.root, "Mate em 1")).toBe(true);
-    expect(hasText(tree.root, "Mate em 1 · 1/3 hoje")).toBe(false);
+  it("erro de rede mostra a causa real com retry", async () => {
+    mockGetDaily.mockRejectedValue(new Error("Sem conexão"));
+    const tree = await render({ mode: "daily" });
+    expect(hasText(tree.root, "Não foi possível carregar")).toBe(true);
+    expect(hasText(tree.root, "Sem conexão")).toBe(true);
   });
 });

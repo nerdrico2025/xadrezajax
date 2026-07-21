@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    DailyPuzzleView,
     NextPuzzleView,
     PuzzleDetailView,
     PuzzleMapView,
@@ -11,6 +12,7 @@ from .views import (
 app_name = "puzzles"
 
 urlpatterns = [
+    path("daily/", DailyPuzzleView.as_view(), name="daily"),
     path("next/", NextPuzzleView.as_view(), name="next"),
     path("map/", PuzzleMapView.as_view(), name="map"),
     path("stats/", PuzzleStatsView.as_view(), name="stats"),

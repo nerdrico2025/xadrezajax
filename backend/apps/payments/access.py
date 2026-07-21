@@ -13,11 +13,12 @@ from django.utils import timezone
 # IA + online (ambas geram GameHistory).
 FREE_DAILY_GAME_LIMIT = 5
 
-# Decisão do PM (2026-07-07): 3 puzzles/dia no plano Grátis. Conta puzzles
-# RESOLVIDOS no dia (solved_at) — tentativa falha não consome a cota, e é o
-# único carimbo de data confiável no UserPuzzleProgress (created_at só marca
-# a primeira tentativa; re-resolver puzzle antigo não re-conta).
-FREE_DAILY_PUZZLE_LIMIT = 3
+# Modelo de problemas (redesenho de 2026-07-21): não existe mais cota de
+# "N problemas/dia no Grátis". O antigo FREE_DAILY_PUZZLE_LIMIT = 3 foi
+# REMOVIDO junto com can_solve_puzzle/puzzles_solved_today. Agora são dois
+# produtos distintos:
+#   - Problema do dia: 1/dia, o mesmo para todos, GRÁTIS para todos;
+#   - Treino: problemas além do diário, EXCLUSIVO do plano pago, ilimitado.
 
 
 def has_paid_access(profile):
@@ -47,21 +48,16 @@ def can_play_game(profile):
     return remaining > 0, remaining
 
 
-def puzzles_solved_today(profile):
-    from apps.puzzles.models import UserPuzzleProgress
+def can_play_daily_puzzle(profile):  # noqa: ARG001 - assinatura por simetria
+    """O Problema do dia é grátis para todos, sempre.
 
-    return UserPuzzleProgress.objects.filter(
-        user=profile.user,
-        solved=True,
-        solved_at__date=timezone.localdate(),
-    ).count()
+    Existe como função (em vez de um `True` solto nas views) para que a regra
+    tenha um lugar só, junto das outras de plano: se um dia o diário passar a
+    ter alguma condição, muda aqui e vale para todos os pontos de uso.
+    """
+    return True
 
 
-def can_solve_puzzle(profile):
-    """(permitido, restantes_hoje) — restantes é None para plano pago
-    (ilimitado). Item 0.2: consultado pela tela de puzzles (pré-gate no
-    next/) e pelo registro de progresso (defesa em profundidade)."""
-    if has_paid_access(profile):
-        return True, None
-    remaining = max(0, FREE_DAILY_PUZZLE_LIMIT - puzzles_solved_today(profile))
-    return remaining > 0, remaining
+def can_train_puzzles(profile):
+    """Treino (problemas além do diário) é exclusivo do plano pago."""
+    return has_paid_access(profile)

@@ -8,32 +8,41 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.payments.access import (
-    FREE_DAILY_PUZZLE_LIMIT,
-    can_solve_puzzle,
+    can_play_daily_puzzle,
+    can_train_puzzles,
     has_paid_access,
 )
 from apps.users.models import get_or_create_profile
 
-from .models import Puzzle, UserPuzzleProgress
+from .models import (
+    DAILY_PUZZLE_MAX_ATTEMPTS,
+    Puzzle,
+    UserPuzzleProgress,
+    get_daily_puzzle,
+)
+
+# Modelo de produto (redesenho de 2026-07-21):
+#   - Problema do dia (`daily/`): 1 por dia, o MESMO para todos, grátis;
+#     4 tentativas, esgotou vale até a virada do dia.
+#   - Treino (`next/`, `map/`, `<pk>/`): problemas além do diário, exclusivo
+#     do plano pago, sem limite de tentativas por problema.
 
 
-def _daily_limit_response(remaining):
+def _premium_required_response():
     return Response(
         {
             "detail": (
-                "Limite diário do plano Grátis atingido "
-                f"({FREE_DAILY_PUZZLE_LIMIT} problemas/dia). "
-                "Assine o Premium para treinar sem limites."
+                "O Treino é exclusivo do plano Premium. "
+                "O Problema do dia continua grátis, todo dia."
             ),
-            "code": "daily_limit_reached",
-            "remaining_puzzles_today": remaining,
+            "code": "training_requires_premium",
         },
         status=status.HTTP_403_FORBIDDEN,
     )
 
 
 def _current_streak(user):
-    """Dias consecutivos com pelo menos um puzzle resolvido, terminando hoje
+    """Dias consecutivos com pelo menos um problema resolvido, terminando hoje
     ou ontem (o streak de hoje ainda não foi 'quebrado' se o dia não acabou)."""
     solved_dates = set(
         UserPuzzleProgress.objects.filter(
@@ -49,15 +58,83 @@ def _current_streak(user):
     return streak
 
 
-class PuzzleMapView(APIView):
+def _puzzle_payload(puzzle, *, include_solution=True):
+    data = {
+        "id": puzzle.id,
+        "title": puzzle.title,
+        "description": puzzle.description,
+        "fen": puzzle.fen,
+        "difficulty": puzzle.difficulty,
+        "category": puzzle.category,
+        "rating": puzzle.rating,
+    }
+    if include_solution:
+        data["solution"] = puzzle.solution
+    return data
+
+
+class DailyPuzzleView(APIView):
     """
-    GET /api/v1/puzzles/map/
-    Returns all puzzles ordered by rating with solved/available status per user.
+    GET /api/v1/puzzles/daily/
+    Problema do dia — o mesmo para todos, grátis para todos (sem gating).
+    Devolve também o estado do usuário nele: resolvido, esgotado, e quantas
+    das tentativas do dia já foram gastas.
     """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        profile = get_or_create_profile(request.user)
+        # Sempre True hoje; a chamada existe para que a regra do diário passe
+        # pelo mesmo lugar das demais regras de plano.
+        if not can_play_daily_puzzle(profile):  # pragma: no cover
+            return _premium_required_response()
+
+        puzzle = get_daily_puzzle()
+        if not puzzle:
+            return Response(
+                {"detail": "Nenhum problema disponível."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        progress = UserPuzzleProgress.objects.filter(
+            user=request.user, puzzle=puzzle
+        ).first()
+        exhausted = bool(progress and progress.is_exhausted_today())
+        solved = bool(progress and progress.solved)
+        attempts_used = progress.attempts_used_today() if progress else 0
+
+        # Esgotado: não devolve a solução — quem gastou as tentativas não
+        # ganha a resposta de graça; volta amanhã, com outro problema.
+        payload = _puzzle_payload(puzzle, include_solution=not exhausted)
+        payload.update(
+            {
+                "already_solved": solved,
+                "exhausted": exhausted,
+                "attempts_used": attempts_used,
+                "max_attempts": DAILY_PUZZLE_MAX_ATTEMPTS,
+                "attempts_left": max(0, DAILY_PUZZLE_MAX_ATTEMPTS - attempts_used),
+            }
+        )
+        return Response(payload)
+
+
+class PuzzleMapView(APIView):
+    """
+    GET /api/v1/puzzles/map/
+    Mapa de problemas do Treino — exclusivo do plano pago.
+
+    Antes do redesenho este endpoint não tinha gating nenhum e devolvia o
+    banco inteiro a qualquer autenticado.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = get_or_create_profile(request.user)
+        if not can_train_puzzles(profile):
+            return _premium_required_response()
+
         puzzles = list(Puzzle.objects.filter(is_active=True).order_by("rating", "id"))
         progress_map = {
             p.puzzle_id: p for p in UserPuzzleProgress.objects.filter(user=request.user)
@@ -92,7 +169,11 @@ class PuzzleMapView(APIView):
 class PuzzleDetailView(APIView):
     """
     GET /api/v1/puzzles/<pk>/
-    Returns full puzzle data for a specific puzzle by ID.
+    Detalhe de um problema (inclui a solução) — exclusivo do plano pago,
+    EXCETO quando o problema pedido é o do dia.
+
+    Antes do redesenho não havia gating: qualquer autenticado lia qualquer
+    problema com a solução junto.
     """
 
     permission_classes = [IsAuthenticated]
@@ -102,44 +183,40 @@ class PuzzleDetailView(APIView):
             puzzle = Puzzle.objects.get(pk=pk, is_active=True)
         except Puzzle.DoesNotExist:
             return Response(
-                {"detail": "Problema não encontrado."}, status=status.HTTP_404_NOT_FOUND
+                {"detail": "Problema não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
             )
+
+        profile = get_or_create_profile(request.user)
+        daily = get_daily_puzzle()
+        is_daily = bool(daily and daily.id == puzzle.id)
+        if not is_daily and not can_train_puzzles(profile):
+            return _premium_required_response()
 
         prog = UserPuzzleProgress.objects.filter(
             user=request.user, puzzle=puzzle
         ).first()
-        return Response(
-            {
-                "id": puzzle.id,
-                "title": puzzle.title,
-                "description": puzzle.description,
-                "fen": puzzle.fen,
-                "solution": puzzle.solution,
-                "difficulty": puzzle.difficulty,
-                "category": puzzle.category,
-                "rating": puzzle.rating,
-                "already_solved": bool(prog and prog.solved),
-            }
-        )
+        # No diário esgotado a solução também não vai — mesma regra do daily/.
+        exhausted = bool(is_daily and prog and prog.is_exhausted_today())
+        payload = _puzzle_payload(puzzle, include_solution=not exhausted)
+        payload["already_solved"] = bool(prog and prog.solved)
+        return Response(payload)
 
 
 class NextPuzzleView(APIView):
     """
     GET /api/v1/puzzles/next/?difficulty=easy
-    Returns the next unsolved puzzle for the authenticated user.
-    Query param `difficulty` is optional (easy/medium/hard).
+    Próximo problema do TREINO — exclusivo do plano pago, ilimitado.
+    A dificuldade adaptativa por rating vale aqui (diferente do diário, que é
+    o mesmo problema para todos).
     """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # Gating do plano Grátis (RF-MON-05, item 0.2): pré-gate antes de
-        # entregar um novo puzzle. A tela consulta stats/ para o contador;
-        # aqui é a trava de quem pede o próximo puzzle já sem cota.
         profile = get_or_create_profile(request.user)
-        allowed, remaining = can_solve_puzzle(profile)
-        if not allowed:
-            return _daily_limit_response(remaining)
+        if not can_train_puzzles(profile):
+            return _premium_required_response()
 
         difficulty = request.query_params.get("difficulty")
         solved_ids = UserPuzzleProgress.objects.filter(
@@ -152,7 +229,8 @@ class NextPuzzleView(APIView):
 
         puzzle = qs.order_by("rating", "id").first()
         if not puzzle:
-            # All puzzles solved — return any random puzzle
+            # Tudo resolvido na dificuldade pedida — devolve qualquer um para
+            # o treino não terminar em tela vazia.
             qs_all = Puzzle.objects.filter(is_active=True)
             if difficulty in ("easy", "medium", "hard"):
                 qs_all = qs_all.filter(difficulty=difficulty)
@@ -164,31 +242,30 @@ class NextPuzzleView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Check if user has an existing progress entry
         progress = UserPuzzleProgress.objects.filter(
             user=request.user, puzzle=puzzle
         ).first()
-
-        return Response(
-            {
-                "id": puzzle.id,
-                "title": puzzle.title,
-                "description": puzzle.description,
-                "fen": puzzle.fen,
-                "solution": puzzle.solution,
-                "difficulty": puzzle.difficulty,
-                "category": puzzle.category,
-                "rating": puzzle.rating,
-                "already_solved": progress.solved if progress else False,
-            }
-        )
+        payload = _puzzle_payload(puzzle)
+        payload["already_solved"] = progress.solved if progress else False
+        return Response(payload)
 
 
 class PuzzleProgressView(APIView):
     """
     POST /api/v1/puzzles/{pk}/progress/
-    Body: { "solved": true, "attempts": 3 }
-    Records or updates the user's attempt on a puzzle.
+    Body: { "solved": bool, "attempts": int }
+
+    ⚠️ PONTO CRÍTICO DE GATING ⚠️
+    Este endpoint recebe só um `pk` e precisa decidir se aquilo é o Problema
+    do dia (livre para todos) ou Treino (exige plano pago). A decisão é feita
+    comparando o `pk` com o problema do dia do servidor — NUNCA confiando no
+    cliente informar o modo. Errar aqui tem dois lados:
+      - bloquear demais → o usuário grátis resolve o diário e não consegue
+        registrar (tranca o produto grátis);
+      - liberar demais → registra progresso de problema pago.
+
+    O carimbo de esgotamento também é do servidor: o cliente reporta a falha,
+    quem conta e decide que acabou é aqui.
     """
 
     permission_classes = [IsAuthenticated]
@@ -198,55 +275,72 @@ class PuzzleProgressView(APIView):
             puzzle = Puzzle.objects.get(id=pk, is_active=True)
         except Puzzle.DoesNotExist:
             return Response(
-                {"detail": "Problema não encontrado."}, status=status.HTTP_404_NOT_FOUND
+                {"detail": "Problema não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
             )
+
+        profile = get_or_create_profile(request.user)
+        daily = get_daily_puzzle()
+        is_daily = bool(daily and daily.id == puzzle.id)
+        if not is_daily and not can_train_puzzles(profile):
+            return _premium_required_response()
 
         solved = bool(request.data.get("solved", False))
         attempts = max(1, int(request.data.get("attempts", 1)))
+        today = timezone.localdate()
 
-        # Defesa em profundidade do gating (item 0.2): só um solve NOVO
-        # consome cota — tentativa falha e re-registro de puzzle já resolvido
-        # passam livres. Espelha o padrão do AiGameResultView (403 + code).
-        existing = UserPuzzleProgress.objects.filter(
+        progress, _created = UserPuzzleProgress.objects.get_or_create(
             user=request.user, puzzle=puzzle
-        ).first()
-        records_new_solve = solved and not (existing and existing.solved)
-        if records_new_solve:
-            profile = get_or_create_profile(request.user)
-            allowed, remaining = can_solve_puzzle(profile)
-            if not allowed:
-                return _daily_limit_response(remaining)
-
-        progress, created = UserPuzzleProgress.objects.get_or_create(
-            user=request.user,
-            puzzle=puzzle,
-            defaults={"solved": solved, "attempts": attempts},
         )
 
-        if not created:
-            progress.attempts += attempts
-            if solved and not progress.solved:
-                progress.solved = True
-                progress.solved_at = timezone.now()
-            progress.save(update_fields=["attempts", "solved", "solved_at"])
+        if is_daily and progress.is_exhausted_today():
+            # Já esgotou hoje: nada muda, nem solve tardio conta.
+            return Response(self._state(progress, is_daily, today))
 
-        elif solved:
+        progress.attempts += attempts
+
+        if is_daily:
+            # Reinicia a contagem quando o carimbo é de outro dia (o mesmo
+            # problema pode voltar a ser o do dia num ciclo futuro).
+            if progress.daily_attempts_date != today:
+                progress.daily_attempts = 0
+                progress.daily_attempts_date = today
+            if not solved:
+                progress.daily_attempts += 1
+                if progress.daily_attempts >= DAILY_PUZZLE_MAX_ATTEMPTS:
+                    progress.exhausted_at = timezone.now()
+
+        if solved and not progress.solved:
+            progress.solved = True
             progress.solved_at = timezone.now()
-            progress.save(update_fields=["solved_at"])
 
-        return Response(
-            {
-                "puzzle_id": puzzle.id,
-                "solved": progress.solved,
-                "attempts": progress.attempts,
-            }
-        )
+        progress.save()
+        return Response(self._state(progress, is_daily, today))
+
+    def _state(self, progress, is_daily, today):
+        data = {
+            "puzzle_id": progress.puzzle_id,
+            "solved": progress.solved,
+            "attempts": progress.attempts,
+            "mode": "daily" if is_daily else "training",
+        }
+        if is_daily:
+            used = progress.attempts_used_today(today)
+            data.update(
+                {
+                    "attempts_used": used,
+                    "max_attempts": DAILY_PUZZLE_MAX_ATTEMPTS,
+                    "attempts_left": max(0, DAILY_PUZZLE_MAX_ATTEMPTS - used),
+                    "exhausted": progress.is_exhausted_today(today),
+                }
+            )
+        return data
 
 
 class PuzzleStatsView(APIView):
     """
     GET /api/v1/puzzles/stats/
-    Returns the user's overall puzzle stats.
+    Estatísticas do usuário + estado do Problema do dia e acesso ao Treino.
     """
 
     permission_classes = [IsAuthenticated]
@@ -259,17 +353,30 @@ class PuzzleStatsView(APIView):
 
         profile = get_or_create_profile(request.user)
         paid = has_paid_access(profile)
-        _, remaining = can_solve_puzzle(profile)
+
+        daily = get_daily_puzzle()
+        daily_progress = (
+            UserPuzzleProgress.objects.filter(user=request.user, puzzle=daily).first()
+            if daily
+            else None
+        )
+        daily_solved = bool(daily_progress and daily_progress.solved)
+        daily_exhausted = bool(daily_progress and daily_progress.is_exhausted_today())
 
         return Response(
             {
                 "solved": solved,
                 "total": total,
                 "attempts": attempts,
-                # Item 0.2: streak de dias consecutivos + contador do gating
-                # (limit/remaining são None no plano pago = ilimitado)
                 "streak": _current_streak(request.user),
-                "daily_puzzle_limit": None if paid else FREE_DAILY_PUZZLE_LIMIT,
-                "remaining_puzzles_today": remaining,
+                # Estado do Problema do dia (grátis para todos)
+                "daily_available": bool(daily)
+                and not daily_solved
+                and not daily_exhausted,
+                "daily_solved": daily_solved,
+                "daily_exhausted": daily_exhausted,
+                "daily_max_attempts": DAILY_PUZZLE_MAX_ATTEMPTS,
+                # Acesso ao Treino (exclusivo do plano pago)
+                "training_unlocked": paid,
             }
         )
