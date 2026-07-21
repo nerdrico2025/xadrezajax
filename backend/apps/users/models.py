@@ -225,6 +225,154 @@ class GameHistory(models.Model):
         )
 
 
+class CampaignProgress(models.Model):
+    """
+    Progressão do Modo Campanha vs IA (épico Modo Campanha, PR 1): uma linha
+    por (perfil, nível) — mesmo padrão do ModalityRating. 3 vitórias no
+    nível desbloqueiam o próximo e concedem o selo do nível dominado.
+
+    Escolhido ARMAZENADO em vez de DERIVADO de GameHistory porque
+    GameHistory não tem coluna de dificuldade estruturada — só um texto
+    livre em opponent_name ("IA Iniciante" etc.), montado a partir do valor
+    bruto recebido em AiGameResultView. Derivar exigiria parsear esse texto
+    (frágil); armazenado incrementa a partir do valor bruto, que já está em
+    memória no momento do registro (ver record_campaign_win()).
+    """
+
+    LEVEL_BEGINNER = "beginner"
+    LEVEL_EASY = "easy"
+    LEVEL_MEDIUM = "medium"
+    LEVEL_HARD = "hard"
+    LEVEL_MASTER = "master"
+    LEVEL_CHOICES = [
+        (LEVEL_BEGINNER, "Iniciante"),
+        (LEVEL_EASY, "Fácil"),
+        (LEVEL_MEDIUM, "Médio"),
+        (LEVEL_HARD, "Difícil"),
+        (LEVEL_MASTER, "Mestre"),
+    ]
+    # Ordem sequencial dos tiers (espec fechada) — usada para achar o
+    # "próximo nível" a desbloquear. Mestre não tem próximo.
+    LEVEL_ORDER = [LEVEL_BEGINNER, LEVEL_EASY, LEVEL_MEDIUM, LEVEL_HARD, LEVEL_MASTER]
+
+    WINS_TO_UNLOCK = 3
+
+    profile = models.ForeignKey(
+        Profile, on_delete=models.CASCADE, related_name="campaign_progress"
+    )
+    level = models.CharField(max_length=8, choices=LEVEL_CHOICES)
+    wins = models.IntegerField(default=0, verbose_name="Vitórias")
+    unlocked = models.BooleanField(default=False, verbose_name="Desbloqueado")
+    unlocked_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Desbloqueado em"
+    )
+    badge_awarded = models.BooleanField(default=False, verbose_name="Selo concedido")
+    badge_awarded_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Selo concedido em"
+    )
+
+    class Meta:
+        unique_together = ("profile", "level")
+        verbose_name = "Progresso de Campanha"
+        verbose_name_plural = "Progressos de Campanha"
+
+    @classmethod
+    def next_level(cls, level):
+        """Próximo tier na ordem da campanha, ou None (Mestre não tem próximo,
+        mas ainda concede selo — a conquista final)."""
+        try:
+            return cls.LEVEL_ORDER[cls.LEVEL_ORDER.index(level) + 1]
+        except (ValueError, IndexError):
+            return None
+
+    def __str__(self):
+        return f"{self.profile.user.email} [{self.level}] {self.wins} vitórias"
+
+
+class CampaignWinLog(models.Model):
+    """
+    Amarra o incremento da campanha ao GameHistory que o originou — garante
+    idempotência: reprocessar/reenviar o resultado da mesma partida (mesmo
+    game_history_id) não conta a vitória duas vezes, porque a constraint
+    OneToOne em `game` faz o segundo get_or_create ser no-op.
+    """
+
+    game = models.OneToOneField(
+        GameHistory, on_delete=models.CASCADE, related_name="campaign_win_log"
+    )
+    level = models.CharField(max_length=8, choices=CampaignProgress.LEVEL_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Vitória de campanha [{self.level}] — game #{self.game_id}"
+
+
+def ensure_campaign_progress(profile):
+    """Garante as 5 linhas de CampaignProgress do perfil, cada uma no estado
+    inicial correto (Iniciante desbloqueado, demais travados) se ainda não
+    existirem. Idempotente (get_or_create por nível) — chamada no signal de
+    criação de Profile e defensivamente na leitura, mesmo padrão de
+    resiliência do get_or_create_profile()."""
+    now = timezone.now()
+    for level in CampaignProgress.LEVEL_ORDER:
+        is_beginner = level == CampaignProgress.LEVEL_BEGINNER
+        CampaignProgress.objects.get_or_create(
+            profile=profile,
+            level=level,
+            defaults={
+                "unlocked": is_beginner,
+                "unlocked_at": now if is_beginner else None,
+            },
+        )
+
+
+def record_campaign_win(profile, level, game_history_id):
+    """Registra uma vitória vs IA na campanha, atrelada ao GameHistory que a
+    originou (game_history_id) — idempotente: chamar de novo com o mesmo
+    game_history_id é no-op (CampaignWinLog.game é OneToOne).
+
+    Ao atingir WINS_TO_UNLOCK vitórias no nível: concede o selo do nível
+    (uma vez só, `badge_awarded` trava) e desbloqueia o próximo nível, se
+    houver (Mestre concede selo mas não desbloqueia nada — é o fim da
+    campanha).
+    """
+    if level not in CampaignProgress.LEVEL_ORDER:
+        return None
+
+    _log, created = CampaignWinLog.objects.get_or_create(
+        game_id=game_history_id, defaults={"level": level}
+    )
+    if not created:
+        return None
+
+    progress, _ = CampaignProgress.objects.select_for_update().get_or_create(
+        profile=profile, level=level
+    )
+    progress.wins += 1
+    update_fields = ["wins"]
+
+    if progress.wins >= CampaignProgress.WINS_TO_UNLOCK and not progress.badge_awarded:
+        progress.badge_awarded = True
+        progress.badge_awarded_at = timezone.now()
+        update_fields += ["badge_awarded", "badge_awarded_at"]
+
+        next_level = CampaignProgress.next_level(level)
+        if next_level:
+            (
+                next_progress,
+                _,
+            ) = CampaignProgress.objects.select_for_update().get_or_create(
+                profile=profile, level=next_level
+            )
+            if not next_progress.unlocked:
+                next_progress.unlocked = True
+                next_progress.unlocked_at = timezone.now()
+                next_progress.save(update_fields=["unlocked", "unlocked_at"])
+
+    progress.save(update_fields=update_fields)
+    return progress
+
+
 class Friendship(models.Model):
     STATUS_PENDING = "pending"
     STATUS_ACCEPTED = "accepted"

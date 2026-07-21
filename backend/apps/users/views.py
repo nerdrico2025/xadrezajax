@@ -632,7 +632,7 @@ class AiGameResultView(APIView):
 
         from apps.payments.access import FREE_DAILY_GAME_LIMIT, can_play_game
 
-        from .models import GameHistory, Profile
+        from .models import GameHistory, Profile, record_campaign_win
 
         with transaction.atomic():
             # Autenticado sem Profile se autocorrige (get_or_create), nunca
@@ -690,7 +690,7 @@ class AiGameResultView(APIView):
                 "hard": "IA Difícil",
                 "master": "IA Mestre",
             }
-            GameHistory.objects.create(
+            game = GameHistory.objects.create(
                 user=request.user,
                 opponent_name=difficulty_label[difficulty],
                 result=result,
@@ -701,6 +701,13 @@ class AiGameResultView(APIView):
                 rated=False,
             )
 
+            # Modo Campanha (épico): só vitória progride, em qualquer
+            # controle de tempo (não filtra por no_clock — regra diferente
+            # da de rating). Atrelado ao game.id — idempotente por
+            # construção (ver record_campaign_win).
+            if result == "win":
+                record_campaign_win(profile, difficulty, game.id)
+
         return Response(
             {
                 "rating": round(modality_rating.rating),
@@ -710,6 +717,40 @@ class AiGameResultView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class CampaignProgressView(APIView):
+    """
+    GET /api/v1/auth/campaign/
+    Estado dos 5 níveis do Modo Campanha vs IA para o perfil autenticado —
+    consumido pelo wizard (cadeado + progresso) e pelo Perfil (selos).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import CampaignProgress, ensure_campaign_progress
+
+        profile = get_or_create_profile(request.user)
+        # Defensivo: perfis anteriores ao backfill (migration 0015) ou
+        # criados fora do signal (não deveria ocorrer) ganham as 5 linhas
+        # na hora — mesmo padrão do get_or_create_profile().
+        ensure_campaign_progress(profile)
+
+        progress_by_level = {
+            p.level: p for p in CampaignProgress.objects.filter(profile=profile)
+        }
+        data = [
+            {
+                "nivel": level,
+                "desbloqueado": progress_by_level[level].unlocked,
+                "vitorias": progress_by_level[level].wins,
+                "vitorias_para_desbloquear": CampaignProgress.WINS_TO_UNLOCK,
+                "selo_concedido": progress_by_level[level].badge_awarded,
+            }
+            for level in CampaignProgress.LEVEL_ORDER
+        ]
+        return Response(data)
 
 
 # ─── Onboarding em 3 toques (item 0.4) ────────────────────────────────────────
