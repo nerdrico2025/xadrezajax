@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Pressable,
   StyleSheet,
   Text,
@@ -18,33 +19,19 @@ import { Colors } from "@/constants/theme";
 import { useBoardTheme } from "@/context/BoardThemeContext";
 import { toChessboardColors } from "@/constants/boardThemes";
 import { useAuth } from "@/context/AuthContext";
-import { useProfile } from "@/hooks/useProfile";
 import { useChessSound } from "@/hooks/useChessSound";
+import { usePuzzleSession } from "@/hooks/usePuzzleSession";
 import { parseUciMove } from "@/utils/chessSpecialMoves";
 import { logEvent } from "@/services/analytics";
-import {
-  DailyPuzzleLimitError,
-  NoPuzzlesAvailableError,
-  difficultyForRating,
-  getNextPuzzle,
-  getPuzzleStats,
-  reportPuzzleProgress,
-  type PuzzleData,
-  type PuzzleStats,
-} from "@/services/puzzles";
+import { reportPuzzleProgress, type PuzzleMode } from "@/services/puzzles";
 
 type Props = {
   onBack: () => void;
   onUpgrade: () => void;
+  /** "daily" = Problema do dia (grátis, 4 tentativas);
+   *  "training" = Treino (pago, ilimitado). */
+  mode?: PuzzleMode;
 };
-
-type ScreenState =
-  | "loading"
-  | "playing"
-  | "solved"
-  | "limit"
-  | "empty"
-  | "error";
 
 const CATEGORY_LABELS: Record<string, string> = {
   mate_in_1: "Mate em 1",
@@ -57,89 +44,75 @@ const CATEGORY_LABELS: Record<string, string> = {
   endgame: "Final",
 };
 
-export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
+export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Props) {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const { theme: boardTheme } = useBoardTheme();
   const boardColors = toChessboardColors(boardTheme);
-  const { token, user } = useAuth();
-  const { profile, loading: profileLoading } = useProfile();
+  const { token } = useAuth();
   const { play } = useChessSound();
 
-  const [state, setState] = useState<ScreenState>("loading");
-  const [stats, setStats] = useState<PuzzleStats | null>(null);
-  const [puzzle, setPuzzle] = useState<PuzzleData | null>(null);
-  const [feedback, setFeedback] = useState<"ready" | "wrong" | "progress">(
-    "ready"
-  );
+  const isDaily = mode === "daily";
+  const {
+    state,
+    setState,
+    puzzle,
+    stats,
+    error,
+    attemptsUsed,
+    setAttemptsUsed,
+    maxAttempts,
+    reload,
+    refreshStats,
+  } = usePuzzleSession(mode);
+
+  const [feedback, setFeedback] = useState<"ready" | "wrong" | "progress">("ready");
   const [replying, setReplying] = useState(false);
+  // Erro pendente: o lance errado fica no tabuleiro até o usuário pedir para
+  // tentar de novo (o desfazer automático não deixava ver o próprio erro).
+  const [pendingRetry, setPendingRetry] = useState(false);
 
   const chessboardRef = useRef<ChessboardRef>(null);
-  // Posição corrente da linha da solução — fonte de verdade para reverter
-  // lances errados (resetBoard) e validar a vez do jogador.
   const gameRef = useRef(new Chess());
   const solutionIndexRef = useRef(0);
   const attemptsRef = useRef(1);
+  const celebration = useRef(new Animated.Value(0)).current;
 
   const playerColor = puzzle ? (new Chess(puzzle.fen).turn() as "w" | "b") : "w";
 
-  const refreshStats = useCallback(async () => {
-    if (!token) return null;
-    const data = await getPuzzleStats(token);
-    setStats(data);
-    return data;
-  }, [token]);
-
-  const loadPuzzle = useCallback(async () => {
-    if (!token) return;
-    setState("loading");
-    try {
-      const currentStats = await refreshStats();
-      if (
-        currentStats?.remaining_puzzles_today === 0 &&
-        currentStats.daily_puzzle_limit !== null
-      ) {
-        logEvent("paywall_shown", { source: "puzzles" });
-        setState("limit");
-        return;
-      }
-
-      const rating =
-        profile?.ratings?.blitz?.rating ?? user?.rating ?? 1500;
-      const difficulty = difficultyForRating(rating);
-      const next = await getNextPuzzle(token, difficulty);
-
-      gameRef.current = new Chess(next.fen);
-      solutionIndexRef.current = 0;
-      attemptsRef.current = 1;
-      setFeedback("ready");
-      setPuzzle(next);
-      setState("playing");
-      logEvent("puzzle_started", {
-        puzzle_id: next.id,
-        difficulty: next.difficulty,
-        category: next.category,
-      });
-    } catch (err) {
-      if (err instanceof DailyPuzzleLimitError) {
-        logEvent("paywall_shown", { source: "puzzles" });
-        setState("limit");
-      } else if (err instanceof NoPuzzlesAvailableError) {
-        // Banco sem conteúdo: estado vazio decente, não tela quebrada.
-        setState("empty");
-      } else {
-        setState("error");
-      }
-    }
-  }, [token, profile, user, refreshStats]);
-
+  // Reinicia o estado local sempre que um problema NOVO entra em cena.
+  // Depende só do id de propósito: incluir `state`/`puzzle` faria o efeito
+  // rodar a cada mudança de estado e resetaria o tabuleiro no meio da
+  // sequência (ex.: ao passar para "solved").
   useEffect(() => {
-    if (profileLoading) return;
-    loadPuzzle();
-    // Carrega uma única vez quando o rating do perfil fica disponível —
-    // recarregar a cada mudança de profile remontaria o puzzle em andamento.
+    if (!puzzle) return;
+    gameRef.current = new Chess(puzzle.fen);
+    solutionIndexRef.current = 0;
+    attemptsRef.current = 1;
+    setFeedback("ready");
+    setPendingRetry(false);
+    celebration.setValue(0);
+    if (state === "playing") {
+      logEvent("puzzle_started", {
+        puzzle_id: puzzle.id,
+        difficulty: puzzle.difficulty,
+        category: puzzle.category,
+        mode,
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileLoading]);
+  }, [puzzle?.id]);
+
+  const celebrate = useCallback(() => {
+    Animated.sequence([
+      Animated.spring(celebration, { toValue: 1, useNativeDriver: true, friction: 4 }),
+      Animated.timing(celebration, {
+        toValue: 0.92,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [celebration]);
 
   const finishPuzzle = useCallback(async () => {
     if (!token || !puzzle) return;
@@ -148,53 +121,96 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
     logEvent("puzzle_solved", {
       puzzle_id: puzzle.id,
       attempts: attemptsRef.current,
+      mode,
     });
+    setState("solved");
+    celebrate();
     try {
       await reportPuzzleProgress(token, puzzle.id, true, attemptsRef.current);
     } catch {
       // Progresso é reconciliável: o próximo stats/ reflete o que o backend
       // aceitou; não bloqueia a celebração local.
     }
-    await refreshStats().catch(() => {});
-    setState("solved");
-  }, [token, puzzle, play, refreshStats]);
+    await refreshStats();
+  }, [token, puzzle, play, mode, setState, celebrate, refreshStats]);
 
-  const playOpponentReply = useCallback(async (uci: string) => {
-    const parsed = parseUciMove(uci);
-    if (!parsed) return;
-    setReplying(true);
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    const reply = gameRef.current.move({
-      from: parsed.from,
-      to: parsed.to,
-      promotion: parsed.promotion ?? "q",
-    });
-    if (reply) {
-      await chessboardRef.current?.move({
-        from: parsed.from as any,
-        to: parsed.to as any,
-        promotion: reply.promotion as any,
-      });
-      play(reply.captured ? "capture" : "move");
+  /** Registra a falha no servidor — quem conta as tentativas e decide o
+   *  esgotamento é o backend, nunca a tela. */
+  const registerFailure = useCallback(async () => {
+    if (!token || !puzzle || !isDaily) return;
+    try {
+      const result = await reportPuzzleProgress(token, puzzle.id, false, 1);
+      if (typeof result.attempts_used === "number") {
+        setAttemptsUsed(result.attempts_used);
+      }
+      if (result.exhausted) {
+        logEvent("puzzle_exhausted", {
+          puzzle_id: puzzle.id,
+          attempts: result.attempts_used ?? attemptsRef.current,
+          mode,
+        });
+        setState("exhausted");
+        await refreshStats();
+      }
+    } catch {
+      // Falha de rede aqui não pode travar a tela: o usuário continua
+      // podendo tentar, e o servidor reconcilia na próxima chamada.
     }
-    setReplying(false);
-  }, [play]);
+  }, [token, puzzle, isDaily, mode, setAttemptsUsed, setState, refreshStats]);
+
+  const handleRetry = useCallback(() => {
+    if (!puzzle) return;
+    setPendingRetry(false);
+    setFeedback("ready");
+    chessboardRef.current?.resetBoard(gameRef.current.fen());
+  }, [puzzle]);
+
+  const playOpponentReply = useCallback(
+    async (uci: string) => {
+      const parsed = parseUciMove(uci);
+      if (!parsed) return;
+      setReplying(true);
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      const reply = gameRef.current.move({
+        from: parsed.from,
+        to: parsed.to,
+        promotion: parsed.promotion ?? "q",
+      });
+      if (reply) {
+        await chessboardRef.current?.move({
+          from: parsed.from as any,
+          to: parsed.to as any,
+          promotion: reply.promotion as any,
+        });
+        play(reply.captured ? "capture" : "move");
+      }
+      setReplying(false);
+    },
+    [play]
+  );
 
   const onMove = async (data: any) => {
-    if (!puzzle || state !== "playing" || replying) return;
+    if (!puzzle || state !== "playing" || replying || pendingRetry) return;
     const { move } = data;
     if (!move) return;
     if (gameRef.current.turn() !== playerColor) return;
 
-    const expected = puzzle.solution[solutionIndexRef.current];
+    const solution = puzzle.solution ?? [];
+    const expected = solution[solutionIndexRef.current];
     const played = `${move.from}${move.to}${move.promotion ?? ""}`.toLowerCase();
 
     if (played !== expected?.toLowerCase()) {
-      // Lance fora da solução: desfaz no tabuleiro e conta a tentativa
       attemptsRef.current += 1;
       setFeedback("wrong");
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      chessboardRef.current?.resetBoard(gameRef.current.fen());
+      if (isDaily) {
+        // Deixa o lance errado visível e espera o "Tentar novamente".
+        setPendingRetry(true);
+        await registerFailure();
+      } else {
+        // Treino: ilimitado, desfaz na hora para manter o ritmo.
+        chessboardRef.current?.resetBoard(gameRef.current.fen());
+      }
       return;
     }
 
@@ -208,36 +224,53 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     solutionIndexRef.current += 1;
-    if (solutionIndexRef.current >= puzzle.solution.length) {
+    if (solutionIndexRef.current >= solution.length) {
       await finishPuzzle();
       return;
     }
 
-    // Resposta automática do "oponente" (lances ímpares da solução)
     setFeedback("progress");
-    const replyUci = puzzle.solution[solutionIndexRef.current];
+    const replyUci = solution[solutionIndexRef.current];
     solutionIndexRef.current += 1;
     await playOpponentReply(replyUci);
 
-    if (solutionIndexRef.current >= puzzle.solution.length) {
+    if (solutionIndexRef.current >= solution.length) {
       await finishPuzzle();
     }
   };
 
-  const isFree = stats?.daily_puzzle_limit != null;
-  const solvedToday =
-    isFree && stats
-      ? stats.daily_puzzle_limit! - (stats.remaining_puzzles_today ?? 0)
-      : 0;
-
+  const attemptsLeft = Math.max(0, maxAttempts - attemptsUsed);
   const feedbackText = {
     ready:
       playerColor === "w"
         ? "Brancas jogam — encontre o melhor lance"
         : "Pretas jogam — encontre o melhor lance",
-    wrong: "Não é esse — tente outro lance",
+    wrong: "Esse não é o melhor lance. Tente outra ideia.",
     progress: "Boa! Continue a sequência",
   }[feedback];
+
+  const title = isDaily ? "Problema do dia" : "Treino";
+
+  // Lance certo em notação legível (SAN), a partir da FEN + primeiro lance da
+  // solução. Mostrado só na tela de esgotamento (revelação de aprendizado). O
+  // servidor entrega a solução no estado terminal; aqui só a traduzimos.
+  const solutionSan = (() => {
+    const first = puzzle?.solution?.[0];
+    if (!puzzle || !first) return null;
+    try {
+      const parsed = parseUciMove(first);
+      if (!parsed) return null;
+      const board = new Chess(puzzle.fen);
+      const move = board.move({
+        from: parsed.from,
+        to: parsed.to,
+        promotion: parsed.promotion ?? "q",
+      });
+      return move?.san ?? first;
+    } catch {
+      return first;
+    }
+  })();
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -251,9 +284,8 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
         >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Problemas</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{title}</Text>
         <View style={styles.headerRight}>
-          {/* Streak em dourado (0.6-D) — número em colors.text (contraste AA) */}
           <View
             style={[
               styles.streakChip,
@@ -281,10 +313,8 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
           <Text style={[styles.messageTitle, { color: colors.text }]}>
             Não foi possível carregar
           </Text>
-          <Text style={[styles.messageSub, { color: colors.secondary }]}>
-            Verifique sua conexão e tente novamente.
-          </Text>
-          <Button title="Tentar novamente" variant="accent" onPress={loadPuzzle} />
+          <Text style={[styles.messageSub, { color: colors.secondary }]}>{error}</Text>
+          <Button title="Tentar novamente" variant="accent" onPress={reload} />
         </View>
       )}
 
@@ -305,7 +335,8 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
         </View>
       )}
 
-      {state === "limit" && (
+      {/* Treino sem plano pago */}
+      {state === "locked" && (
         <View style={styles.center}>
           <View
             style={[
@@ -316,11 +347,11 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
             <Ionicons name="lock-closed" size={28} color={colors.accent} />
           </View>
           <Text style={[styles.messageTitle, { color: colors.text }]}>
-            Você completou os problemas de hoje!
+            O Treino é exclusivo do Premium
           </Text>
           <Text style={[styles.messageSub, { color: colors.secondary }]}>
-            O plano Grátis inclui {stats?.daily_puzzle_limit ?? 3} problemas por dia.
-            Assine o Premium para treinar sem limites.
+            Resolva problemas à vontade, além do desafio diário. O Problema do
+            dia continua grátis, todo dia.
           </Text>
           <Button
             title="Assinar Premium"
@@ -336,16 +367,108 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
         </View>
       )}
 
+      {/* Diário com as tentativas esgotadas */}
+      {state === "exhausted" && (
+        <View style={styles.center}>
+          <View
+            style={[
+              styles.limitBadge,
+              { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
+            ]}
+          >
+            <Ionicons name="hourglass-outline" size={28} color={colors.accentOnLight} />
+          </View>
+          <Text style={[styles.messageTitle, { color: colors.text }]}>
+            Você não conseguiu desta vez
+          </Text>
+          {solutionSan ? (
+            <View
+              style={[
+                styles.solutionReveal,
+                { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
+              ]}
+              accessibilityLabel={`A jogada certa era ${solutionSan}`}
+            >
+              <Text style={[styles.solutionLabel, { color: colors.secondary }]}>
+                A jogada certa era
+              </Text>
+              <Text style={[styles.solutionMove, { color: colors.accentOnLight }]}>
+                {solutionSan}
+              </Text>
+            </View>
+          ) : null}
+          <Text style={[styles.messageSub, { color: colors.secondary }]}>
+            Volte amanhã para um novo desafio.
+          </Text>
+          <Button title="Voltar ao início" variant="accent" onPress={onBack} />
+        </View>
+      )}
+
       {(state === "playing" || state === "solved") && puzzle && (
         <View style={styles.body}>
           <View style={styles.puzzleInfo}>
             <Text style={[styles.category, { color: colors.secondary }]}>
               {CATEGORY_LABELS[puzzle.category] ?? "Tática"}
-              {isFree ? ` · ${solvedToday}/${stats?.daily_puzzle_limit} hoje` : null}
             </Text>
-            <Text style={[styles.feedback, { color: feedback === "wrong" ? colors.error : colors.text }]}>
-              {state === "solved" ? "Problema resolvido! 🎉" : feedbackText}
-            </Text>
+
+            {/* Contador de tentativas — só no diário (Treino é ilimitado) */}
+            {isDaily && state === "playing" && maxAttempts > 0 && (
+              <View style={styles.attemptsRow} accessibilityLabel={
+                `Tentativa ${Math.min(attemptsUsed + 1, maxAttempts)} de ${maxAttempts}`
+              }>
+                {Array.from({ length: maxAttempts }).map((_, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.attemptDot,
+                      {
+                        backgroundColor:
+                          i < attemptsLeft ? colors.accent : "transparent",
+                        borderColor:
+                          i < attemptsLeft ? colors.accent : colors.divider,
+                      },
+                    ]}
+                  />
+                ))}
+                <Text style={[styles.attemptsText, { color: colors.secondary }]}>
+                  Tentativa {Math.min(attemptsUsed + 1, maxAttempts)} de {maxAttempts}
+                </Text>
+              </View>
+            )}
+
+            {state === "solved" ? (
+              <Animated.View
+                style={[
+                  styles.solvedBanner,
+                  {
+                    backgroundColor: colors.accentMuted,
+                    borderColor: colors.accent + "55",
+                    transform: [{ scale: celebration.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.9, 1.05],
+                    }) }],
+                    opacity: celebration.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.6, 1],
+                    }),
+                  },
+                ]}
+              >
+                <Ionicons name="sparkles" size={18} color={colors.accentOnLight} />
+                <Text style={[styles.solvedText, { color: colors.accentOnLight }]}>
+                  Muito bem! Problema resolvido!
+                </Text>
+              </Animated.View>
+            ) : (
+              <Text
+                style={[
+                  styles.feedback,
+                  { color: feedback === "wrong" ? colors.error : colors.text },
+                ]}
+              >
+                {feedbackText}
+              </Text>
+            )}
           </View>
 
           <View style={styles.boardSection}>
@@ -355,38 +478,50 @@ export default function PuzzleScreen({ onBack, onUpgrade }: Props) {
               fen={puzzle.fen}
               onMove={onMove}
               colors={boardColors}
-              gestureEnabled={state === "playing" && !replying}
+              gestureEnabled={state === "playing" && !replying && !pendingRetry}
             />
           </View>
 
-          {state === "solved" ? (
-            <View style={styles.footer}>
-              {/* Streak destacado em dourado no momento de recompensa (0.6-D) */}
-              <View
-                style={[
-                  styles.solvedStreak,
-                  { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
-                ]}
-              >
-                <Ionicons name="flame" size={18} color={colors.accentOnLight} />
-                <Text style={[styles.solvedStreakText, { color: colors.accentOnLight }]}>
-                  {stats?.streak === 1
-                    ? "1 dia de sequência"
-                    : `${stats?.streak ?? 0} dias de sequência`}
-                </Text>
-              </View>
-              <Button
-                title="Próximo problema"
-                iconName="arrow-forward"
-                variant="accent"
-                onPress={loadPuzzle}
-              />
-            </View>
-          ) : (
-            <View style={styles.footer}>
-              {replying && <ActivityIndicator size="small" color={colors.secondary} />}
-            </View>
-          )}
+          <View style={styles.footer}>
+            {state === "solved" ? (
+              <>
+                {stats && stats.streak > 0 && (
+                  <View
+                    style={[
+                      styles.solvedStreak,
+                      {
+                        backgroundColor: colors.accentMuted,
+                        borderColor: colors.accent + "55",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="flame" size={18} color={colors.accentOnLight} />
+                    <Text
+                      style={[styles.solvedStreakText, { color: colors.accentOnLight }]}
+                    >
+                      {stats.streak === 1
+                        ? "1 dia de sequência"
+                        : `${stats.streak} dias de sequência`}
+                    </Text>
+                  </View>
+                )}
+                {isDaily ? (
+                  <Button title="Voltar ao início" variant="accent" onPress={onBack} />
+                ) : (
+                  <Button
+                    title="Próximo problema"
+                    iconName="arrow-forward"
+                    variant="accent"
+                    onPress={reload}
+                  />
+                )}
+              </>
+            ) : pendingRetry ? (
+              <Button title="Tentar novamente" variant="accent" onPress={handleRetry} />
+            ) : (
+              replying && <ActivityIndicator size="small" color={colors.secondary} />
+            )}
+          </View>
         </View>
       )}
     </View>
@@ -444,6 +579,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   backLink: { fontSize: 14, fontWeight: "600", padding: 8 },
+  solutionReveal: {
+    alignItems: "center",
+    gap: 2,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginVertical: 4,
+  },
+  solutionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  solutionMove: { fontSize: 24, fontWeight: "800" },
 
   body: { flex: 1 },
   puzzleInfo: {
@@ -451,7 +602,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 8,
     alignItems: "center",
-    gap: 4,
+    gap: 6,
   },
   category: {
     fontSize: 11,
@@ -459,7 +610,20 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: "uppercase",
   },
+  attemptsRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  attemptDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5 },
+  attemptsText: { fontSize: 12, fontWeight: "600", marginLeft: 4 },
   feedback: { fontSize: 16, fontWeight: "600", textAlign: "center" },
+  solvedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  solvedText: { fontSize: 15, fontWeight: "800" },
   boardSection: {
     flex: 1,
     alignItems: "center",
@@ -471,7 +635,7 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     minHeight: 96,
     justifyContent: "flex-end",
-    gap: 4,
+    gap: 8,
   },
   solvedStreak: {
     flexDirection: "row",

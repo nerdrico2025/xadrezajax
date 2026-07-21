@@ -40,7 +40,7 @@ import MenuBottomSheet from "@/presentation/components/MenuBottomSheet";
 import { gameMenu, profileMenu } from "@/presentation/config/menuConfigs";
 
 type ActiveMenu = "game" | "profile" | null;
-type ActiveScreen = "home" | "ai_setup" | "play" | "puzzles" | "private_room" | "profile" | "settings" | "leaderboard" | "subscription";
+type ActiveScreen = "home" | "ai_setup" | "play" | "puzzles" | "puzzle_training" | "private_room" | "profile" | "settings" | "leaderboard" | "subscription";
 
 export default function Home() {
   const { theme } = useTheme();
@@ -279,6 +279,7 @@ export default function Home() {
             onPlayOnline={handleQuickOnline}
             onPrivateRoom={() => { setActiveScreen("private_room"); }}
             onPlayPuzzles={() => { setActiveScreen("puzzles"); }}
+            onTraining={() => { setActiveScreen("puzzle_training"); }}
           />
         ) : activeScreen === "ai_setup" ? (
           <AiGameSetupScreen
@@ -300,6 +301,16 @@ export default function Home() {
           </View>
         ) : activeScreen === "puzzles" ? (
           <PuzzleScreen
+            mode="daily"
+            onBack={() => {
+              setActiveScreen("home");
+              setActiveTab("home");
+            }}
+            onUpgrade={() => setActiveScreen("subscription")}
+          />
+        ) : activeScreen === "puzzle_training" ? (
+          <PuzzleScreen
+            mode="training"
             onBack={() => {
               setActiveScreen("home");
               setActiveTab("home");

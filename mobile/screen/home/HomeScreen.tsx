@@ -23,24 +23,33 @@ type Props = {
   onPlayOnline: () => void;
   onPrivateRoom: () => void;
   onPlayPuzzles: () => void;
+  /** Treino (problemas além do diário) — exclusivo do plano pago. */
+  onTraining: () => void;
 };
 
-export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPlayPuzzles }: Props) {
+export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPlayPuzzles, onTraining }: Props) {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const { user, token } = useAuth();
   const { profile } = useProfile();
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [puzzleStreak, setPuzzleStreak] = useState(0);
+  // Treino travado até o stats/ dizer o contrário — o card do Treino é
+  // vitrine de conversão, então aparece para todos, com cadeado no grátis.
+  const [trainingUnlocked, setTrainingUnlocked] = useState(false);
+  const [dailySolved, setDailySolved] = useState(false);
 
-  // Streak de puzzles para o chip dourado do card (0.6-D) — falha silenciosa:
-  // sem rede o card continua funcional, só sem o chip.
+  // Estado dos problemas para os cards — falha silenciosa: sem rede os cards
+  // continuam funcionais, só sem chip/estado (a tela de destino mostra o erro).
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
     getPuzzleStats(token)
       .then((stats) => {
-        if (!cancelled) setPuzzleStreak(stats.streak);
+        if (cancelled) return;
+        setPuzzleStreak(stats.streak);
+        setTrainingUnlocked(stats.training_unlocked);
+        setDailySolved(stats.daily_solved);
       })
       .catch(() => {});
     return () => {
@@ -172,7 +181,9 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
           <Ionicons name="extension-puzzle" size={28} color={colors.accent} style={styles.cardIcon} />
           <View>
             <Text style={[styles.cardTitle, { color: colors.text }]}>Problema do dia</Text>
-            <Text style={[styles.cardSub, { color: colors.secondary }]}>Treine táticas em poucos lances</Text>
+            <Text style={[styles.cardSub, { color: colors.secondary }]}>
+              {dailySolved ? "Resolvido hoje — volte amanhã" : "Um desafio novo todo dia"}
+            </Text>
           </View>
         </View>
         <View style={styles.cardRight}>
@@ -190,6 +201,42 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
               <Ionicons name="flame" size={13} color={colors.accentOnLight} />
               <Text style={[styles.streakText, { color: colors.accentOnLight }]}>{puzzleStreak}</Text>
             </View>
+          )}
+          <Ionicons name="chevron-forward" size={20} color={colors.secondary} />
+        </View>
+      </Pressable>
+
+      {/* Card: Treino — exclusivo do plano pago. Visível para todos de
+          propósito (vitrine de conversão); no grátis mostra cadeado e leva
+          ao paywall em vez de entrar. */}
+      <Pressable
+        style={[styles.card, { backgroundColor: colors.card, borderColor: colors.divider, borderWidth: 1 }]}
+        onPress={onTraining}
+        android_ripple={{ color: colors.primary + "20" }}
+        accessibilityRole="button"
+        accessibilityLabel={
+          trainingUnlocked ? "Treino" : "Treino, exclusivo do plano Premium"
+        }
+      >
+        <View style={styles.cardLeft}>
+          <Ionicons
+            name="barbell-outline"
+            size={28}
+            color={trainingUnlocked ? colors.accent : colors.secondary}
+            style={styles.cardIcon}
+          />
+          <View>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Treino</Text>
+            <Text style={[styles.cardSub, { color: colors.secondary }]}>
+              {trainingUnlocked
+                ? "Resolva problemas à vontade"
+                : "Problemas ilimitados no Premium"}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.cardRight}>
+          {!trainingUnlocked && (
+            <Ionicons name="lock-closed" size={16} color={colors.accentOnLight} />
           )}
           <Ionicons name="chevron-forward" size={20} color={colors.secondary} />
         </View>
