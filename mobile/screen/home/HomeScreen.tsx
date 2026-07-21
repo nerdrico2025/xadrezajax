@@ -205,7 +205,7 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
           <Text style={[styles.cardPiece, { color: colors.accent }]}>♕</Text>
           <View>
             <Text style={[styles.cardTitle, { color: colors.text }]}>Classificação</Text>
-            <Text style={[styles.cardSub, { color: colors.secondary }]}>Top jogadores do servidor</Text>
+            <Text style={[styles.cardSub, { color: colors.secondary }]}>Melhores Jogadores do Clube</Text>
           </View>
         </View>
         <Ionicons name="chevron-forward" size={20} color={colors.secondary} />
