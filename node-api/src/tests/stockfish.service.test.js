@@ -8,13 +8,46 @@
 
 const EventEmitter = require("events");
 
+/**
+ * Engine falsa. Desde o pool de processos de vida longa (enginePool.js), o
+ * serviço AGUARDA o handshake UCI antes de mandar `position`/`go` — então a
+ * falsa precisa responder `uciok`/`readyok` como o binário real, senão a
+ * promessa nunca avança.
+ */
 function fakeEngine() {
   const engine = new EventEmitter();
   engine.stdout = new EventEmitter();
   engine.stderr = new EventEmitter();
-  engine.stdin = { write: jest.fn() };
   engine.kill = jest.fn();
+
+  const stdin = new EventEmitter();
+  stdin.write = jest.fn((cmd) => {
+    if (cmd === "uci\n") {
+      setImmediate(() =>
+        engine.stdout.emit("data", Buffer.from("id name Fake\nuciok\n"))
+      );
+    } else if (cmd === "isready\n") {
+      setImmediate(() => engine.stdout.emit("data", Buffer.from("readyok\n")));
+    }
+    return true;
+  });
+  engine.stdin = stdin;
   return engine;
+}
+
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+/** Espera o serviço chegar no `go` (pós-handshake) para então emitir a saída
+ *  da busca. Sem isto o teste emitiria `bestmove` antes de alguém escutar. */
+async function untilGo(engine) {
+  for (let i = 0; i < 50; i++) {
+    const sent = engine.stdin.write.mock.calls.some(([cmd]) =>
+      cmd.startsWith("go ")
+    );
+    if (sent) return;
+    await flush();
+  }
+  throw new Error("a engine nunca recebeu o comando 'go'");
 }
 
 /** Linha de MultiPV no formato que o parser produz. */
@@ -248,22 +281,25 @@ describe("resolveLevel — resolução de dificuldade", () => {
 
 describe("getBestMove — integração com o processo da engine (mockada)", () => {
   let getBestMove;
+  let shutdownPool;
   let engine;
 
   beforeEach(() => {
     jest.resetModules();
     engine = fakeEngine();
     jest.doMock("child_process", () => ({ spawn: jest.fn(() => engine) }));
-    ({ getBestMove } = require("../services/stockfish.service"));
+    ({ getBestMove, shutdownPool } = require("../services/stockfish.service"));
   });
 
   afterEach(() => {
+    shutdownPool();
     jest.dontMock("child_process");
     if (Math.random.mockRestore) Math.random.mockRestore();
   });
 
   test("beginner configura MultiPV alto via setoption", async () => {
     const promise = getBestMove("fen", "beginner");
+    await untilGo(engine);
     expect(engine.stdin.write).toHaveBeenCalledWith(
       "setoption name MultiPV value 16\n"
     );
@@ -271,19 +307,30 @@ describe("getBestMove — integração com o processo da engine (mockada)", () =
     await promise;
   });
 
-  test("master NÃO configura MultiPV (força total, linha única)", async () => {
+  test("master fixa MultiPV 1 (força total, linha única)", async () => {
     const promise = getBestMove("fen", "master");
-    const multipvCalls = engine.stdin.write.mock.calls.filter(([cmd]) =>
-      cmd.includes("MultiPV")
+    await untilGo(engine);
+    // Com engine reutilizada é preciso ser EXPLÍCITO: omitir o setoption
+    // deixaria vazar o MultiPV 16 de um lance anterior de Iniciante.
+    expect(engine.stdin.write).toHaveBeenCalledWith(
+      "setoption name MultiPV value 1\n"
     );
-    expect(multipvCalls).toHaveLength(0);
     engine.stdout.emit("data", Buffer.from("bestmove e2e4\n"));
     expect(await promise).toBe("e2e4");
+  });
+
+  test("zera a hash entre lances (ucinewgame) para não ficar mais forte que a calibragem", async () => {
+    const promise = getBestMove("fen", "beginner");
+    await untilGo(engine);
+    expect(engine.stdin.write).toHaveBeenCalledWith("ucinewgame\n");
+    engine.stdout.emit("data", Buffer.from("bestmove e2e4\n"));
+    await promise;
   });
 
   test("beginner joga linha inferior quando o sorteio dispara o erro", async () => {
     jest.spyOn(Math, "random").mockReturnValue(0);
     const promise = getBestMove("fen", "beginner");
+    await untilGo(engine);
 
     engine.stdout.emit(
       "data",
@@ -303,6 +350,7 @@ describe("getBestMove — integração com o processo da engine (mockada)", () =
   test("beginner nunca escolhe a linha que entrega mate contra", async () => {
     jest.spyOn(Math, "random").mockReturnValue(0);
     const promise = getBestMove("fen", "beginner");
+    await untilGo(engine);
 
     engine.stdout.emit(
       "data",
@@ -319,7 +367,41 @@ describe("getBestMove — integração com o processo da engine (mockada)", () =
 
   test("propaga null quando a engine não devolve lance", async () => {
     const promise = getBestMove("fen", "medium");
+    await untilGo(engine);
     engine.stdout.emit("data", Buffer.from("bestmove\n"));
     expect(await promise).toBeNull();
+  });
+
+  test("posição sem lance legal devolve null, nunca a string '(none)'", async () => {
+    // Regressão: "(none)" tem 6 caracteres, então passava por parseUciMove no
+    // app como from="(n"/to="on" e explodia dentro do chess.js.
+    const promise = getBestMove("fen", "beginner");
+    await untilGo(engine);
+    engine.stdout.emit("data", Buffer.from("bestmove (none)\n"));
+    expect(await promise).toBeNull();
+  });
+
+  test("reaproveita o mesmo processo entre lances (não faz spawn por requisição)", async () => {
+    const { spawn } = require("child_process");
+
+    for (let i = 0; i < 3; i++) {
+      const promise = getBestMove("fen", "medium");
+      await untilGo(engine);
+      engine.stdout.emit("data", Buffer.from("bestmove e2e4\n"));
+      expect(await promise).toBe("e2e4");
+      engine.stdin.write.mock.calls.length = 0; // zera para o próximo untilGo
+    }
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  test("linha partida entre dois chunks não corrompe o lance", async () => {
+    // Node não garante que um chunk de stdout termine em "\n". O parser antigo
+    // fatiava por chunk e produziria "e2e" aqui.
+    const promise = getBestMove("fen", "medium");
+    await untilGo(engine);
+    engine.stdout.emit("data", Buffer.from("bestmo"));
+    engine.stdout.emit("data", Buffer.from("ve e2e4\n"));
+    expect(await promise).toBe("e2e4");
   });
 });

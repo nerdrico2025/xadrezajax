@@ -57,6 +57,42 @@ const AI_MIN_MS: Record<Difficulty, [number, number]> = {
 // em limbo silencioso).
 const AI_TIMEOUT_MS = 10000;
 
+// ─── Recuperação de falha da IA ─────────────────────────────────────────────
+// O relato do teste em device foi "a IA parou de jogar e 'Tentar novamente'
+// não resolvia — só dava para abandonar". O retry reenviava a MESMA requisição
+// na hora, sem espaço para a condição transitória passar, e havia caminhos que
+// não levavam a estado jogável nenhum. Agora:
+//   - tentativas automáticas com espera crescente ANTES de incomodar o usuário
+//     (a maioria das falhas é transitória e se resolve sozinha);
+//   - teto de tentativas manuais, para o botão nunca virar um loop;
+//   - e, em qualquer ponto, uma saída explícita da tela.
+const AI_AUTO_RETRY_DELAYS_MS = [400, 1200];
+const AI_MAX_MANUAL_RETRIES = 3;
+
+/**
+ * O lance UCI é jogável nesta posição?
+ *
+ * Vale por si: a engine pode devolver "(none)" (posição sem lance legal), uma
+ * string truncada, ou um lance que não é legal ali. Com chess.js ^1.4 `move()`
+ * LANÇA nesses casos — e a exceção subia por `makeAIMove`, deixando o tabuleiro
+ * travado na vez da IA. Validar aqui transforma isso numa falha tratada, que o
+ * retry sabe resolver.
+ */
+function isPlayableUci(fen: string, uci: string | null): boolean {
+  const parsed = uci ? parseUciMove(uci) : null;
+  if (!parsed) return false;
+  if (!/^[a-h][1-8]$/.test(parsed.from) || !/^[a-h][1-8]$/.test(parsed.to)) return false;
+  try {
+    return !!new Chess(fen).move({
+      from: parsed.from,
+      to: parsed.to,
+      promotion: parsed.promotion ?? "q",
+    });
+  } catch {
+    return false;
+  }
+}
+
 function aiFloorMs(difficulty: Difficulty): number {
   const [lo, hi] = AI_MIN_MS[difficulty];
   return lo === hi ? lo : lo + Math.random() * (hi - lo);
@@ -120,6 +156,8 @@ export default function GameScreen({
   const [aiError, setAiError] = useState(false);
   // Posição pendente para o "Tentar novamente" quando a IA falha/expira.
   const pendingAiGameRef = useRef<Chess | null>(null);
+  // Quantas vezes o usuário já apertou "Tentar novamente" nesta partida.
+  const aiManualRetriesRef = useRef(0);
   // Timer do timeout de 10s da jogada da IA — limpo no unmount para não
   // deixar reject/setState disparando depois que a tela morreu.
   const aiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -205,6 +243,32 @@ export default function GameScreen({
   const aiMaterial = aiCaptures.reduce((s, p) => s + (PIECE_VALUE[p] ?? 0), 0);
   const playerAdvantage = playerMaterial - aiMaterial;
 
+  /** Pede o lance à engine, com tentativas automáticas espaçadas. Só devolve
+   *  um lance COMPROVADAMENTE jogável na posição, ou null. */
+  const requestAiMove = useCallback(
+    async (fen: string): Promise<string | null> => {
+      for (let attempt = 0; attempt <= AI_AUTO_RETRY_DELAYS_MS.length; attempt++) {
+        if (attempt > 0) {
+          const wait = AI_AUTO_RETRY_DELAYS_MS[attempt - 1];
+          await new Promise((resolve) => setTimeout(resolve, wait));
+        }
+        let candidate: string | null = null;
+        try {
+          candidate = await withTimeout(
+            getBestMove(fen, difficulty),
+            AI_TIMEOUT_MS,
+            aiTimeoutRef
+          );
+        } catch {
+          candidate = null;
+        }
+        if (isPlayableUci(fen, candidate)) return candidate;
+      }
+      return null;
+    },
+    [difficulty]
+  );
+
   const makeAIMove = useCallback(async (currentGame: Chess) => {
     setAiError(false);
     setLoading(true);
@@ -212,16 +276,8 @@ export default function GameScreen({
     // A engine roda no node-api (fetch), fora da thread de UI — o cálculo
     // não congela a interface. O piso de tempo abaixo é só percepção.
     const startedAt = Date.now();
-    let bestMove: string | null = null;
-    try {
-      bestMove = await withTimeout(
-        getBestMove(currentGame.fen(), difficulty),
-        AI_TIMEOUT_MS,
-        aiTimeoutRef
-      );
-    } catch {
-      bestMove = null;
-    }
+    const fen = currentGame.fen();
+    const bestMove = await requestAiMove(fen);
 
     // Piso humanizado: espera só o que FALTA para atingir o piso — nunca soma
     // ao tempo real (max(tempoReal, piso)).
@@ -243,8 +299,16 @@ export default function GameScreen({
     const to = parsed.to as any;
 
     const updated = new Chess(currentGame.fen());
+    // `requestAiMove` já validou a legalidade nesta FEN, então `move` não
+    // lança aqui. O guarda continua por robustez, e agora leva ao mesmo
+    // caminho de falha recuperável — nunca a um tabuleiro travado.
     const aiMove = updated.move({ from, to, promotion: parsed.promotion ?? "q" });
-    if (!aiMove) { setLoading(false); return; }
+    if (!aiMove) {
+      pendingAiGameRef.current = currentGame;
+      setLoading(false);
+      setAiError(true);
+      return;
+    }
 
     await chessboardRef.current?.move({ from, to, promotion: aiMove.promotion as any });
 
@@ -280,7 +344,7 @@ export default function GameScreen({
 
     // Save after AI move (player's turn next — stable restore point)
     doSave(updated.fen(), capturesRef.current.playerCaptures, newAiCaptures, capturesRef.current.moveCount);
-  }, [difficulty, play, playerColor, clock, doSave]);
+  }, [difficulty, play, playerColor, clock, doSave, requestAiMove]);
 
   useEffect(() => {
     if (savedGame) {
@@ -302,6 +366,9 @@ export default function GameScreen({
     setCampaignUnlock(null);
     setMoveCount(0);
     setClockTimedOut(null);
+    setAiError(false);
+    aiManualRetriesRef.current = 0;
+    pendingAiGameRef.current = null;
     clock.reset();
     await chessboardRef.current?.resetBoard();
     play("gameStart");
@@ -314,16 +381,41 @@ export default function GameScreen({
     setShowResignConfirm(true);
   }, []);
 
-  const handleRetryAi = useCallback(() => {
-    setAiError(false);
+  const handleRetryAi = useCallback(async () => {
     const pending = pendingAiGameRef.current;
-    if (pending) makeAIMove(pending);
-  }, [makeAIMove]);
+    if (!pending) {
+      // Sem posição pendente não há o que retomar — sair é a única saída
+      // honesta, e é melhor que um botão que não faz nada.
+      setAiError(false);
+      onLeave?.();
+      return;
+    }
+    aiManualRetriesRef.current += 1;
+    setAiError(false);
+    // `await` + `catch`: sem eles, uma rejeição aqui ficava solta e deixava
+    // `loading` preso em true — o indicador "Pensando" para sempre.
+    try {
+      await makeAIMove(pending);
+    } catch (e) {
+      logEvent("ai_move_retry_error", {
+        difficulty,
+        attempt: aiManualRetriesRef.current,
+        message: (e as Error)?.message,
+      });
+      setLoading(false);
+      setAiError(true);
+    }
+  }, [makeAIMove, onLeave, difficulty]);
 
   const handleAbandonAi = useCallback(() => {
     setAiError(false);
     onLeave?.();
   }, [onLeave]);
+
+  // Esgotadas as tentativas manuais, o modal para de oferecer "Tentar
+  // novamente" e passa a oferecer só a saída. É a garantia dura de que este
+  // caminho nunca vira um loop.
+  const aiRetriesExhausted = aiManualRetriesRef.current >= AI_MAX_MANUAL_RETRIES;
 
   const onMove = async (data: any) => {
     try {
@@ -495,11 +587,15 @@ export default function GameScreen({
 
       <ConfirmModal
         visible={aiError}
-        title="A IA não respondeu"
-        message="Algo atrapalhou a jogada da IA. Você pode tentar de novo ou sair da partida."
-        confirmLabel="Tentar novamente"
+        title={aiRetriesExhausted ? "Não foi possível retomar" : "A IA não respondeu"}
+        message={
+          aiRetriesExhausted
+            ? "A IA continua sem responder depois de várias tentativas. Saia da partida e tente de novo daqui a pouco."
+            : "Algo atrapalhou a jogada da IA. Você pode tentar de novo ou sair da partida."
+        }
+        confirmLabel={aiRetriesExhausted ? "Sair da partida" : "Tentar novamente"}
         cancelLabel="Sair"
-        onConfirm={handleRetryAi}
+        onConfirm={aiRetriesExhausted ? handleAbandonAi : handleRetryAi}
         onCancel={handleAbandonAi}
       />
 

@@ -1,4 +1,4 @@
-const { spawn } = require("child_process");
+const { EnginePool } = require("./enginePool");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Calibragem de força da IA — reescrita na rodada de UX pós-Campanha (item 2).
@@ -182,73 +182,47 @@ function pickMove(bestMove, pvLines, errorWindow) {
   return safe.sort((a, b) => b.loss - a.loss)[0].move;
 }
 
-function getBestMove(fen, level = DEFAULT_LEVEL) {
+// Pool de engines quentes + teto de concorrência. Ver enginePool.js para o
+// porquê (o spawn por requisição custava ~95% do tempo de resposta e saturava
+// a CPU sob concorrência).
+const pool = new EnginePool();
+
+/**
+ * Melhor lance da engine para `fen`, já com a janela de erro do nível aplicada.
+ * Devolve null quando não há lance legal na posição ("bestmove (none)").
+ */
+async function getBestMove(fen, level = DEFAULT_LEVEL) {
   const { skill, depth, movetime, multipv = 1, errorWindow } = resolveLevel(level);
-  // Janela de timeout: tempo de análise + folga para spawn/handshake.
-  const timeoutMs = (movetime || depth * 1000) + 5000;
+  // Janela de timeout: tempo de análise + folga. A folga pôde encolher de 5s
+  // para 2s porque o engine já vem quente do pool — não há mais spawn nem
+  // carga de rede NNUE dentro desta janela.
+  const timeoutMs = (movetime || depth * 1000) + 2000;
   const goCmd = movetime
     ? `go depth ${depth} movetime ${movetime}\n`
     : `go depth ${depth}\n`;
 
-  return new Promise((resolve, reject) => {
-    const engine = spawn("stockfish");
-
-    let responded = false;
-    // Última linha PV vista por índice MultiPV (1 = melhor); Stockfish
-    // reescreve a cada iteração de profundidade, então só a mais recente
-    // por índice importa.
-    const pvLines = {};
-
-    const timeout = setTimeout(() => {
-      if (!responded) {
-        responded = true;
-        engine.kill();
-        reject(new Error("Stockfish timeout"));
-      }
-    }, timeoutMs);
-
-    engine.stdout.on("data", (data) => {
-      const lines = data.toString().split("\n");
-
-      for (const line of lines) {
-        if (multipv > 1 && line.startsWith("info") && line.includes("multipv")) {
-          const parsed = parseMultipvLine(line);
-          if (parsed) pvLines[parsed.index] = parsed;
-        }
-
-        if (line.startsWith("bestmove") && !responded) {
-          responded = true;
-          clearTimeout(timeout);
-
-          const bestMove = line.split(" ")[1];
-          engine.kill();
-          resolve(bestMove ? pickMove(bestMove, pvLines, errorWindow) : null);
-          return;
-        }
-      }
+  const engine = await pool.acquire();
+  let healthy = true;
+  try {
+    const { bestMove, pvLines } = await engine.search({
+      skill,
+      multipv,
+      fen,
+      goCmd,
+      timeoutMs,
+      parseLine: parseMultipvLine,
     });
-
-    engine.stderr.on("data", (data) => {
-      console.error("Stockfish stderr:", data.toString());
-    });
-
-    engine.on("error", (err) => {
-      if (!responded) {
-        responded = true;
-        clearTimeout(timeout);
-        reject(new Error(`Falha ao iniciar Stockfish: ${err.message}`));
-      }
-    });
-
-    engine.stdin.write("uci\n");
-    engine.stdin.write(`setoption name Skill Level value ${skill}\n`);
-    if (multipv > 1) {
-      engine.stdin.write(`setoption name MultiPV value ${multipv}\n`);
-    }
-    engine.stdin.write("isready\n");
-    engine.stdin.write(`position fen ${fen}\n`);
-    engine.stdin.write(goCmd);
-  });
+    if (!bestMove) return null;
+    return pickMove(bestMove, pvLines, errorWindow);
+  } catch (err) {
+    // Timeout/erro no meio de uma busca deixa o engine em estado indefinido
+    // (pode haver um `bestmove` atrasado a caminho). Não devolve ao pool.
+    healthy = false;
+    pool.discard(engine);
+    throw err;
+  } finally {
+    if (healthy) pool.release(engine);
+  }
 }
 
 module.exports = {
@@ -264,4 +238,7 @@ module.exports = {
   parseMultipvLine,
   lineScore,
   pickMove,
+  // Operacional: métricas do pool e encerramento limpo (testes e SIGTERM).
+  poolStats: () => pool.stats(),
+  shutdownPool: () => pool.shutdown(),
 };
