@@ -65,15 +65,28 @@ const ACTIVE_GAME: SavedAiGame = {
 // pendentes (piso humanizado, timeout de 10s da IA) antes do teardown do Jest.
 const mountedTrees: renderer.ReactTestRenderer[] = [];
 
-function render() {
+function render(difficulty: "beginner" | "easy" | "medium" | "hard" | "master" = "medium") {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(
-      <GameScreen savedGame={ACTIVE_GAME} difficulty="medium" playerColor="w" timeControl={null} />
+      <GameScreen
+        savedGame={{ ...ACTIVE_GAME, difficulty }}
+        difficulty={difficulty}
+        playerColor="w"
+        timeControl={null}
+      />
     );
   });
   mountedTrees.push(tree);
   return tree;
+}
+
+/** Encerra a partida por abandono — caminho mais curto até a tela de fim. */
+function resign(tree: renderer.ReactTestRenderer) {
+  act(() => {
+    findByLabel(tree.root, "Desistir da partida").props.onPress();
+  });
+  pressText(tree.root, "Abandonar");
 }
 
 function findByLabel(root: ReactTestInstance, label: string) {
@@ -420,5 +433,43 @@ describe("Modo Campanha — feedback de desbloqueio na vitória vs IA (PR 2)", (
       await Promise.resolve();
     });
     expect(hasText(tree.root, "dominado!")).toBe(false);
+  });
+});
+
+// ⚠️ TEMPORÁRIO — instrumentação de diagnóstico da calibragem da IA.
+// TODO(remover): junto com utils/aiGamePgn.ts.
+describe("instrumentação de PGN (diagnóstico temporário da calibragem)", () => {
+  function hasTextContaining(root: ReactTestInstance, part: string) {
+    return (
+      root.findAll((n) => {
+        const c = n.props?.children;
+        const str = typeof c === "string" ? c : Array.isArray(c) ? c.join("") : "";
+        return str.includes(part);
+      }).length > 0
+    );
+  }
+
+  it("mostra o PGN no fim de partida no Iniciante", () => {
+    const tree = render("beginner");
+    resign(tree);
+    expect(hasTextContaining(tree.root, "Diagnóstico da IA")).toBe(true);
+    expect(hasTextContaining(tree.root, '[Difficulty "beginner"]')).toBe(true);
+    // Partida retomada de um save: a análise precisa saber que está truncada.
+    expect(hasTextContaining(tree.root, "[Incomplete")).toBe(true);
+  });
+
+  it("mostra o PGN no Fácil", () => {
+    const tree = render("easy");
+    resign(tree);
+    expect(hasTextContaining(tree.root, '[Difficulty "easy"]')).toBe(true);
+  });
+
+  it("NÃO instrumenta os níveis fora da investigação", () => {
+    // A instrumentação não pode vazar para o resto do produto.
+    for (const level of ["medium", "hard", "master"] as const) {
+      const tree = render(level);
+      resign(tree);
+      expect(hasTextContaining(tree.root, "Diagnóstico da IA")).toBe(false);
+    }
   });
 });

@@ -30,6 +30,8 @@ import CapturedPieces from "./CapturedPieces";
 import ConfirmModal from "@/components/ConfirmModal";
 import ChessClock from "@/components/ChessClock";
 import { AI_LEVELS, type Difficulty, type PlayerColor } from "@/constants/aiGame";
+// ⚠️ TEMPORÁRIO (diagnóstico da calibragem do Iniciante) — ver utils/aiGamePgn.ts
+import { buildAiGamePgn, shouldRecordPgn } from "@/utils/aiGamePgn";
 
 interface GameScreenProps {
   onLeave?: () => void;
@@ -135,6 +137,10 @@ export default function GameScreen({
   const [showDrawConfirm, setShowDrawConfirm] = useState(false);
   const [moveCount, setMoveCount] = useState(savedGame?.moveCount ?? 0);
   const chessboardRef = useRef<ChessboardRef>(null);
+  // ⚠️ TEMPORÁRIO: lances em SAN da partida, só p/ Iniciante/Fácil. Ver
+  // utils/aiGamePgn.ts para o porquê e para o TODO de remoção.
+  const sanHistoryRef = useRef<string[]>([]);
+  const [diagnosticPgn, setDiagnosticPgn] = useState<string | null>(null);
   const { play } = useChessSound();
 
   const aiColor = playerColor === "w" ? "b" : "w";
@@ -156,6 +162,18 @@ export default function GameScreen({
     clock.pause();
     clearSavedGame().catch(() => {});
     setGameResult(result);
+    // ⚠️ TEMPORÁRIO: monta o PGN para a análise pós-morte da calibragem.
+    if (shouldRecordPgn(difficulty)) {
+      setDiagnosticPgn(
+        buildAiGamePgn({
+          moves: sanHistoryRef.current,
+          difficulty,
+          playerColor,
+          result,
+          resumed: !!savedGame,
+        })
+      );
+    }
     setCampaignUnlock(null);
     if (authToken) {
       // Persiste a partida vs IA no histórico/estatísticas (decisão D1: nunca
@@ -192,7 +210,7 @@ export default function GameScreen({
           });
         });
     }
-  }, [authToken, difficulty, clock, timeControl]);
+  }, [authToken, difficulty, clock, timeControl, playerColor, savedGame]);
 
   useEffect(() => {
     if (!clockTimedOut || gameResult) return;
@@ -252,6 +270,8 @@ export default function GameScreen({
       ? [...capturesRef.current.aiCaptures, aiMove.captured]
       : capturesRef.current.aiCaptures;
     if (aiMove.captured) setAiCaptures(newAiCaptures);
+    // ⚠️ TEMPORÁRIO: registra o lance da IA para o PGN de diagnóstico.
+    if (shouldRecordPgn(difficulty)) sanHistoryRef.current.push(aiMove.san);
 
     const result = detectGameOver(updated, playerColor);
     if (result) {
@@ -302,6 +322,9 @@ export default function GameScreen({
     setCampaignUnlock(null);
     setMoveCount(0);
     setClockTimedOut(null);
+    // ⚠️ TEMPORÁRIO: zera o registro de lances do diagnóstico.
+    sanHistoryRef.current = [];
+    setDiagnosticPgn(null);
     clock.reset();
     await chessboardRef.current?.resetBoard();
     play("gameStart");
@@ -343,6 +366,8 @@ export default function GameScreen({
       });
 
       if (!playerMove) return;
+      // ⚠️ TEMPORÁRIO: registra o lance do jogador para o PGN de diagnóstico.
+      if (shouldRecordPgn(difficulty)) sanHistoryRef.current.push(playerMove.san);
 
       const newPlayerCaptures = playerMove.captured
         ? [...playerCaptures, playerMove.captured]
@@ -508,6 +533,7 @@ export default function GameScreen({
         onNewGame={handleNewGame}
         onLeave={() => onLeave?.()}
         campaignUnlock={campaignUnlock}
+        diagnosticPgn={diagnosticPgn}
       />
 
       <ConfirmModal
