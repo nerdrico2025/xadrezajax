@@ -202,38 +202,109 @@ describe("percepção de travamento na jogada da IA (PR D, item 8)", () => {
     expect(hasLabel(tree.root, "A IA está pensando")).toBe(false);
   });
 
-  it("falha/timeout da IA mostra erro tratado, sem limbo silencioso", async () => {
+  /**
+   * Avança o relógio falso em fatias, intercalando flush de microtasks.
+   *
+   * As esperas do retry automático são agendadas DEPOIS que a tentativa
+   * anterior rejeita — ou seja, dentro de uma continuação de promessa. Um único
+   * `advanceTimersByTime` não as enxerga, porque elas ainda não existiam quando
+   * ele rodou. Fatiar resolve sem acoplar o teste aos valores exatos do backoff.
+   */
+  async function settle(totalMs = 6000, steps = 24) {
+    for (let i = 0; i < steps; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => {
+        jest.advanceTimersByTime(totalMs / steps);
+      });
+    }
+  }
+
+  it("tenta sozinha antes de incomodar o usuário (falha transitória se resolve só)", async () => {
     jest.useFakeTimers();
+    // Falha na primeira, responde na segunda: o usuário nunca vê o modal.
     getBestMove.mockRejectedValueOnce(new Error("boom"));
+    getBestMove.mockResolvedValueOnce("e2e4");
     const tree = await renderAiTurn();
 
-    await act(async () => {
-      jest.advanceTimersByTime(1300);
-    });
+    await settle();
+
+    expect(getBestMove).toHaveBeenCalledTimes(2);
+    expect(hasText(tree.root, "A IA não respondeu")).toBe(false);
+  });
+
+  it("falha/timeout da IA mostra erro tratado, sem limbo silencioso", async () => {
+    jest.useFakeTimers();
+    getBestMove.mockRejectedValue(new Error("boom"));
+    const tree = await renderAiTurn();
+
+    await settle();
 
     expect(hasText(tree.root, "A IA não respondeu")).toBe(true);
     expect(hasText(tree.root, "Tentar novamente")).toBe(true);
     expect(hasText(tree.root, "Sair")).toBe(true);
   });
 
+  it("lance ilegal/malformado da engine é falha tratada, não trava o tabuleiro", async () => {
+    jest.useFakeTimers();
+    // "(none)" tem 6 caracteres e passava por parseUciMove como from="(n".
+    getBestMove.mockResolvedValue("(none)");
+    const tree = await renderAiTurn();
+
+    await settle();
+
+    expect(hasText(tree.root, "A IA não respondeu")).toBe(true);
+    expect(hasText(tree.root, "Sair")).toBe(true);
+  });
+
   it("'Tentar novamente' re-solicita a jogada à engine", async () => {
     jest.useFakeTimers();
-    getBestMove.mockRejectedValueOnce(new Error("boom"));
+    getBestMove.mockRejectedValue(new Error("boom"));
     const tree = await renderAiTurn();
-    await act(async () => {
-      jest.advanceTimersByTime(1300);
-    });
+    await settle();
     expect(hasText(tree.root, "A IA não respondeu")).toBe(true);
-    expect(getBestMove).toHaveBeenCalledTimes(1);
+    const callsBefore = getBestMove.mock.calls.length;
 
+    getBestMove.mockReset();
     getBestMove.mockResolvedValueOnce("e2e4");
     pressText(tree.root, "Tentar novamente");
-    await act(async () => {
-      jest.advanceTimersByTime(1300);
-    });
+    await settle();
 
-    expect(getBestMove).toHaveBeenCalledTimes(2);
+    expect(callsBefore).toBeGreaterThan(0);
+    expect(getBestMove).toHaveBeenCalledTimes(1);
     expect(hasText(tree.root, "A IA não respondeu")).toBe(false);
+  });
+
+  it("o retry NUNCA vira loop: esgotado o teto, só resta sair", async () => {
+    jest.useFakeTimers();
+    getBestMove.mockRejectedValue(new Error("boom"));
+    const tree = await renderAiTurn();
+    await settle();
+
+    // Três tentativas manuais, todas falhando.
+    for (let i = 0; i < 3; i++) {
+      expect(hasText(tree.root, "Tentar novamente")).toBe(true);
+      pressText(tree.root, "Tentar novamente");
+      await settle();
+    }
+
+    // O botão que reabria o mesmo estado desapareceu; sobra a saída.
+    expect(hasText(tree.root, "Tentar novamente")).toBe(false);
+    expect(hasText(tree.root, "Não foi possível retomar")).toBe(true);
+    expect(hasText(tree.root, "Sair da partida")).toBe(true);
+  });
+
+  it("falha da IA nunca deixa o indicador 'Pensando' preso", async () => {
+    jest.useFakeTimers();
+    getBestMove.mockRejectedValue(new Error("boom"));
+    const tree = await renderAiTurn();
+    await settle();
+    expect(hasLabel(tree.root, "A IA está pensando")).toBe(false);
+
+    // E também não fica preso depois de um retry manual que falha — era o
+    // caso do `makeAIMove` sem await/catch.
+    pressText(tree.root, "Tentar novamente");
+    await settle();
+    expect(hasLabel(tree.root, "A IA está pensando")).toBe(false);
   });
 });
 
