@@ -130,6 +130,27 @@ function hasText(root: ReactTestInstance, text: string) {
   );
 }
 
+/** Texto que CONTÉM o trecho (a legenda da solução é uma frase só). */
+function hasTextContaining(root: ReactTestInstance, part: string) {
+  return (
+    root.findAll((n) => {
+      const c = n.props?.children;
+      const s = typeof c === "string" ? c : Array.isArray(c) ? c.join("") : "";
+      return s.includes(part);
+    }).length > 0
+  );
+}
+
+/** A seta da solução desenhada sobre o tabuleiro, se estiver presente. */
+function solutionArrow(root: ReactTestInstance) {
+  const found = root.findAll(
+    (n) =>
+      typeof n.type !== "string" &&
+      (n.type as { name?: string })?.name === "SolutionArrow"
+  );
+  return found.length ? found[0].props : null;
+}
+
 function pressLabel(root: ReactTestInstance, label: string) {
   const nodes = root.findAll(
     (n) => n.props?.accessibilityLabel === label && typeof n.props?.onPress === "function"
@@ -150,6 +171,17 @@ function pressText(root: ReactTestInstance, text: string) {
   if (!node) throw new Error(`Nenhum botão pressionável com o texto "${text}"`);
   return act(async () => {
     node!.props.onPress();
+  });
+}
+
+/** Dispara o onLayout do contêiner do tabuleiro — a seta só é desenhada
+ *  depois que a tela conhece o lado do tabuleiro em pixels. */
+async function layoutBoard(root: ReactTestInstance, width = 320) {
+  const nodes = root.findAll((n) => typeof n.props?.onLayout === "function");
+  await act(async () => {
+    for (const n of nodes) {
+      n.props.onLayout({ nativeEvent: { layout: { width, height: width } } });
+    }
   });
 }
 
@@ -263,11 +295,18 @@ describe("Problema do dia (mode=daily)", () => {
 
     await makeMove("a1", "a2");
 
+    await layoutBoard(tree.root);
+
     expect(hasText(tree.root, "Você não conseguiu desta vez")).toBe(true);
-    // Solução revelada (SAN do primeiro lance) como aprendizado.
-    expect(hasText(tree.root, "A jogada certa era")).toBe(true);
-    expect(hasText(tree.root, "Ra8#")).toBe(true);
-    expect(hasText(tree.root, "Volte amanhã para um novo desafio.")).toBe(true);
+    // A solução é revelada DENTRO do tabuleiro (seta origem→destino), não como
+    // texto solto: quem está aprendendo não deveria ter de traduzir "Ra8#" de
+    // volta para casas para entender o lance.
+    expect(solutionArrow(tree.root)).toMatchObject({ from: "a1", to: "a8" });
+    // O tabuleiro continua em cena, agora somente leitura.
+    expect(boardProps.gestureEnabled).toBe(false);
+    // A legenda textual complementa a seta, não a substitui.
+    expect(hasTextContaining(tree.root, "A jogada certa era Ra8#")).toBe(true);
+    expect(hasTextContaining(tree.root, "Volte amanhã para um novo desafio.")).toBe(true);
     expect(
       getBufferedEvents().some((e) => e.name === "puzzle_exhausted")
     ).toBe(true);
@@ -283,8 +322,33 @@ describe("Problema do dia (mode=daily)", () => {
       solution: ["a1a8"],
     });
     const tree = await render({ mode: "daily" });
+    await layoutBoard(tree.root);
     expect(hasText(tree.root, "Você não conseguiu desta vez")).toBe(true);
-    expect(hasText(tree.root, "Ra8#")).toBe(true);
+    expect(solutionArrow(tree.root)).toMatchObject({ from: "a1", to: "a8" });
+    expect(hasTextContaining(tree.root, "A jogada certa era Ra8#")).toBe(true);
+  });
+
+  it("acerto também mostra a solução no tabuleiro, somente leitura", async () => {
+    mockReportProgress.mockResolvedValue({
+      puzzle_id: 1,
+      solved: true,
+      attempts: 1,
+      mode: "daily",
+    });
+    const tree = await render({ mode: "daily" });
+    await makeMove("a1", "a8");
+    await layoutBoard(tree.root);
+
+    expect(hasText(tree.root, "Muito bem! Problema resolvido!")).toBe(true);
+    expect(solutionArrow(tree.root)).toMatchObject({ from: "a1", to: "a8" });
+    expect(boardProps.gestureEnabled).toBe(false);
+  });
+
+  it("durante o jogo NÃO desenha a seta da solução", async () => {
+    const tree = await render({ mode: "daily" });
+    await layoutBoard(tree.root);
+    expect(solutionArrow(tree.root)).toBeNull();
+    expect(boardProps.gestureEnabled).toBe(true);
   });
 
   it("botão de voltar ao início leva para a Home", async () => {

@@ -24,6 +24,7 @@ import { usePuzzleSession } from "@/hooks/usePuzzleSession";
 import { parseUciMove } from "@/utils/chessSpecialMoves";
 import { logEvent } from "@/services/analytics";
 import { reportPuzzleProgress, type PuzzleMode } from "@/services/puzzles";
+import SolutionArrow from "./SolutionArrow";
 
 type Props = {
   onBack: () => void;
@@ -71,6 +72,8 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
   // Erro pendente: o lance errado fica no tabuleiro até o usuário pedir para
   // tentar de novo (o desfazer automático não deixava ver o próprio erro).
   const [pendingRetry, setPendingRetry] = useState(false);
+  // Lado do tabuleiro em pixels — a seta da solução é desenhada em cima dele.
+  const [boardSize, setBoardSize] = useState(0);
 
   const chessboardRef = useRef<ChessboardRef>(null);
   const gameRef = useRef(new Chess());
@@ -251,26 +254,39 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
 
   const title = isDaily ? "Problema do dia" : "Treino";
 
-  // Lance certo em notação legível (SAN), a partir da FEN + primeiro lance da
-  // solução. Mostrado só na tela de esgotamento (revelação de aprendizado). O
-  // servidor entrega a solução no estado terminal; aqui só a traduzimos.
-  const solutionSan = (() => {
+  // Lance certo da solução: casas de origem/destino (para desenhar no
+  // tabuleiro) e SAN (para o rótulo acessível). O servidor entrega a solução no
+  // estado terminal; aqui só a traduzimos.
+  //
+  // Em problemas de vários lances mostramos o PRIMEIRO — é o lance-chave, o que
+  // o usuário precisava enxergar; a sequência inteira viraria poluição visual.
+  const solution = (() => {
     const first = puzzle?.solution?.[0];
     if (!puzzle || !first) return null;
+    const parsed = parseUciMove(first);
+    if (!parsed) return null;
+    let san = first;
     try {
-      const parsed = parseUciMove(first);
-      if (!parsed) return null;
-      const board = new Chess(puzzle.fen);
-      const move = board.move({
+      const move = new Chess(puzzle.fen).move({
         from: parsed.from,
         to: parsed.to,
         promotion: parsed.promotion ?? "q",
       });
-      return move?.san ?? first;
+      if (move?.san) san = move.san;
     } catch {
-      return first;
+      // Solução malformada no banco: ainda dá para destacar as casas, que é o
+      // que importa aqui. Não derruba a tela.
     }
+    return {
+      from: parsed.from,
+      to: parsed.to,
+      san,
+      hasMore: (puzzle.solution?.length ?? 0) > 1,
+    };
   })();
+
+  /** Estado terminal: o problema acabou (acertou ou esgotou as tentativas). */
+  const isTerminal = state === "solved" || state === "exhausted";
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -367,44 +383,7 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
         </View>
       )}
 
-      {/* Diário com as tentativas esgotadas */}
-      {state === "exhausted" && (
-        <View style={styles.center}>
-          <View
-            style={[
-              styles.limitBadge,
-              { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
-            ]}
-          >
-            <Ionicons name="hourglass-outline" size={28} color={colors.accentOnLight} />
-          </View>
-          <Text style={[styles.messageTitle, { color: colors.text }]}>
-            Você não conseguiu desta vez
-          </Text>
-          {solutionSan ? (
-            <View
-              style={[
-                styles.solutionReveal,
-                { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
-              ]}
-              accessibilityLabel={`A jogada certa era ${solutionSan}`}
-            >
-              <Text style={[styles.solutionLabel, { color: colors.secondary }]}>
-                A jogada certa era
-              </Text>
-              <Text style={[styles.solutionMove, { color: colors.accentOnLight }]}>
-                {solutionSan}
-              </Text>
-            </View>
-          ) : null}
-          <Text style={[styles.messageSub, { color: colors.secondary }]}>
-            Volte amanhã para um novo desafio.
-          </Text>
-          <Button title="Voltar ao início" variant="accent" onPress={onBack} />
-        </View>
-      )}
-
-      {(state === "playing" || state === "solved") && puzzle && (
+      {(state === "playing" || isTerminal) && puzzle && (
         <View style={styles.body}>
           <View style={styles.puzzleInfo}>
             <Text style={[styles.category, { color: colors.secondary }]}>
@@ -436,7 +415,26 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
               </View>
             )}
 
-            {state === "solved" ? (
+            {state === "exhausted" ? (
+              <View
+                style={[
+                  styles.solvedBanner,
+                  {
+                    backgroundColor: colors.accentMuted,
+                    borderColor: colors.accent + "55",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="hourglass-outline"
+                  size={18}
+                  color={colors.accentOnLight}
+                />
+                <Text style={[styles.solvedText, { color: colors.accentOnLight }]}>
+                  Você não conseguiu desta vez
+                </Text>
+              </View>
+            ) : state === "solved" ? (
               <Animated.View
                 style={[
                   styles.solvedBanner,
@@ -472,18 +470,53 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
           </View>
 
           <View style={styles.boardSection}>
-            <Chessboard
-              key={puzzle.id}
-              ref={chessboardRef}
-              fen={puzzle.fen}
-              onMove={onMove}
-              colors={boardColors}
-              gestureEnabled={state === "playing" && !replying && !pendingRetry}
-            />
+            <View
+              // A chave inclui o estado terminal de propósito: remonta o
+              // tabuleiro na posição ORIGINAL do problema, desfazendo o lance
+              // errado que ficou visível. A seta só faz sentido sobre a posição
+              // em que o lance deveria ter sido jogado.
+              key={`${puzzle.id}-${isTerminal ? "solucao" : "jogando"}`}
+              style={styles.boardWrapper}
+              onLayout={(e) => setBoardSize(e.nativeEvent.layout.width)}
+              accessibilityLabel={
+                isTerminal && solution
+                  ? `Tabuleiro com a solução: ${solution.san}, de ${solution.from} para ${solution.to}`
+                  : undefined
+              }
+            >
+              <Chessboard
+                ref={chessboardRef}
+                fen={puzzle.fen}
+                onMove={onMove}
+                colors={boardColors}
+                gestureEnabled={state === "playing" && !replying && !pendingRetry}
+              />
+              {isTerminal && solution && boardSize > 0 && (
+                <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                  <SolutionArrow
+                    from={solution.from}
+                    to={solution.to}
+                    size={boardSize}
+                    color={colors.accent}
+                  />
+                </View>
+              )}
+            </View>
           </View>
 
           <View style={styles.footer}>
-            {state === "solved" ? (
+            {state === "exhausted" ? (
+              <>
+                <Text
+                  style={[styles.solutionCaption, { color: colors.secondary }]}
+                >
+                  {solution
+                    ? `A jogada certa era ${solution.san}${solution.hasMore ? " — e a sequência continuava a partir dela" : ""}. Volte amanhã para um novo desafio.`
+                    : "Volte amanhã para um novo desafio."}
+                </Text>
+                <Button title="Voltar ao início" variant="accent" onPress={onBack} />
+              </>
+            ) : state === "solved" ? (
               <>
                 {stats && stats.streak > 0 && (
                   <View
@@ -579,22 +612,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   backLink: { fontSize: 14, fontWeight: "600", padding: 8 },
-  solutionReveal: {
-    alignItems: "center",
-    gap: 2,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginVertical: 4,
+  // A solução agora é mostrada DENTRO do tabuleiro (SolutionArrow). Esta
+  // legenda é só o complemento textual — a informação principal é a seta.
+  solutionCaption: {
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 19,
+    marginBottom: 4,
   },
-  solutionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  solutionMove: { fontSize: 24, fontWeight: "800" },
 
   body: { flex: 1 },
   puzzleInfo: {
@@ -630,6 +655,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 8,
   },
+  // `position: relative` explícito para ancorar o absoluteFill da seta.
+  boardWrapper: { position: "relative" },
   footer: {
     paddingHorizontal: 20,
     paddingBottom: 24,
