@@ -1,4 +1,4 @@
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
@@ -58,6 +58,13 @@ interface GameOverModalProps {
   onLeave: () => void;
   /** Modo Campanha: presente só quando esta vitória dominou um nível. */
   campaignUnlock?: CampaignUnlockInfo | null;
+  /**
+   * ⚠️ TEMPORÁRIO — INSTRUMENTAÇÃO DE DIAGNÓSTICO, NÃO É FEATURE DE PRODUTO.
+   * TODO(remover): junto com utils/aiGamePgn.ts, ao fim da análise da
+   * calibragem do Iniciante. Preenchido só em partidas vs IA nos níveis
+   * Iniciante/Fácil; nos demais vem null e nada é renderizado.
+   */
+  diagnosticPgn?: string | null;
 }
 
 export default function GameOverModal({
@@ -65,6 +72,7 @@ export default function GameOverModal({
   onNewGame,
   onLeave,
   campaignUnlock,
+  diagnosticPgn,
 }: GameOverModalProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
@@ -96,6 +104,30 @@ export default function GameOverModal({
           <Text style={[styles.ratingNote, { color: colors.secondary }]}>
             Partida contra a IA — seu rating não mudou.
           </Text>
+
+          {/* ⚠️ TEMPORÁRIO: PGN da partida para a análise da calibragem.
+              Texto selecionável (toque longo → Copiar) de propósito: evita
+              adicionar expo-clipboard só para uma instrumentação que vai ser
+              removida. Some sozinho nos níveis fora da investigação. */}
+          {diagnosticPgn ? (
+            <View
+              style={[
+                styles.diagnosticBox,
+                { borderColor: colors.divider, backgroundColor: colors.buttonSecondary },
+              ]}
+            >
+              <Text style={[styles.diagnosticLabel, { color: colors.secondary }]}>
+                Diagnóstico da IA · toque e segure para copiar
+              </Text>
+              <Text
+                selectable
+                style={[styles.diagnosticPgn, { color: colors.text }]}
+                accessibilityLabel="PGN da partida para diagnóstico da calibragem da IA"
+              >
+                {diagnosticPgn}
+              </Text>
+            </View>
+          ) : null}
 
           {/* Modo Campanha: comemoração discreta, nunca bloqueia o fluxo —
               dourado é a cor de conquista (sem laranja). */}
@@ -146,6 +178,27 @@ export default function GameOverModal({
 }
 
 const styles = StyleSheet.create({
+  // ⚠️ TEMPORÁRIO — remover junto com o bloco de diagnóstico.
+  diagnosticBox: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 12,
+    gap: 6,
+  },
+  diagnosticLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  diagnosticPgn: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+  },
+
   overlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.7)",
