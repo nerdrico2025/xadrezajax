@@ -117,6 +117,9 @@ async function render(
       />
     );
   });
+  // A tela só monta o tabuleiro depois de medir a área disponível, então todo
+  // teste precisa de um layout — sem isso não existe `boardProps`.
+  await layoutBoard(tree.root);
   return tree;
 }
 
@@ -174,13 +177,13 @@ function pressText(root: ReactTestInstance, text: string) {
   });
 }
 
-/** Dispara o onLayout do contêiner do tabuleiro — a seta só é desenhada
- *  depois que a tela conhece o lado do tabuleiro em pixels. */
-async function layoutBoard(root: ReactTestInstance, width = 320) {
+/** Dispara o onLayout da caixa do tabuleiro — a tela só monta o tabuleiro (e a
+ *  seta) depois de conhecer a área disponível em pixels. */
+async function layoutBoard(root: ReactTestInstance, width = 320, height = width) {
   const nodes = root.findAll((n) => typeof n.props?.onLayout === "function");
   await act(async () => {
     for (const n of nodes) {
-      n.props.onLayout({ nativeEvent: { layout: { width, height: width } } });
+      n.props.onLayout({ nativeEvent: { layout: { width, height } } });
     }
   });
 }
@@ -357,6 +360,37 @@ describe("Problema do dia (mode=daily)", () => {
     const tree = await render({ mode: "daily", onBack });
     await pressText(tree.root, "Voltar ao início");
     expect(onBack).toHaveBeenCalled();
+  });
+});
+
+// O default do react-native-chessboard é `floor(larguraDaTela / 8) * 8` — só
+// largura. Numa tela baixa isso fazia o tabuleiro transbordar o contêiner e
+// colidir com o banner de sucesso (em cima) e o pill de streak (embaixo).
+describe("Tabuleiro dimensionado pela área disponível", () => {
+  it("caixa mais larga que alta: manda a ALTURA para o tabuleiro", async () => {
+    const tree = await render({ mode: "daily" });
+    await layoutBoard(tree.root, 400, 312);
+    expect(boardProps.boardSize).toBe(312);
+  });
+
+  it("caixa mais alta que larga: manda a LARGURA", async () => {
+    const tree = await render({ mode: "daily" });
+    await layoutBoard(tree.root, 344, 600);
+    expect(boardProps.boardSize).toBe(344);
+  });
+
+  it("arredonda para baixo em múltiplo de 8 (casas em pixels inteiros)", async () => {
+    const tree = await render({ mode: "daily" });
+    await layoutBoard(tree.root, 393, 851);
+    expect(boardProps.boardSize).toBe(392);
+  });
+
+  it("a seta da solução usa o MESMO lado do tabuleiro", async () => {
+    mockGetDaily.mockResolvedValue({ ...DAILY, exhausted: true });
+    const tree = await render({ mode: "daily" });
+    await layoutBoard(tree.root, 400, 300);
+    expect(boardProps.boardSize).toBe(296);
+    expect(solutionArrow(tree.root)).toMatchObject({ size: 296 });
   });
 });
 

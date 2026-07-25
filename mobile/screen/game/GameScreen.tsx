@@ -20,7 +20,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
 import { useBoardTheme } from "@/context/BoardThemeContext";
-import { toChessboardColors } from "@/constants/boardThemes";
+import { PROMOTION_LABELS, toChessboardColors } from "@/constants/boardThemes";
 import GameOverModal, {
   type GameResult,
   type CampaignUnlockInfo,
@@ -592,6 +592,10 @@ export default function GameScreen({
             fen={game.fen()}
             onMove={onMove}
             colors={boardColors}
+            // `flipped` só existe para o seletor de promoção se contra-rotacionar
+            // (o contêiner do tabuleiro é que gira 180°, aqui embaixo).
+            flipped={isFlipped}
+            promotionLabels={PROMOTION_LABELS}
             withLetters={!isFlipped}
             withNumbers={!isFlipped}
             renderPiece={isFlipped && squareSize > 0 ? (piece) => (

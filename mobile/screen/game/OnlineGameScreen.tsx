@@ -20,7 +20,7 @@ import { useChessClock } from "@/hooks/useChessClock";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useBoardTheme } from "@/context/BoardThemeContext";
-import { toChessboardColors } from "@/constants/boardThemes";
+import { PROMOTION_LABELS, toChessboardColors } from "@/constants/boardThemes";
 import ChessClock from "@/components/ChessClock";
 import CapturedPieces from "./CapturedPieces";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -361,6 +361,10 @@ export default function OnlineGameScreen({
             fen={localFen}
             onMove={onMove}
             colors={boardColors}
+            // `flipped` só existe para o seletor de promoção se contra-rotacionar
+            // (o contêiner do tabuleiro é que gira 180°, aqui embaixo).
+            flipped={isFlipped}
+            promotionLabels={PROMOTION_LABELS}
             withLetters={!isFlipped}
             withNumbers={!isFlipped}
             renderPiece={

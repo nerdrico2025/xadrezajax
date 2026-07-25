@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  type LayoutChangeEvent,
   Pressable,
   StyleSheet,
   Text,
@@ -17,7 +18,7 @@ import Button from "@/components/Button";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useBoardTheme } from "@/context/BoardThemeContext";
-import { toChessboardColors } from "@/constants/boardThemes";
+import { PROMOTION_LABELS, toChessboardColors } from "@/constants/boardThemes";
 import { useAuth } from "@/context/AuthContext";
 import { useChessSound } from "@/hooks/useChessSound";
 import { usePuzzleSession } from "@/hooks/usePuzzleSession";
@@ -72,7 +73,8 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
   // Erro pendente: o lance errado fica no tabuleiro até o usuário pedir para
   // tentar de novo (o desfazer automático não deixava ver o próprio erro).
   const [pendingRetry, setPendingRetry] = useState(false);
-  // Lado do tabuleiro em pixels — a seta da solução é desenhada em cima dele.
+  // Lado do tabuleiro em pixels. Medido (ver `measureBoard`), nunca herdado do
+  // default da lib — é isso que garante que o tabuleiro caiba na tela.
   const [boardSize, setBoardSize] = useState(0);
 
   const chessboardRef = useRef<ChessboardRef>(null);
@@ -167,6 +169,26 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
     setFeedback("ready");
     chessboardRef.current?.resetBoard(gameRef.current.fen());
   }, [puzzle]);
+
+  /**
+   * Mede a área livre entre o banner e o rodapé e deriva o lado do tabuleiro.
+   *
+   * Por que não deixar a lib decidir: o default do react-native-chessboard é
+   * `floor(larguraDaTela / 8) * 8` — só largura, sem olhar a altura disponível.
+   * Como o contêiner é `flex: 1` e o tabuleiro não encolhe (flexShrink 0 no RN),
+   * em telas mais baixas o tabuleiro transbordava para cima e para baixo e
+   * colidia com o banner de sucesso e com o pill de streak. Limitar pelo MENOR
+   * lado da caixa medida resolve na origem.
+   *
+   * Múltiplo de 8 para as 8 casas fecharem em pixels inteiros (mesma razão do
+   * default da lib) — sem isso a última casa e as coordenadas saem meio pixel
+   * fora do lugar.
+   */
+  const measureBoard = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    const side = Math.floor(Math.min(width, height) / 8) * 8;
+    setBoardSize((prev) => (prev === side ? prev : side));
+  }, []);
 
   const playOpponentReply = useCallback(
     async (uci: string) => {
@@ -441,9 +463,13 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
                   {
                     backgroundColor: colors.accentMuted,
                     borderColor: colors.accent + "55",
+                    // `clamp`: a mola passa de 1 (overshoot), e sem o limite a
+                    // interpolação extrapolava — o banner crescia mais do que a
+                    // folga que ele tem até o tabuleiro.
                     transform: [{ scale: celebration.interpolate({
                       inputRange: [0, 1],
                       outputRange: [0.9, 1.05],
+                      extrapolate: "clamp",
                     }) }],
                     opacity: celebration.interpolate({
                       inputRange: [0, 1],
@@ -470,35 +496,48 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
           </View>
 
           <View style={styles.boardSection}>
-            <View
-              // A chave inclui o estado terminal de propósito: remonta o
-              // tabuleiro na posição ORIGINAL do problema, desfazendo o lance
-              // errado que ficou visível. A seta só faz sentido sobre a posição
-              // em que o lance deveria ter sido jogado.
-              key={`${puzzle.id}-${isTerminal ? "solucao" : "jogando"}`}
-              style={styles.boardWrapper}
-              onLayout={(e) => setBoardSize(e.nativeEvent.layout.width)}
-              accessibilityLabel={
-                isTerminal && solution
-                  ? `Tabuleiro com a solução: ${solution.san}, de ${solution.from} para ${solution.to}`
-                  : undefined
-              }
-            >
-              <Chessboard
-                ref={chessboardRef}
-                fen={puzzle.fen}
-                onMove={onMove}
-                colors={boardColors}
-                gestureEnabled={state === "playing" && !replying && !pendingRetry}
-              />
-              {isTerminal && solution && boardSize > 0 && (
-                <View style={StyleSheet.absoluteFill} pointerEvents="none">
-                  <SolutionArrow
-                    from={solution.from}
-                    to={solution.to}
-                    size={boardSize}
-                    color={colors.accent}
+            {/* Caixa de medição: o frame DESTA view é a área de conteúdo da
+                seção (o padding fica no pai), então o que ela mede é
+                exatamente o espaço em que o tabuleiro pode caber. */}
+            <View style={styles.boardBox} onLayout={measureBoard}>
+              {boardSize > 0 && (
+                <View
+                  // A chave inclui o estado terminal de propósito: remonta o
+                  // tabuleiro na posição ORIGINAL do problema, desfazendo o
+                  // lance errado que ficou visível. A seta só faz sentido sobre
+                  // a posição em que o lance deveria ter sido jogado.
+                  //
+                  // `boardSize` também entra na chave porque a lib calcula a
+                  // posição de cada peça UMA vez, na montagem (shared values
+                  // inicializados a partir de `pieceSize`): mudar o tamanho sem
+                  // remontar deixaria as peças fora das casas.
+                  key={`${puzzle.id}-${isTerminal ? "solucao" : "jogando"}-${boardSize}`}
+                  style={[styles.boardWrapper, { width: boardSize, height: boardSize }]}
+                  accessibilityLabel={
+                    isTerminal && solution
+                      ? `Tabuleiro com a solução: ${solution.san}, de ${solution.from} para ${solution.to}`
+                      : undefined
+                  }
+                >
+                  <Chessboard
+                    ref={chessboardRef}
+                    fen={puzzle.fen}
+                    boardSize={boardSize}
+                    onMove={onMove}
+                    colors={boardColors}
+                    promotionLabels={PROMOTION_LABELS}
+                    gestureEnabled={state === "playing" && !replying && !pendingRetry}
                   />
+                  {isTerminal && solution && (
+                    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                      <SolutionArrow
+                        from={solution.from}
+                        to={solution.to}
+                        size={boardSize}
+                        color={colors.accent}
+                      />
+                    </View>
+                  )}
                 </View>
               )}
             </View>
@@ -622,10 +661,12 @@ const styles = StyleSheet.create({
   },
 
   body: { flex: 1 },
+  // `paddingBottom` é a folga garantida entre o banner de sucesso e a borda de
+  // cima do tabuleiro — nada aqui pode encostar na fileira 8.
   puzzleInfo: {
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 8,
+    paddingBottom: 16,
     alignItems: "center",
     gap: 6,
   },
@@ -651,14 +692,21 @@ const styles = StyleSheet.create({
   solvedText: { fontSize: 15, fontWeight: "800" },
   boardSection: {
     flex: 1,
+    paddingHorizontal: 8,
+  },
+  boardBox: {
+    flex: 1,
+    alignSelf: "stretch",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 8,
   },
   // `position: relative` explícito para ancorar o absoluteFill da seta.
   boardWrapper: { position: "relative" },
+  // `paddingTop` é a folga garantida entre a borda de baixo do tabuleiro (onde
+  // ficam as coordenadas a–h) e o pill de streak.
   footer: {
     paddingHorizontal: 20,
+    paddingTop: 16,
     paddingBottom: 24,
     minHeight: 96,
     justifyContent: "flex-end",

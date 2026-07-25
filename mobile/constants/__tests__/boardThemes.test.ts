@@ -4,6 +4,7 @@ import {
   BOARD_THEME_ORDER,
   DEFAULT_BOARD_THEME_ID,
   NEW_USER_BOARD_THEME_ID,
+  PROMOTION_LABELS,
   isBoardThemeId,
   toChessboardColors,
 } from "../boardThemes";
@@ -117,5 +118,41 @@ describe("temas de tabuleiro", () => {
     expect(c.lastMoveHighlight).toBe(BOARD_THEMES.madeira.lastMoveHighlight);
     expect(c.checkmateHighlight).toBe(BOARD_THEMES.madeira.checkHighlight);
     expect(c.selectedSquareHighlight).toBe(BOARD_THEMES.madeira.selectedHighlight);
+  });
+
+  // O seletor de promoção da lib vinha semitransparente e com o botão em
+  // '#FF9B71' (laranja). Os tokens abaixo são o que impede as duas coisas.
+  describe("seletor de promoção", () => {
+    it("o card é OPACO em todos os temas (nada do tabuleiro atravessa por baixo)", () => {
+      for (const t of ALL) {
+        const c = toChessboardColors(t);
+        expect(c.promotionSurface).toBe(t.lightSquare);
+        // Hex sólido, sem canal alfa.
+        expect(c.promotionSurface).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      }
+    });
+
+    it("o backdrop escurece o tabuleiro (preto com alfa), igual em todos os temas", () => {
+      for (const t of ALL) {
+        expect(toChessboardColors(t).promotionBackdrop).toBe("rgba(0, 0, 0, 0.62)");
+      }
+    });
+
+    it("o realce de toque é o Dourado AJAX — nunca o laranja do default da lib", () => {
+      for (const t of ALL) {
+        const pressed = toChessboardColors(t).promotionPieceButton;
+        expect(pressed).toMatch(/rgba\(\s*201\s*,\s*168\s*,\s*76/);
+        expect(pressed).not.toMatch(/FF9B71/i);
+      }
+    });
+
+    it("as 4 opções têm rótulo acessível em PT-BR", () => {
+      expect(PROMOTION_LABELS).toEqual({
+        q: "Promover para dama",
+        r: "Promover para torre",
+        b: "Promover para bispo",
+        n: "Promover para cavalo",
+      });
+    });
   });
 });
