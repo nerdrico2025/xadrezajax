@@ -61,11 +61,16 @@ function makeProps(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// Árvores montadas no teste corrente — desmontadas no afterEach para que os
+// timers da tela (lance pendente, aviso) não sobrevivam ao teste.
+const mounted: renderer.ReactTestRenderer[] = [];
+
 function render(props: ReturnType<typeof makeProps>) {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(<OnlineGameScreen {...(props as any)} />);
   });
+  mounted.push(tree);
   return tree;
 }
 
@@ -107,6 +112,10 @@ function layoutBoard(root: ReactTestInstance, side = 320) {
 }
 
 afterEach(() => {
+  act(() => {
+    mounted.forEach((tree) => tree.unmount());
+  });
+  mounted.length = 0;
   chessboardRenders.length = 0;
   jest.clearAllMocks();
 });
@@ -288,5 +297,116 @@ describe("nome do oponente no cabeçalho", () => {
   it("só cai em 'Jogador #N' quando o oponente não anuncia identidade nenhuma", () => {
     const tree = render(makeProps({ game: { ...GAME, black: { id: "2" } } }));
     expect(hasText(tree.root, "Jogador #2")).toBe(true);
+  });
+});
+
+// ── Lance não enviado / recusado ─────────────────────────────────────────
+
+describe("aviso de lance não enviado", () => {
+  it("mostra o motivo na tela em vez de falhar em silêncio", () => {
+    const tree = render(
+      makeProps({ moveError: "Sem conexão — o lance não foi enviado." })
+    );
+    expect(hasText(tree.root, "Sem conexão — o lance não foi enviado.")).toBe(true);
+  });
+
+  it("não mostra o aviso quando não há erro", () => {
+    const tree = render(makeProps());
+    expect(
+      tree.root.findAll((n) => n.props?.accessibilityRole === "alert").length
+    ).toBe(0);
+  });
+});
+
+// ── "Voltar" = desistir, com confirmação ─────────────────────────────────
+
+describe("sair da partida pelo cabeçalho", () => {
+  it("com partida em andamento, pede confirmação e NÃO sai direto", () => {
+    const props = makeProps();
+    const tree = render(props);
+
+    act(() => {
+      findByLabel(tree.root, "Sair da partida").props.onPress();
+    });
+
+    expect(hasText(tree.root, "Sair da partida")).toBe(true);
+    expect(props.onLeave).not.toHaveBeenCalled();
+    expect(props.onResign).not.toHaveBeenCalled();
+  });
+
+  it("confirmar segue a MESMA via do Desistir (onResign), não uma saída silenciosa", () => {
+    const props = makeProps();
+    const tree = render(props);
+
+    act(() => {
+      findByLabel(tree.root, "Sair da partida").props.onPress();
+    });
+    pressText(tree.root, "Sair e perder");
+
+    expect(props.onResign).toHaveBeenCalledTimes(1);
+    expect(props.onLeave).not.toHaveBeenCalled();
+  });
+
+  it("cancelar a confirmação mantém o jogador na partida", () => {
+    const props = makeProps();
+    const tree = render(props);
+
+    act(() => {
+      findByLabel(tree.root, "Sair da partida").props.onPress();
+    });
+    pressText(tree.root, "Continuar jogando");
+
+    expect(props.onResign).not.toHaveBeenCalled();
+    expect(props.onLeave).not.toHaveBeenCalled();
+  });
+
+  it("com a partida JÁ encerrada, voltar sai direto (nada a perder)", () => {
+    const props = makeProps({
+      game: { ...GAME, gameOver: { winnerId: "1", reason: "checkmate" } },
+    });
+    const tree = render(props);
+
+    act(() => {
+      findByLabel(tree.root, "Sair da partida").props.onPress();
+    });
+
+    expect(props.onLeave).toHaveBeenCalledTimes(1);
+    expect(props.onResign).not.toHaveBeenCalled();
+  });
+});
+
+// ── Indicador de espera rotulado ─────────────────────────────────────────
+
+describe("indicador de espera", () => {
+  it("no turno do oponente, o indicador tem rótulo legível", () => {
+    const tree = render(makeProps({ game: { ...GAME, turn: "b" } }));
+    expect(hasText(tree.root, "Aguardando oponente...")).toBe(true);
+  });
+
+  it("no meu turno, sem lance pendente, não há indicador de espera", () => {
+    const tree = render(makeProps());
+    expect(hasText(tree.root, "Aguardando oponente...")).toBe(false);
+    expect(hasText(tree.root, "Enviando lance...")).toBe(false);
+  });
+
+  it("partida encerrada não mostra indicador de espera", () => {
+    const tree = render(
+      makeProps({
+        game: {
+          ...GAME,
+          turn: "b",
+          gameOver: { winnerId: "1", reason: "checkmate" },
+        },
+      })
+    );
+    expect(hasText(tree.root, "Aguardando oponente...")).toBe(false);
+  });
+
+  it("desconexão do oponente tem prioridade sobre o rótulo de espera", () => {
+    const tree = render(
+      makeProps({ game: { ...GAME, turn: "b" }, opponentDisconnected: true })
+    );
+    expect(hasText(tree.root, "Desconectado...")).toBe(true);
+    expect(hasText(tree.root, "Aguardando oponente...")).toBe(false);
   });
 });

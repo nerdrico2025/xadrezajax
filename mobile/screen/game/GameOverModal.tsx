@@ -24,6 +24,7 @@ export type GameEndReason =
   | "draw"
   | "agreement"
   | "resign"
+  | "abandon"
   | "timeout";
 
 export type GameResult = {
@@ -51,6 +52,8 @@ const REASON_LABEL: Record<GameEndReason, string> = {
   draw: "Regra dos 50 lances",
   agreement: "Acordo mútuo",
   resign: "Abandono",
+  // Encerrada pelo servidor: o jogador caiu e não voltou dentro da carência.
+  abandon: "Abandono por desconexão",
   timeout: "Tempo esgotado",
 };
 

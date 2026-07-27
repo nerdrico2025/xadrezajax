@@ -1,7 +1,7 @@
 const { Server } = require("socket.io");
 const { getRedis } = require("../services/redis.service");
 const { verifySocketToken } = require("./auth");
-const { addToQueue, removeFromQueue, findOpponent, getUserGame, QUEUE_KEY, QUEUE_MAX_AGE_MS } = require("./matchmaking");
+const { addToQueue, removeFromQueue, findOpponent, getUserGame, renewUserGame, QUEUE_KEY, QUEUE_MAX_AGE_MS } = require("./matchmaking");
 const { reportGameResult, canPlayGame } = require("../services/gameResult.service");
 const {
   createGame,
@@ -15,7 +15,31 @@ const {
   createRoom,
   joinRoom,
   closeRoom,
+  abandonGraceMs,
+  DEFAULT_TIME_CONTROL_SECS,
 } = require("./gameRoom");
+
+// Timers de carência por abandono, por usuário desconectado. Cancelados
+// assim que o jogador reconecta. Processo único por design (o node-api roda
+// numa instância só); se um dia escalar, a defesa contra encerramento
+// duplicado continua sendo `resignGame`, que recusa partida já encerrada.
+const abandonTimers = new Map();
+
+function clearAbandonTimer(userId) {
+  const key = String(userId);
+  const timer = abandonTimers.get(key);
+  if (timer) {
+    clearTimeout(timer);
+    abandonTimers.delete(key);
+  }
+}
+
+/** Relógio de partida humana: sempre definido, sempre pelo servidor. O valor
+ * que o cliente manda é uma sugestão — inválido ou ausente cai no padrão. */
+function resolveTimeControl(requested) {
+  const value = Number(requested);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_TIME_CONTROL_SECS;
+}
 
 function buildGameStartPayload(gameId, game) {
   return {
@@ -69,6 +93,9 @@ function setupSocket(httpServer) {
     // Mark user online in Redis (TTL 600s — cleared on disconnect)
     getRedis().set(`online:${userId}`, socket.id, "EX", 600).catch(() => {});
 
+    // Voltou dentro da carência: a partida não é encerrada por abandono.
+    clearAbandonTimer(userId);
+
     // Rejoin active game room asynchronously — AFTER listeners are registered
     getUserGame(userId).then(async (activeGameId) => {
       if (!activeGameId) return;
@@ -76,6 +103,9 @@ function setupSocket(httpServer) {
       if (game && game.status === "active") {
         socket.join(`game:${activeGameId}`);
         await updateSocket(activeGameId, userId, socket.id);
+        // Reconectar renova o ponteiro de recuperação — quem passou por uma
+        // queda é justamente quem mais precisa que ele sobreviva.
+        await renewUserGame(userId);
         socket.emit("game_rejoined", buildGameStartPayload(activeGameId, game));
         socket.to(`game:${activeGameId}`).emit("opponent_reconnected");
       }
@@ -84,7 +114,7 @@ function setupSocket(httpServer) {
     // ── MATCHMAKING ──────────────────────────────────────────────────────
     socket.on("join_queue", async (data = {}) => {
       const meta = typeof data === "object" ? data : {};
-      const timeControl = meta.time_control ?? null;
+      const timeControl = resolveTimeControl(meta.time_control);
       try {
         const existing = await getUserGame(userId);
         if (existing) {
@@ -404,28 +434,35 @@ function setupSocket(httpServer) {
       try {
         if (!to_user_id) return;
 
-        // Create room for the inviter. `inviteeId` fica gravado na sala para
-        // que o teardown (close_room) saiba a quem avisar se o convite for
-        // cancelado — sem isso o convidado ficaria com o convite válido na
-        // tela e ainda conseguiria entrar numa sala já abandonada.
-        const code = await createRoom(userId, socket.id, meta, {
-          inviteeId: to_user_id,
-        });
-        socket.emit("room_created", { code });
-
-        // Look up target's active socket via Redis
+        // Resolve o destinatário ANTES de criar a sala: criar primeiro
+        // deixava sala órfã no Redis (10 min) sempre que o amigo estava
+        // offline, e a tela de quem convidou travava em "aguardando entrar".
         const redis = getRedis();
         const targetSocketId = await redis.get(`online:${to_user_id}`);
-        if (!targetSocketId) {
-          socket.emit("invite_error", { message: "Amigo não está online" });
-          return;
-        }
-
-        const targetSocket = io.sockets.sockets.get(targetSocketId);
+        const targetSocket =
+          targetSocketId && io.sockets.sockets.get(targetSocketId);
         if (!targetSocket) {
           socket.emit("invite_error", { message: "Amigo não está online" });
           return;
         }
+
+        // `inviteeId` fica gravado na sala para que o teardown (close_room)
+        // saiba a quem avisar se o convite for cancelado — sem isso o
+        // convidado ficaria com o convite válido na tela e ainda conseguiria
+        // entrar numa sala já abandonada.
+        const code = await createRoom(userId, socket.id, meta, {
+          inviteeId: to_user_id,
+        });
+
+        // Corrida estreita: o amigo pode cair entre a checagem e o envio.
+        // Desfaz a sala pelo mesmo teardown da #85 em vez de deixá-la órfã.
+        if (!targetSocket.connected) {
+          await closeRoom(code, userId);
+          socket.emit("invite_error", { message: "Amigo não está online" });
+          return;
+        }
+
+        socket.emit("room_created", { code });
 
         const fromName = meta.username || meta.full_name || `Usuário ${userId}`;
         targetSocket.emit("friend_invitation", {
@@ -447,12 +484,57 @@ function setupSocket(httpServer) {
         getRedis().del(`online:${userId}`).catch(() => {});
         await removeFromQueue(userId);
         const gameId = await getUserGame(userId);
-        if (gameId) {
-          io.to(`game:${gameId}`).emit("opponent_disconnected", {
-            game_id: gameId,
-            message: "Oponente desconectou. Aguardando reconexão...",
-          });
-        }
+        if (!gameId) return;
+
+        const game = await getGame(gameId);
+        if (!game || game.status !== "active") return;
+
+        // Carência para reconectar. Esgotada, a partida encerra com derrota
+        // por abandono — com "toda partida humana vale rating", fechar o app
+        // não pode ser rota de fuga para quem está perdendo. O limite é do
+        // servidor e nunca excede o relógio de quem caiu (ver abandonGraceMs).
+        const graceMs = abandonGraceMs(game, userId);
+
+        io.to(`game:${gameId}`).emit("opponent_disconnected", {
+          game_id: gameId,
+          message: "Oponente desconectou. Aguardando reconexão...",
+          grace_ms: graceMs,
+        });
+
+        clearAbandonTimer(userId);
+        abandonTimers.set(
+          String(userId),
+          setTimeout(async () => {
+            abandonTimers.delete(String(userId));
+            try {
+              // Mesma via de encerramento da desistência — quem sai da
+              // partida perde, tenha clicado em "Desistir" ou sumido.
+              // `resignGame` recusa partida já encerrada, então uma corrida
+              // com outro fim de jogo não gera resultado duplicado.
+              const result = await resignGame(gameId, userId);
+              if (result.error) return;
+
+              const winnerId =
+                result.winner === "white" ? result.white_id : result.black_id;
+              io.to(`game:${gameId}`).emit("game_over", {
+                game_id: gameId,
+                winner_id: winnerId,
+                reason: "abandon",
+              });
+              reportGameResult(
+                result.white_id,
+                result.black_id,
+                result.winner,
+                result.time_control
+              );
+              console.log(
+                `[Socket] abandono game=${gameId} por=${userId} apos=${graceMs}ms`
+              );
+            } catch (err) {
+              console.error("[Socket] abandon error:", err);
+            }
+          }, graceMs)
+        );
       } catch (err) {
         console.error("[Socket] disconnect cleanup error:", err);
       }

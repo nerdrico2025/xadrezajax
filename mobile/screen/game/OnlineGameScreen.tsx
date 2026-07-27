@@ -32,6 +32,15 @@ import GameOverModal from "./GameOverModal";
 
 const PIECE_VALUE: Record<string, number> = { q: 9, r: 5, b: 3, n: 3, p: 1 };
 
+// Janela em que o tabuleiro fica travado esperando o servidor confirmar o
+// lance. Era 8s: com o descarte silencioso corrigido (o envio impossível
+// agora falha na hora, com aviso), sobra só o caso de servidor que aceita e
+// não responde — 5s já cobre isso sem parecer travamento.
+const MOVE_PENDING_TIMEOUT_MS = 5000;
+
+// Quanto tempo o aviso de lance não enviado fica na tela.
+const MOVE_NOTICE_MS = 5000;
+
 interface Props {
   game: OnlineGame;
   opponentDisconnected: boolean;
@@ -96,8 +105,13 @@ export default function OnlineGameScreen({
   // única vez, no import, a partir da largura da janela.
   const [boardSize, setBoardSize] = useState(0);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showDrawConfirm, setShowDrawConfirm] = useState(false);
+  const [moveNotice, setMoveNotice] = useState<string | null>(null);
   const [localFen, setLocalFen] = useState(game.fen);
+  // Espelho da posição autoritativa para o efeito de erro poder
+  // ressincronizar o tabuleiro sem re-rodar a cada lance.
+  const localFenRef = useRef(localFen);
   const [myCaptures, setMyCaptures] = useState<string[]>([]);
   const [opponentCaptures, setOpponentCaptures] = useState<string[]>([]);
   const [movePending, setMovePending] = useState(false);
@@ -132,11 +146,30 @@ export default function OnlineGameScreen({
     if (movePendingTimeout.current) clearTimeout(movePendingTimeout.current);
   }, [game.fen]);
 
-  // Reset movePending immediately on server-side move rejection
+  useEffect(() => { localFenRef.current = localFen; }, [localFen]);
+
+  // Timer do lance pendente não pode sobreviver à tela (sair da partida
+  // enquanto um lance estava em voo deixava um setTimeout órfão).
+  useEffect(() => {
+    return () => {
+      if (movePendingTimeout.current) clearTimeout(movePendingTimeout.current);
+    };
+  }, []);
+
+  // Lance recusado pelo servidor OU que nem chegou a ser enviado. Três
+  // coisas precisam acontecer, e antes só a primeira acontecia:
+  //   1. destravar o tabuleiro;
+  //   2. desfazer o lance que o tabuleiro já animou localmente — senão a tela
+  //      mostra uma posição que o servidor não conhece;
+  //   3. avisar o jogador. Silêncio em partida ranqueada é inaceitável.
   useEffect(() => {
     if (!moveError) return;
     setMovePending(false);
     if (movePendingTimeout.current) clearTimeout(movePendingTimeout.current);
+    chessboardRef.current?.resetBoard(localFenRef.current);
+    setMoveNotice(moveError);
+    const t = setTimeout(() => setMoveNotice(null), MOVE_NOTICE_MS);
+    return () => clearTimeout(t);
   }, [moveError]);
 
   // Apply opponent's move when game.fen changes
@@ -210,7 +243,10 @@ export default function OnlineGameScreen({
         move.piece === "p" && (move.to[1] === "8" || move.to[1] === "1");
       setMovePending(true);
       if (movePendingTimeout.current) clearTimeout(movePendingTimeout.current);
-      movePendingTimeout.current = setTimeout(() => setMovePending(false), 8000);
+      movePendingTimeout.current = setTimeout(
+        () => setMovePending(false),
+        MOVE_PENDING_TIMEOUT_MS
+      );
       // move.promotion vem do diálogo de promoção do tabuleiro
       onMakeMove(
         move.from,
@@ -243,6 +279,27 @@ export default function OnlineGameScreen({
 
   const opponent = game.myColor === "w" ? game.black : game.white;
 
+  // Sair no meio da partida é derrota (a partida vale rating) — então "voltar"
+  // pede confirmação e segue a MESMA via do "Desistir". Com a partida já
+  // encerrada, voltar é só fechar a tela.
+  const handleBackPress = useCallback(() => {
+    if (game.gameOver) {
+      onLeave();
+      return;
+    }
+    setShowLeaveConfirm(true);
+  }, [game.gameOver, onLeave]);
+
+  // Legenda do indicador de espera. Sem rótulo, um spinner no cabeçalho lê
+  // como "carregando/travado" — era a leitura do teste em device.
+  const waitingLabel = game.gameOver
+    ? null
+    : movePending
+    ? "Enviando lance..."
+    : game.turn !== game.myColor
+    ? "Aguardando oponente..."
+    : null;
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Reconnecting banner */}
@@ -256,7 +313,13 @@ export default function OnlineGameScreen({
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.buttonSecondary }]}>
         <View style={styles.opponentInfo}>
-          <Pressable onPress={onLeave} hitSlop={10} style={styles.headerButton}>
+          <Pressable
+            onPress={handleBackPress}
+            hitSlop={10}
+            style={styles.headerButton}
+            accessibilityRole="button"
+            accessibilityLabel="Sair da partida"
+          >
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </Pressable>
           <Ionicons name="person-circle-outline" size={28} color={colors.secondary} />
@@ -266,21 +329,33 @@ export default function OnlineGameScreen({
                   entrou sem anunciar identidade (cliente antigo). */}
               {opponent.username || opponent.full_name || `Jogador #${opponent.id}`}
             </Text>
-            {opponent.rating ? (
-              <Text style={[styles.opponentRating, { color: colors.secondary }]}>
-                {opponent.rating} pts
-              </Text>
-            ) : opponentDisconnected ? (
+            {/* Linha de status do oponente, por prioridade: desconexão >
+                espera > rating. Ocupa a linha que já existia — o rótulo do
+                indicador entra sem deslocar o layout a cada turno. */}
+            {opponentDisconnected ? (
               <Text style={[styles.disconnectedBadge, { color: colors.error }]}>
                 Desconectado...
+              </Text>
+            ) : waitingLabel ? (
+              <Text style={[styles.opponentRating, { color: colors.secondary }]}>
+                {waitingLabel}
+              </Text>
+            ) : opponent.rating ? (
+              <Text style={[styles.opponentRating, { color: colors.secondary }]}>
+                {opponent.rating} pts
               </Text>
             ) : null}
           </View>
         </View>
 
         <View style={styles.headerActions}>
-          {!isMyTurn && !game.gameOver && (
-            <ActivityIndicator size="small" color={colors.secondary} />
+          {waitingLabel && (
+            <ActivityIndicator
+              size="small"
+              color={colors.secondary}
+              accessibilityRole="progressbar"
+              accessibilityLabel={waitingLabel}
+            />
           )}
           {game.timeControl !== null && (
             <ChessClock
@@ -338,6 +413,19 @@ export default function OnlineGameScreen({
           </Pressable>
         </View>
       </View>
+
+      {/* Lance recusado ou não enviado — o jogador precisa saber. */}
+      {moveNotice && !game.gameOver && (
+        <View
+          style={[styles.infoBanner, { backgroundColor: colors.error + "22" }]}
+          accessibilityRole="alert"
+        >
+          <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
+          <Text style={[styles.infoBannerText, { color: colors.error }]}>
+            {moveNotice}
+          </Text>
+        </View>
+      )}
 
       {/* Draw offer status */}
       {outgoingDrawOffer && !game.gameOver && (
@@ -428,6 +516,22 @@ export default function OnlineGameScreen({
         result={gameResult}
         onNewGame={onLeave}
         onLeave={onLeave}
+      />
+
+      {/* Sair no meio da partida: mesma consequência do "Desistir", e por isso
+          o mesmo caminho de código (onResign). Só a pergunta é diferente. */}
+      <ConfirmModal
+        visible={showLeaveConfirm}
+        title="Sair da partida"
+        message="Sair agora conta como derrota — a vitória vai para o oponente e a partida vale rating."
+        confirmLabel="Sair e perder"
+        cancelLabel="Continuar jogando"
+        destructive
+        onConfirm={() => {
+          setShowLeaveConfirm(false);
+          onResign();
+        }}
+        onCancel={() => setShowLeaveConfirm(false)}
       />
 
       <ConfirmModal

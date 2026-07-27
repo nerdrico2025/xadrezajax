@@ -1,4 +1,5 @@
 const { getRedis } = require("../services/redis.service");
+const { GAME_TTL } = require("./ttl");
 
 const QUEUE_KEY = "matchmaking:queue";
 const USER_GAME_PREFIX = "user:game:";
@@ -46,10 +47,20 @@ async function findOpponent(userId) {
 async function setUserGame(userId, gameId) {
   const redis = getRedis();
   if (gameId) {
-    await redis.set(`${USER_GAME_PREFIX}${userId}`, gameId, "EX", 3600);
+    // Mesma janela da partida (ver ttl.js) — nunca menor, ou o reconnect
+    // deixa de achar uma partida que ainda existe.
+    await redis.set(`${USER_GAME_PREFIX}${userId}`, gameId, "EX", GAME_TTL);
   } else {
     await redis.del(`${USER_GAME_PREFIX}${userId}`);
   }
+}
+
+/** Renova o ponteiro de recuperação junto com a partida. Chamado no mesmo
+ * ponto em que a partida é renovada (a cada lance) e no rejoin — sem isso o
+ * ponteiro vence sozinho e o jogador perde a capacidade de reconectar. */
+async function renewUserGame(userId) {
+  const redis = getRedis();
+  await redis.expire(`${USER_GAME_PREFIX}${userId}`, GAME_TTL);
 }
 
 async function getUserGame(userId) {
@@ -57,4 +68,13 @@ async function getUserGame(userId) {
   return redis.get(`${USER_GAME_PREFIX}${userId}`);
 }
 
-module.exports = { addToQueue, removeFromQueue, findOpponent, setUserGame, getUserGame, QUEUE_KEY, QUEUE_MAX_AGE_MS };
+module.exports = {
+  addToQueue,
+  removeFromQueue,
+  findOpponent,
+  setUserGame,
+  renewUserGame,
+  getUserGame,
+  QUEUE_KEY,
+  QUEUE_MAX_AGE_MS,
+};
