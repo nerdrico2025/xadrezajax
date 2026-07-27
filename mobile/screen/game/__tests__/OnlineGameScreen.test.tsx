@@ -4,10 +4,16 @@ import OnlineGameScreen from "../OnlineGameScreen";
 import type { OnlineGame } from "@/hooks/gameSocketReducer";
 
 // Módulos pesados/nativos fora do escopo destes testes
-// React 19 aceita ref como prop comum — mock simples cobre o uso de chessboardRef
+// React 19 aceita ref como prop comum — mock simples cobre o uso de chessboardRef.
+// O mock guarda as props de CADA render do tabuleiro: é assim que se verifica
+// que ele nunca monta antes de saber o próprio tamanho.
+const chessboardRenders: Record<string, any>[] = [];
 jest.mock("react-native-chessboard", () => ({
   __esModule: true,
-  default: () => null,
+  default: (props: Record<string, any>) => {
+    chessboardRenders.push(props);
+    return null;
+  },
 }));
 jest.mock("react-native-chessboard/lib/commonjs/constants", () => ({
   PIECES: {},
@@ -91,7 +97,17 @@ function pressText(root: ReactTestInstance, text: string) {
   });
 }
 
+/** Dispara o onLayout da caixa de medição do tabuleiro. */
+function layoutBoard(root: ReactTestInstance, side = 320) {
+  const box = root.findAll((n) => typeof n.props?.onLayout === "function")[0];
+  expect(box).toBeTruthy();
+  act(() => {
+    box.props.onLayout({ nativeEvent: { layout: { width: side, height: side } } });
+  });
+}
+
 afterEach(() => {
+  chessboardRenders.length = 0;
   jest.clearAllMocks();
 });
 
@@ -203,5 +219,74 @@ describe("fim de partida por acordo", () => {
     );
     expect(hasText(tree.root, "Empate!")).toBe(true);
     expect(hasText(tree.root, "Acordo mútuo")).toBe(true);
+  });
+});
+
+// ── Orientação do tabuleiro ──────────────────────────────────────────────
+// O flash de tabuleiro invertido nas pretas vinha de o tabuleiro montar antes
+// de a contra-rotação das peças estar disponível (ela depende do tamanho da
+// casa, que só existia pós-onLayout). O contrato agora é: nada monta antes da
+// medição, e o primeiro paint já sai orientado.
+
+describe("orientação do tabuleiro no primeiro paint", () => {
+  it("não monta o tabuleiro antes de medir o espaço disponível", () => {
+    render(makeProps({ game: { ...GAME, myColor: "b" } }));
+    expect(chessboardRenders).toHaveLength(0);
+  });
+
+  it("nas pretas, o PRIMEIRO render do tabuleiro já traz a contra-rotação das peças", () => {
+    const tree = render(makeProps({ game: { ...GAME, myColor: "b" } }));
+    layoutBoard(tree.root);
+
+    expect(chessboardRenders.length).toBeGreaterThan(0);
+    const first = chessboardRenders[0];
+    expect(first.boardSize).toBeGreaterThan(0);
+    expect(first.flipped).toBe(true);
+    expect(typeof first.renderPiece).toBe("function");
+    // Nenhum render intermediário sem a contra-rotação — é isso que
+    // eliminava o flash de ~1s.
+    expect(
+      chessboardRenders.every((p) => typeof p.renderPiece === "function")
+    ).toBe(true);
+  });
+
+  it("nas brancas não contra-rotaciona (o contêiner não gira)", () => {
+    const tree = render(makeProps({ game: { ...GAME, myColor: "w" } }));
+    layoutBoard(tree.root);
+
+    const first = chessboardRenders[0];
+    expect(first.flipped).toBe(false);
+    expect(first.renderPiece).toBeUndefined();
+  });
+
+  it("passa o tamanho medido ao tabuleiro em vez do default da lib", () => {
+    const tree = render(makeProps());
+    layoutBoard(tree.root, 300);
+    // Múltiplo de 8 mais próximo por baixo de 300.
+    expect(chessboardRenders[0].boardSize).toBe(296);
+  });
+});
+
+// ── Identidade do oponente ───────────────────────────────────────────────
+
+describe("nome do oponente no cabeçalho", () => {
+  it("mostra o username quando o oponente se anuncia", () => {
+    const tree = render(makeProps());
+    expect(hasText(tree.root, "rival")).toBe(true);
+  });
+
+  it("cai no nome completo quando não há username", () => {
+    const tree = render(
+      makeProps({
+        game: { ...GAME, black: { id: "2", full_name: "Renan Souza" } },
+      })
+    );
+    expect(hasText(tree.root, "Renan Souza")).toBe(true);
+    expect(hasText(tree.root, "Jogador #2")).toBe(false);
+  });
+
+  it("só cai em 'Jogador #N' quando o oponente não anuncia identidade nenhuma", () => {
+    const tree = render(makeProps({ game: { ...GAME, black: { id: "2" } } }));
+    expect(hasText(tree.root, "Jogador #2")).toBe(true);
   });
 });

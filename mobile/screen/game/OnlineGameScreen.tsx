@@ -5,6 +5,7 @@ import {
   Pressable,
   Text,
   ActivityIndicator,
+  type LayoutChangeEvent,
 } from "react-native";
 import { useRef, useState, useCallback, useEffect } from "react";
 import Chessboard from "react-native-chessboard";
@@ -90,7 +91,10 @@ export default function OnlineGameScreen({
   const boardColors = toChessboardColors(boardTheme);
   const { play } = useChessSound();
   const chessboardRef = useRef<ChessboardRef>(null);
-  const [squareSize, setSquareSize] = useState(0);
+  // Lado do tabuleiro em pixels. Medido antes de montar o tabuleiro (ver
+  // `measureBoard`), nunca herdado do default da lib — que é calculado uma
+  // única vez, no import, a partir da largura da janela.
+  const [boardSize, setBoardSize] = useState(0);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [showDrawConfirm, setShowDrawConfirm] = useState(false);
   const [localFen, setLocalFen] = useState(game.fen);
@@ -104,6 +108,12 @@ export default function OnlineGameScreen({
   const isMyTurn = game.turn === game.myColor && !game.gameOver && !movePending;
 
   const clock = useChessClock(game.timeControl ?? null);
+
+  const measureBoard = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    const side = Math.floor(Math.min(width, height) / 8) * 8;
+    setBoardSize((prev) => (prev === side ? prev : side));
+  }, []);
 
   // Sync clock times from server on each move
   useEffect(() => {
@@ -252,11 +262,13 @@ export default function OnlineGameScreen({
           <Ionicons name="person-circle-outline" size={28} color={colors.secondary} />
           <View>
             <Text style={[styles.opponentName, { color: colors.text }]}>
-              {(opponent as any).username ?? `Jogador #${opponent.id}`}
+              {/* "Jogador #N" é o último recurso: só aparece se o oponente
+                  entrou sem anunciar identidade (cliente antigo). */}
+              {opponent.username || opponent.full_name || `Jogador #${opponent.id}`}
             </Text>
-            {(opponent as any).rating ? (
+            {opponent.rating ? (
               <Text style={[styles.opponentRating, { color: colors.secondary }]}>
-                {(opponent as any).rating} pts
+                {opponent.rating} pts
               </Text>
             ) : opponentDisconnected ? (
               <Text style={[styles.disconnectedBadge, { color: colors.error }]}>
@@ -352,36 +364,57 @@ export default function OnlineGameScreen({
           advantage={myAdvantage < 0 ? -myAdvantage : 0}
           colors={colors}
         />
-        <View
-          style={[styles.boardWrapper, isFlipped && styles.boardFlipped, { pointerEvents: isMyTurn ? "auto" : "none" }]}
-          onLayout={(e) => setSquareSize(e.nativeEvent.layout.width / 8)}
-        >
-          <Chessboard
-            ref={chessboardRef}
-            fen={localFen}
-            onMove={onMove}
-            colors={boardColors}
-            // `flipped` só existe para o seletor de promoção se contra-rotacionar
-            // (o contêiner do tabuleiro é que gira 180°, aqui embaixo).
-            flipped={isFlipped}
-            promotionLabels={PROMOTION_LABELS}
-            withLetters={!isFlipped}
-            withNumbers={!isFlipped}
-            renderPiece={
-              isFlipped && squareSize > 0
-                ? (piece) => (
-                    <Image
-                      source={PIECES[piece]}
-                      style={{
-                        width: squareSize,
-                        height: squareSize,
-                        transform: [{ rotate: "180deg" }],
-                      }}
-                    />
-                  )
-                : undefined
-            }
-          />
+        {/* Caixa de medição: mede o espaço disponível ANTES de o tabuleiro
+            existir. O tabuleiro só monta com o tamanho já conhecido, então a
+            contra-rotação das peças (`renderPiece`, que depende do tamanho da
+            casa) já está valendo no PRIMEIRO paint — era isso que faltava e
+            fazia as peças aparecerem de cabeça para baixo por um instante
+            quando o jogador estava com as pretas. Mesmo padrão do
+            PuzzleScreen. */}
+        <View style={styles.boardBox} onLayout={measureBoard}>
+          {boardSize > 0 && (
+            <View
+              // `boardSize` na chave porque a lib calcula a posição de cada
+              // peça UMA vez, na montagem: mudar o tamanho sem remontar
+              // deixaria as peças fora das casas. gameId/myColor mantêm o
+              // tabuleiro montado durante toda a partida.
+              key={`${game.gameId}-${game.myColor}-${boardSize}`}
+              style={[
+                styles.boardWrapper,
+                { width: boardSize, height: boardSize },
+                isFlipped && styles.boardFlipped,
+                { pointerEvents: isMyTurn ? "auto" : "none" },
+              ]}
+            >
+              <Chessboard
+                ref={chessboardRef}
+                fen={localFen}
+                boardSize={boardSize}
+                onMove={onMove}
+                colors={boardColors}
+                // `flipped` só existe para o seletor de promoção se contra-rotacionar
+                // (o contêiner do tabuleiro é que gira 180°, aqui embaixo).
+                flipped={isFlipped}
+                promotionLabels={PROMOTION_LABELS}
+                withLetters={!isFlipped}
+                withNumbers={!isFlipped}
+                renderPiece={
+                  isFlipped
+                    ? (piece) => (
+                        <Image
+                          source={PIECES[piece]}
+                          style={{
+                            width: boardSize / 8,
+                            height: boardSize / 8,
+                            transform: [{ rotate: "180deg" }],
+                          }}
+                        />
+                      )
+                    : undefined
+                }
+              />
+            </View>
+          )}
         </View>
         <CapturedPieces
           pieces={myCaptures as any}
@@ -476,6 +509,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 8,
     paddingVertical: 12,
+  },
+  boardBox: {
+    flex: 1,
+    alignSelf: "stretch",
+    alignItems: "center",
+    justifyContent: "center",
   },
   boardWrapper: {},
   boardFlipped: { transform: [{ rotate: "180deg" }] },

@@ -6,12 +6,14 @@ import {
   gameSocketReducer,
   initialState,
   type GameColor,
+  type PlayerMeta,
 } from "./gameSocketReducer";
 
 export type {
   GameColor,
   GamePlayer,
   OnlineGame,
+  PlayerMeta,
   SocketStatus,
   FriendInvitation,
 } from "./gameSocketReducer";
@@ -89,6 +91,12 @@ export function useGameSocket() {
 
     socket.on("room_created", ({ code }: { code: string }) =>
       dispatch({ type: "ROOM_CREATED", code })
+    );
+
+    // Teardown do convite (cancelado pelo criador, recusado pelo convidado ou
+    // expirado). Mesmo evento para os dois lados — ver gameRoom.closeRoom.
+    socket.on("room_closed", ({ code }: { code: string }) =>
+      dispatch({ type: "ROOM_CLOSED", code })
     );
 
     const handleGameStart = (data: any) => {
@@ -211,7 +219,7 @@ export function useGameSocket() {
   // They read current state via stateRef to avoid stale closures.
   // Guards prevent emitting in wrong states (no duplicate joins, etc.).
 
-  const joinQueue = useCallback((timeControl?: number | null, meta?: { username?: string | null; rating?: number | null }) => {
+  const joinQueue = useCallback((timeControl?: number | null, meta?: PlayerMeta) => {
     const socket = socketRef.current;
     if (!socket?.connected || stateRef.current.status !== "connected") return;
     socket.emit("join_queue", { time_control: timeControl ?? null, ...meta });
@@ -222,16 +230,27 @@ export function useGameSocket() {
     dispatch({ type: "QUEUE_LEFT" });
   }, []);
 
-  const createRoom = useCallback(() => {
+  // `meta` é a identidade que o OPONENTE vai ver no topo da tela de jogo. Sem
+  // ela o servidor monta o jogador só com o id e a tela cai em "Jogador #N" —
+  // era exatamente o que acontecia em sala (a fila rápida já mandava).
+  const createRoom = useCallback((meta: PlayerMeta = {}) => {
     const socket = socketRef.current;
     if (!socket?.connected || stateRef.current.status !== "connected") return;
-    socket.emit("create_room");
+    socket.emit("create_room", meta);
   }, []);
 
-  const joinRoom = useCallback((code: string) => {
+  const joinRoom = useCallback((code: string, meta: PlayerMeta = {}) => {
     const socket = socketRef.current;
     if (!socket?.connected) return;
-    socket.emit("join_room", { code });
+    socket.emit("join_room", { code, meta });
+  }, []);
+
+  // Passo RECUSAR/SAIR do handshake de convite: invalida a sala no servidor e
+  // avisa o outro lado. A limpeza local é otimista (mesmo padrão de
+  // leaveQueue/declineDraw) — a tela nunca fica presa esperando o round-trip.
+  const closeRoom = useCallback((code: string) => {
+    socketRef.current?.emit("close_room", { code });
+    dispatch({ type: "ROOM_CLOSED", code });
   }, []);
 
   const makeMove = useCallback((from: string, to: string, promotion?: string) => {
@@ -279,7 +298,7 @@ export function useGameSocket() {
   }, []);
 
   const inviteFriend = useCallback(
-    (toUserId: number, meta: { username?: string | null; full_name?: string } = {}) => {
+    (toUserId: number, meta: PlayerMeta = {}) => {
       socketRef.current?.emit("invite_friend", { to_user_id: toUserId, meta });
     },
     []
@@ -304,6 +323,7 @@ export function useGameSocket() {
     leaveQueue,
     createRoom,
     joinRoom,
+    closeRoom,
     makeMove,
     resign,
     offerDraw,

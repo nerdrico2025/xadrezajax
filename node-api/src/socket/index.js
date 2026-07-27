@@ -14,6 +14,7 @@ const {
   updateSocket,
   createRoom,
   joinRoom,
+  closeRoom,
 } = require("./gameRoom");
 
 function buildGameStartPayload(gameId, game) {
@@ -164,6 +165,48 @@ function setupSocket(httpServer) {
       } catch (err) {
         console.error("[Socket] create_room error:", err);
         socket.emit("error", { message: "Erro ao criar sala" });
+      }
+    });
+
+    // Teardown do convite — passo RECUSAR/SAIR do handshake (ver
+    // gameRoom.closeRoom). Um único par de eventos (close_room → room_closed)
+    // serve ao criador que cancela e ao convidado que recusa; o `reason` é
+    // derivado do papel no servidor, nunca aceito do cliente.
+    socket.on("close_room", async ({ code } = {}) => {
+      try {
+        if (!code) return;
+        const normalized = String(code).toUpperCase();
+        const result = await closeRoom(normalized, userId);
+        if (result.error) {
+          socket.emit("error", { message: result.error });
+          return;
+        }
+
+        const payload = {
+          code: normalized,
+          reason: result.reason,
+          by_id: String(userId),
+        };
+
+        // Quem fechou sempre recebe a confirmação — inclusive quando a sala
+        // já tinha expirado. É o que destrava a tela dele sem depender do
+        // estado do Redis.
+        socket.emit("room_closed", payload);
+
+        if (result.notifyUserId) {
+          const targetSocketId = await getRedis().get(
+            `online:${result.notifyUserId}`
+          );
+          const targetSocket =
+            targetSocketId && io.sockets.sockets.get(targetSocketId);
+          if (targetSocket) targetSocket.emit("room_closed", payload);
+        }
+
+        console.log(
+          `[Socket] room_closed code=${normalized} reason=${result.reason} by=${userId}`
+        );
+      } catch (err) {
+        console.error("[Socket] close_room error:", err);
       }
     });
 
@@ -361,8 +404,13 @@ function setupSocket(httpServer) {
       try {
         if (!to_user_id) return;
 
-        // Create room for the inviter
-        const code = await createRoom(userId, socket.id, meta);
+        // Create room for the inviter. `inviteeId` fica gravado na sala para
+        // que o teardown (close_room) saiba a quem avisar se o convite for
+        // cancelado — sem isso o convidado ficaria com o convite válido na
+        // tela e ainda conseguiria entrar numa sala já abandonada.
+        const code = await createRoom(userId, socket.id, meta, {
+          inviteeId: to_user_id,
+        });
         socket.emit("room_created", { code });
 
         // Look up target's active socket via Redis

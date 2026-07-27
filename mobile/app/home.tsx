@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -74,6 +74,7 @@ export default function Home() {
     leaveQueue,
     createRoom,
     joinRoom,
+    closeRoom,
     makeMove,
     resign,
     offerDraw,
@@ -87,11 +88,30 @@ export default function Home() {
     dismissInvitation,
   } = useGameSocket();
 
+  // Identidade anunciada ao oponente (topo da tela de jogo dele). A fila
+  // rápida já mandava; sala/convite passam a mandar o mesmo objeto.
+  const playerMeta = useMemo(
+    () => ({
+      username: user?.username,
+      full_name: user?.full_name,
+      rating: user?.rating,
+    }),
+    [user]
+  );
+
   useEffect(() => {
     if (quickSearching && (socketStatus === "error" || socketStatus === "idle") && !onlineGame) {
       setQuickSearching(false);
     }
   }, [socketStatus, quickSearching, onlineGame]);
+
+  // A busca ACABOU quando a partida começa. Sem isto o overlay volta a
+  // aparecer ao sair da partida: clearGame() devolve status "connected", que
+  // não é "error" nem "idle", então o reset acima nunca dispara e a tela fica
+  // travada em "Procurando oponente...".
+  useEffect(() => {
+    if (onlineGame) setQuickSearching(false);
+  }, [onlineGame]);
 
   const showDailyLimitAlert = useCallback(() => {
     Alert.alert(
@@ -126,17 +146,31 @@ export default function Home() {
       "Convite de partida ♟",
       `${fromName} te convidou para jogar!`,
       [
-        { text: "Recusar", onPress: dismissInvitation, style: "cancel" },
+        {
+          // RECUSAR é teardown de verdade: invalida a sala e avisa quem
+          // convidou (antes só sumia o alerta e o convidante esperava
+          // indefinidamente por alguém que já tinha recusado).
+          text: "Recusar",
+          onPress: () => {
+            closeRoom(inviteCode);
+            dismissInvitation();
+          },
+          style: "cancel",
+        },
         {
           text: "Aceitar",
           onPress: () => {
             dismissInvitation();
-            joinRoom(inviteCode);
+            joinRoom(inviteCode, playerMeta);
           },
         },
       ],
       { cancelable: false }
     );
+    // Dep list estreita de propósito: o alerta é um efeito colateral por
+    // CONVITE. Incluir playerMeta/callbacks faria o mesmo convite reabrir o
+    // alerta a cada mudança de perfil ou reconexão do socket.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [friendInvitation]);
 
   const handleCloseMenu = useCallback(() => setActiveMenu(null), []);
@@ -158,8 +192,8 @@ export default function Home() {
   const handleQuickOnline = useCallback(() => {
     setActiveMenu(null);
     setQuickSearching(true);
-    joinQueue(ONLINE_TIME_CONTROL, { username: user?.username, rating: user?.rating });
-  }, [joinQueue, user]);
+    joinQueue(ONLINE_TIME_CONTROL, playerMeta);
+  }, [joinQueue, playerMeta]);
 
   const openAiSetup = useCallback(async () => {
     // Pré-seleciona a última configuração usada (PR C).
@@ -223,10 +257,36 @@ export default function Home() {
 
   const handleInviteFriend = useCallback(
     (friendId: number) => {
-      inviteFriend(friendId, { username: user?.username ?? undefined, full_name: user?.full_name });
+      inviteFriend(friendId, playerMeta);
     },
-    [inviteFriend, user]
+    [inviteFriend, playerMeta]
   );
+
+  const handleCreateRoom = useCallback(
+    () => createRoom(playerMeta),
+    [createRoom, playerMeta]
+  );
+
+  const handleJoinRoom = useCallback(
+    (code: string) => joinRoom(code, playerMeta),
+    [joinRoom, playerMeta]
+  );
+
+  // Sair da espera pela sala: teardown no servidor — invalida a sala e avisa
+  // o convidado. Era isto que faltava: o botão chamava `leaveQueue`, que só
+  // mexe na fila de matchmaking e nunca desfazia a sala.
+  const handleCancelRoom = useCallback(() => {
+    if (roomCode) closeRoom(roomCode);
+  }, [roomCode, closeRoom]);
+
+  // Voltar da tela de sala desfaz as duas esperas possíveis: a sala (acima) e
+  // a fila rápida, caso o usuário tenha entrado nela por outro caminho.
+  const handleLeavePrivateRoom = useCallback(() => {
+    handleCancelRoom();
+    leaveQueue();
+    setActiveScreen("home");
+    setActiveTab("home");
+  }, [handleCancelRoom, leaveQueue]);
 
 
   const currentMenu = (() => {
@@ -322,16 +382,12 @@ export default function Home() {
             status={socketStatus}
             roomCode={roomCode}
             onJoinQueue={joinQueue}
-            onLeaveQueue={leaveQueue}
-            onCreateRoom={createRoom}
-            onJoinRoom={joinRoom}
+            onCancelRoom={handleCancelRoom}
+            onCreateRoom={handleCreateRoom}
+            onJoinRoom={handleJoinRoom}
             onInviteFriend={handleInviteFriend}
             initialTab="friend"
-            onBack={() => {
-              leaveQueue();
-              setActiveScreen("home");
-              setActiveTab("home");
-            }}
+            onBack={handleLeavePrivateRoom}
           />
         ) : activeScreen === "profile" ? (
           <ProfileScreen />
