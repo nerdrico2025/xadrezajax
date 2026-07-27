@@ -36,17 +36,29 @@ index 601d1d5..2125573 100644
      highlight: (_: {
          square: Square;
 diff --git a/node_modules/react-native-chessboard/lib/typescript/context/props-context/index.d.ts b/node_modules/react-native-chessboard/lib/typescript/context/props-context/index.d.ts
-index 42e9bea..c4d21b1 100644
+index 42e9bea..79b8b0d 100644
 --- a/node_modules/react-native-chessboard/lib/typescript/context/props-context/index.d.ts
 +++ b/node_modules/react-native-chessboard/lib/typescript/context/props-context/index.d.ts
-@@ -14,6 +14,7 @@ declare type ChessboardColorsType = {
+@@ -14,6 +14,10 @@ declare type ChessboardColorsType = {
      lastMoveHighlight?: string;
      checkmateHighlight?: string;
      promotionPieceButton?: string;
 +    selectedSquareHighlight?: string;
++    promotionBackdrop?: string;
++    promotionSurface?: string;
++    promotionBorder?: string;
  };
  declare type ChessboardDurationsType = {
      move?: number;
+@@ -58,6 +62,8 @@ declare type ChessboardProps = {
+      * Useful if you want to customise the default durations used in the chessboard (in milliseconds).
+      */
+     durations?: ChessboardDurationsType;
++    flipped?: boolean;
++    promotionLabels?: Partial<Record<'q' | 'r' | 'b' | 'n', string>>;
+ };
+ declare type ChessboardContextType = ChessboardProps & Required<Pick<ChessboardProps, 'gestureEnabled' | 'withLetters' | 'withNumbers' | 'boardSize'>> & {
+     pieceSize: number;
 diff --git a/node_modules/react-native-chessboard/src/components/piece/index.tsx b/node_modules/react-native-chessboard/src/components/piece/index.tsx
 index bbbd539..59597bb 100644
 --- a/node_modules/react-native-chessboard/src/components/piece/index.tsx
@@ -193,6 +205,275 @@ index 2fc9565..a7c4eae 100644
      },
      [chess, selectableSquares, selectedSquare]
    );
+diff --git a/node_modules/react-native-chessboard/src/context/board-promotion-context/dialog/dialog-piece.tsx b/node_modules/react-native-chessboard/src/context/board-promotion-context/dialog/dialog-piece.tsx
+index 34c64d0..31806bc 100644
+--- a/node_modules/react-native-chessboard/src/context/board-promotion-context/dialog/dialog-piece.tsx
++++ b/node_modules/react-native-chessboard/src/context/board-promotion-context/dialog/dialog-piece.tsx
+@@ -1,6 +1,6 @@
+ import type { PieceType } from 'chess.js';
+ import React from 'react';
+-import { StyleSheet, View } from 'react-native';
++import { Image, StyleSheet, View } from 'react-native';
+ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+ import Animated, {
+   runOnJS,
+@@ -9,22 +9,35 @@ import Animated, {
+   withTiming,
+ } from 'react-native-reanimated';
+ import type { Player } from '../../../types';
+-import { ChessPiece } from '../../../components/piece/visual-piece';
++import { PIECES } from '../../../constants';
+ import { useChessboardProps } from '../../../context/props-context/hooks';
+ 
+ type DialogPieceProps = {
+-  index: number;
+-  width: number;
++  /** Lado da célula em pixels (quadrada). */
++  size: number;
+   type: Player;
+   piece: PieceType;
+   onSelectPiece?: (piece: PieceType) => void;
+ };
+ 
++/**
++ * AJAX patch — uma opção do seletor de promoção.
++ *
++ * Diferenças em relação ao original:
++ *   - célula com borda e canto próprios: as 4 opções leem como 4 botões
++ *     separados, não como um bloco só;
++ *   - a peça é renderizada direto de PIECES, sem passar por `renderPiece`. O app
++ *     usa `renderPiece` para girar as peças 180° quando o jogador é das pretas,
++ *     e dentro do seletor a peça precisa estar sempre de pé;
++ *   - tamanho da peça derivado da célula (o original herdava `pieceSize` do
++ *     tabuleiro, que não tem relação com o tamanho do botão).
++ */
+ const DialogPiece: React.FC<DialogPieceProps> = React.memo(
+-  ({ index, width, type, piece, onSelectPiece }) => {
++  ({ size, type, piece, onSelectPiece }) => {
+     const isTapActive = useSharedValue(false);
+     const {
+-      colors: { promotionPieceButton },
++      colors: { promotionPieceButton, promotionBorder },
++      promotionLabels,
+     } = useChessboardProps();
+ 
+     const gesture = Gesture.Tap()
+@@ -42,53 +55,52 @@ const DialogPiece: React.FC<DialogPieceProps> = React.memo(
+ 
+     const rStyle = useAnimatedStyle(() => {
+       return {
+-        opacity: withTiming(isTapActive.value ? 1 : 0, { duration: 150 }),
++        opacity: withTiming(isTapActive.value ? 1 : 0, { duration: 120 }),
+       };
+     }, []);
+ 
+     return (
+       <GestureDetector gesture={gesture}>
+-        <Animated.View>
++        <View
++          style={[
++            styles.cell,
++            { width: size, height: size, borderColor: promotionBorder },
++          ]}
++          accessible
++          accessibilityRole="button"
++          accessibilityLabel={
++            promotionLabels?.[piece] ?? piece.toUpperCase()
++          }
++        >
++          {/* Realce de toque por cima do fundo opaco do card. */}
+           <Animated.View
+             style={[
+-              {
+-                width,
+-                position: 'absolute',
+-                backgroundColor: promotionPieceButton,
+-                aspectRatio: 1,
+-                borderTopLeftRadius: index === 0 ? 5 : 0,
+-                borderBottomLeftRadius: index === 1 ? 5 : 0,
+-                borderTopRightRadius: index === 2 ? 5 : 0,
+-                borderBottomRightRadius: index === 3 ? 5 : 0,
+-              } as const,
++              StyleSheet.absoluteFill,
++              styles.pressed,
++              { backgroundColor: promotionPieceButton },
+               rStyle,
+             ]}
+           />
+-          <View
+-            style={[
+-              {
+-                width,
+-                borderLeftWidth: index === 3 || index === 2 ? 1 : 0,
+-                borderTopWidth: index % 2 !== 0 ? 1 : 0,
+-              } as const,
+-              styles.pieceContainer,
+-            ]}
+-          >
+-            <ChessPiece id={`${type}${piece}`} />
+-          </View>
+-        </Animated.View>
++          <Image
++            source={PIECES[`${type}${piece}`]}
++            style={{ width: size * 0.82, height: size * 0.82 }}
++          />
++        </View>
+       </GestureDetector>
+     );
+   }
+ );
+ 
+ const styles = StyleSheet.create({
+-  pieceContainer: {
+-    aspectRatio: 1,
++  cell: {
+     justifyContent: 'center',
+     alignItems: 'center',
+-    borderBottomWidth: 0,
+-    borderColor: 'rgba(0,0,0,0.2)',
++    borderRadius: 10,
++    borderWidth: 1,
++    overflow: 'hidden',
++  },
++  pressed: {
++    borderRadius: 10,
+   },
+ });
+ 
+diff --git a/node_modules/react-native-chessboard/src/context/board-promotion-context/dialog/index.tsx b/node_modules/react-native-chessboard/src/context/board-promotion-context/dialog/index.tsx
+index 481593d..51b3687 100644
+--- a/node_modules/react-native-chessboard/src/context/board-promotion-context/dialog/index.tsx
++++ b/node_modules/react-native-chessboard/src/context/board-promotion-context/dialog/index.tsx
+@@ -3,59 +3,102 @@ import React from 'react';
+ import type { PieceType } from 'chess.js';
+ import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+ 
+-import { StyleSheet } from 'react-native';
++import { StyleSheet, View } from 'react-native';
+ import type { BoardPromotionContextState } from '..';
+ import { DialogPiece } from './dialog-piece';
+ 
+-const PROMOTION_PIECES: PieceType[] = ['q', 'r', 'n', 'b'];
++// AJAX patch: ordem Q/R/B/N (dama, torre, bispo, cavalo) — a ordem de
++// frequência real da promoção, e a mesma dos apps de referência.
++const PROMOTION_PIECES: PieceType[] = ['q', 'r', 'b', 'n'];
+ 
++/**
++ * AJAX patch — seletor de promoção.
++ *
++ * O original era um painel 2×2 `rgba(256,256,256,0.85)` (semitransparente, e
++ * com componentes fora da faixa 0–255) em `position: absolute` SEM top/left:
++ * caía no canto superior esquerdo do contêiner do tabuleiro, por cima das
++ * casas, com as peças reais aparecendo por baixo.
++ *
++ * Agora é o padrão de mercado: backdrop escurecido cobrindo o tabuleiro inteiro
++ * e um card OPACO centralizado. Nada do tabuleiro atravessa por baixo.
++ */
+ const PromotionDialog: React.FC<Required<BoardPromotionContextState>> =
+   React.memo(({ type, onSelect }) => {
+-    const { boardSize } = useChessboardProps();
++    const {
++      boardSize,
++      flipped,
++      colors: { promotionBackdrop, promotionSurface, promotionBorder },
++    } = useChessboardProps();
++
++    // Alvo de toque confortável mesmo em telas pequenas: boardSize/4 fica em
++    // ~80–100dp, bem acima do mínimo de 44dp.
++    const cellSize = Math.floor(boardSize / 4);
++    // Largura fechada na conta da grade 2×2 (2 células + gap + padding), para o
++    // wrap ser determinístico em qualquer tamanho de tabuleiro.
++    const cardWidth = cellSize * 2 + CARD_GAP + CARD_PADDING * 2;
+ 
+     return (
+       <Animated.View
+-        entering={FadeIn}
+-        exiting={FadeOut}
++        entering={FadeIn.duration(120)}
++        exiting={FadeOut.duration(120)}
+         style={[
+-          {
+-            width: boardSize / 3,
+-          },
+-          styles.container,
++          StyleSheet.absoluteFill,
++          styles.backdrop,
++          { backgroundColor: promotionBackdrop },
+         ]}
+       >
+-        {PROMOTION_PIECES.map((piece, i) => {
+-          return (
++        <View
++          style={[
++            styles.card,
++            {
++              width: cardWidth,
++              backgroundColor: promotionSurface,
++              borderColor: promotionBorder,
++              // O app rotaciona o contêiner do tabuleiro em 180° para jogar de
++              // pretas; sem esta contra-rotação o seletor viria de cabeça para
++              // baixo junto com ele.
++              transform: flipped ? [{ rotate: '180deg' }] : undefined,
++            },
++          ]}
++        >
++          {PROMOTION_PIECES.map((piece) => (
+             <DialogPiece
+-              key={i}
+-              width={boardSize / 6}
+-              index={i}
++              key={piece}
++              size={cellSize}
+               piece={piece}
+               type={type}
+               onSelectPiece={onSelect}
+             />
+-          );
+-        })}
++          ))}
++        </View>
+       </Animated.View>
+     );
+   });
+ 
++const CARD_GAP = 8;
++const CARD_PADDING = 12;
++
+ const styles = StyleSheet.create({
+-  container: {
+-    position: 'absolute',
+-    aspectRatio: 1,
+-    backgroundColor: 'rgba(256,256,256,0.85)',
+-    borderRadius: 5,
++  backdrop: {
+     zIndex: 10,
+     justifyContent: 'center',
+     alignItems: 'center',
+-    shadowColor: 'black',
+-    shadowOpacity: 0.2,
+-    shadowOffset: {
+-      height: 5,
+-      width: 0,
+-    },
++  },
++  // 2×2: quatro células de boardSize/4 não caberiam em uma linha só dentro do
++  // tabuleiro, e a grade dá alvos de toque maiores.
++  card: {
++    flexDirection: 'row',
+     flexWrap: 'wrap',
++    justifyContent: 'center',
++    gap: CARD_GAP,
++    padding: CARD_PADDING,
++    borderRadius: 16,
++    borderWidth: 1,
++    shadowColor: 'black',
++    shadowOpacity: 0.3,
++    shadowRadius: 12,
++    shadowOffset: { height: 6, width: 0 },
++    elevation: 8,
+   },
+ });
+ 
 diff --git a/node_modules/react-native-chessboard/src/context/board-refs-context/index.tsx b/node_modules/react-native-chessboard/src/context/board-refs-context/index.tsx
 index 3966cd9..67a71ef 100644
 --- a/node_modules/react-native-chessboard/src/context/board-refs-context/index.tsx
@@ -223,24 +504,60 @@ index 3966cd9..67a71ef 100644
        highlight: ({ square, color }) => {
          squareRefs.current?.[square].current.highlight({
 diff --git a/node_modules/react-native-chessboard/src/context/props-context/index.tsx b/node_modules/react-native-chessboard/src/context/props-context/index.tsx
-index 448aa9c..6daf4b1 100644
+index 448aa9c..6b503d8 100644
 --- a/node_modules/react-native-chessboard/src/context/props-context/index.tsx
 +++ b/node_modules/react-native-chessboard/src/context/props-context/index.tsx
-@@ -16,6 +16,9 @@ type ChessboardColorsType = {
+@@ -15,7 +15,18 @@ type ChessboardColorsType = {
+   black: string;
    lastMoveHighlight?: string;
    checkmateHighlight?: string;
++  /** Realce de toque de uma opção do seletor de promoção. */
    promotionPieceButton?: string;
 +  // AJAX patch: cor do brilho sob a peça na casa selecionada/arrastada.
 +  // Permite temas de tabuleiro (PR E) usarem o Dourado AJAX na seleção.
 +  selectedSquareHighlight?: string;
++  // AJAX patch: seletor de promoção opaco com backdrop (ver dialog/index.tsx).
++  /** Escurecimento sobre o tabuleiro enquanto o seletor está aberto. */
++  promotionBackdrop?: string;
++  /** Fundo do card do seletor. Precisa ser OPACO. */
++  promotionSurface?: string;
++  /** Borda do card e das 4 opções. */
++  promotionBorder?: string;
  };
  
  type ChessboardDurationsType = {
-@@ -86,6 +89,7 @@ const defaultChessboardProps: ChessboardContextType = {
+@@ -62,6 +73,18 @@ type ChessboardProps = {
+    * Useful if you want to customise the default durations used in the chessboard (in milliseconds).
+    */
+   durations?: ChessboardDurationsType;
++  /**
++   * AJAX patch: o contêiner do tabuleiro está rotacionado 180° (jogador das
++   * pretas). O seletor de promoção se contra-rotaciona para não sair de cabeça
++   * para baixo. Não afeta o tabuleiro em si — a rotação continua sendo do app.
++   */
++  flipped?: boolean;
++  /**
++   * AJAX patch: rótulos acessíveis das opções de promoção, por peça
++   * (ex.: `{ q: 'Promover para dama' }`). Sem eles o leitor de tela anuncia
++   * apenas a letra da peça.
++   */
++  promotionLabels?: Partial<Record<'q' | 'r' | 'b' | 'n', string>>;
+ };
+ 
+ type ChessboardContextType = ChessboardProps &
+@@ -85,7 +108,14 @@ const defaultChessboardProps: ChessboardContextType = {
+     white: '#D9FDF8',
      lastMoveHighlight: 'rgba(255,255,0, 0.5)',
      checkmateHighlight: '#E84855',
-     promotionPieceButton: '#FF9B71',
+-    promotionPieceButton: '#FF9B71',
++    // AJAX patch: o default da lib era '#FF9B71' — laranja, proibido na marca
++    // (RF-VISUAL-01). O default agora é neutro para que uma tela que esqueça de
++    // passar `colors` nunca reintroduza laranja.
++    promotionPieceButton: 'rgba(0, 0, 0, 0.12)',
 +    selectedSquareHighlight: 'rgba(0, 0, 0, 0.1)',
++    promotionBackdrop: 'rgba(0, 0, 0, 0.62)',
++    promotionSurface: '#FFFFFF',
++    promotionBorder: 'rgba(0, 0, 0, 0.18)',
    },
    durations: {
      move: 150,

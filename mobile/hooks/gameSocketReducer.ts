@@ -5,7 +5,16 @@ export type GameColor = "w" | "b";
 export type GamePlayer = {
   id: string;
   username?: string;
+  full_name?: string;
   rating?: number;
+};
+
+/** Identidade que o jogador anuncia ao entrar numa fila ou sala — é o que a
+ * tela de jogo do oponente exibe no topo. */
+export type PlayerMeta = {
+  username?: string | null;
+  full_name?: string | null;
+  rating?: number | null;
 };
 
 export type OnlineGame = {
@@ -64,6 +73,7 @@ export type Action =
   | { type: "QUEUED" }
   | { type: "QUEUE_LEFT" }
   | { type: "ROOM_CREATED"; code: string }
+  | { type: "ROOM_CLOSED"; code: string }
   | { type: "GAME_STARTED"; game: OnlineGame }
   | { type: "MOVE_MADE"; fen: string; turn: GameColor; check: boolean; lastMove: { from: string; to: string } | null; whiteTimeMs: number | null; blackTimeMs: number | null }
   | { type: "GAME_OVER"; winnerId: string | null; reason: string }
@@ -125,6 +135,24 @@ export function gameSocketReducer(state: State, action: Action): State {
       return { ...state, status: "connected", roomCode: null };
     case "ROOM_CREATED":
       return { ...state, status: "queued", roomCode: action.code };
+    case "ROOM_CLOSED": {
+      // Fecha o convite dos DOIS lados com o mesmo evento: quem esperava na
+      // sala (roomCode) e quem tinha o convite na tela (friendInvitation).
+      // Ignora códigos de outra sala — evita que um teardown atrasado apague
+      // um convite novo.
+      const wasHosting = state.roomCode === action.code;
+      const wasInvited = state.friendInvitation?.roomCode === action.code;
+      if (!wasHosting && !wasInvited) return state;
+      return {
+        ...state,
+        roomCode: wasHosting ? null : state.roomCode,
+        friendInvitation: wasInvited ? null : state.friendInvitation,
+        // "queued" aqui é o estado de espera criado pelo ROOM_CREATED —
+        // volta para conectado. Partida em andamento nunca é afetada.
+        status:
+          wasHosting && state.status === "queued" ? "connected" : state.status,
+      };
+    }
     case "GAME_STARTED":
       return {
         ...state,

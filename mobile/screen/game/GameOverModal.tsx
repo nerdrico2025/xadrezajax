@@ -3,6 +3,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { AI_LEVEL_BY_ID, type Difficulty } from "@/constants/aiGame";
+import { QA_SHOW_AI_DIAGNOSTIC_PGN } from "@/constants/qaFlags";
+import Confetti from "@/components/Confetti";
 
 /** Modo Campanha: preenchido quando a vitória atual cruzou o limiar de 3
  * vitórias no nível jogado — dominatedLevel ganhou o selo; nextLevel é o
@@ -63,6 +65,9 @@ interface GameOverModalProps {
    * TODO(remover): junto com utils/aiGamePgn.ts, ao fim da análise da
    * calibragem do Iniciante. Preenchido só em partidas vs IA nos níveis
    * Iniciante/Fácil; nos demais vem null e nada é renderizado.
+   *
+   * Só é EXIBIDO em build de preview/QA (QA_SHOW_AI_DIAGNOSTIC_PGN). Em
+   * produção a prop pode vir preenchida e nada aparece.
    */
   diagnosticPgn?: string | null;
 }
@@ -108,8 +113,12 @@ export default function GameOverModal({
           {/* ⚠️ TEMPORÁRIO: PGN da partida para a análise da calibragem.
               Texto selecionável (toque longo → Copiar) de propósito: evita
               adicionar expo-clipboard só para uma instrumentação que vai ser
-              removida. Some sozinho nos níveis fora da investigação. */}
-          {diagnosticPgn ? (
+              removida. Some sozinho nos níveis fora da investigação.
+
+              Gateado por QA_SHOW_AI_DIAGNOSTIC_PGN: era ruído visual no modal
+              de vitória do usuário final (bloco com tags [Event]/[Date]/... e a
+              lista de lances). Preview/QA continua vendo e copiando. */}
+          {QA_SHOW_AI_DIAGNOSTIC_PGN && diagnosticPgn ? (
             <View
               style={[
                 styles.diagnosticBox,
@@ -172,6 +181,11 @@ export default function GameOverModal({
             </Pressable>
           </View>
         </View>
+
+        {/* Confete por último para cair na FRENTE do card. `pointerEvents: none`
+            dentro do componente — nunca rouba o toque dos botões. Desmonta com
+            o modal (o componente inteiro sai quando `result` volta a null). */}
+        {result.outcome === "win" && <Confetti />}
       </View>
     </Modal>
   );

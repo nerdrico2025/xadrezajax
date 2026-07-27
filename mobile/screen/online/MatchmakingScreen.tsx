@@ -23,7 +23,11 @@ interface Props {
   status: SocketStatus;
   roomCode: string | null;
   onJoinQueue: () => void;
-  onLeaveQueue: () => void;
+  /** Desiste da sala/convite: invalida a sala no servidor e avisa o
+   * convidado. NÃO é a fila de matchmaking — foi exatamente essa confusão
+   * (Cancelar emitindo `leave_queue`) que deixava a sala viva do lado do
+   * convidado. */
+  onCancelRoom: () => void;
   onCreateRoom: () => void;
   onJoinRoom: (code: string) => void;
   onBack: () => void;
@@ -36,7 +40,7 @@ type Tab = "friend" | "code";
 export default function MatchmakingScreen({
   status,
   roomCode,
-  onLeaveQueue,
+  onCancelRoom,
   onJoinRoom,
   onBack,
   onInviteFriend,
@@ -284,7 +288,7 @@ export default function MatchmakingScreen({
               style={[styles.cancelButton, { borderColor: colors.error, marginTop: 24 }]}
               onPress={() => {
                 setInvitedFriendName(null);
-                onLeaveQueue();
+                onCancelRoom();
               }}
             >
               <Text style={[styles.cancelButtonText, { color: colors.error }]}>Cancelar</Text>

@@ -520,19 +520,31 @@ describe("instrumentação de PGN (diagnóstico temporário da calibragem)", () 
     );
   }
 
-  it("mostra o PGN no fim de partida no Iniciante", () => {
+  /** O PGN que a tela entrega ao modal. Quem decide EXIBIR é o modal, atrás da
+   *  flag de QA (ver GameOverModal.test.tsx) — aqui verificamos só a captura. */
+  function diagnosticPgn(root: ReactTestInstance): string | null | undefined {
+    const modal = root.findAll(
+      (n) =>
+        typeof n.type !== "string" &&
+        (n.type as { name?: string })?.name === "GameOverModal"
+    );
+    expect(modal).toHaveLength(1);
+    return modal[0].props.diagnosticPgn;
+  }
+
+  it("captura o PGN no fim de partida no Iniciante", () => {
     const tree = render("beginner");
     resign(tree);
-    expect(hasTextContaining(tree.root, "Diagnóstico da IA")).toBe(true);
-    expect(hasTextContaining(tree.root, '[Difficulty "beginner"]')).toBe(true);
+    const pgn = diagnosticPgn(tree.root);
+    expect(pgn).toContain('[Difficulty "beginner"]');
     // Partida retomada de um save: a análise precisa saber que está truncada.
-    expect(hasTextContaining(tree.root, "[Incomplete")).toBe(true);
+    expect(pgn).toContain("[Incomplete");
   });
 
-  it("mostra o PGN no Fácil", () => {
+  it("captura o PGN no Fácil", () => {
     const tree = render("easy");
     resign(tree);
-    expect(hasTextContaining(tree.root, '[Difficulty "easy"]')).toBe(true);
+    expect(diagnosticPgn(tree.root)).toContain('[Difficulty "easy"]');
   });
 
   it("NÃO instrumenta os níveis fora da investigação", () => {
@@ -540,7 +552,15 @@ describe("instrumentação de PGN (diagnóstico temporário da calibragem)", () 
     for (const level of ["medium", "hard", "master"] as const) {
       const tree = render(level);
       resign(tree);
-      expect(hasTextContaining(tree.root, "Diagnóstico da IA")).toBe(false);
+      expect(diagnosticPgn(tree.root)).toBeNull();
     }
+  });
+
+  it("o PGN capturado NÃO é renderizado (flag de QA desligada = produção)", () => {
+    const tree = render("beginner");
+    resign(tree);
+    expect(diagnosticPgn(tree.root)).toContain("[Event");
+    expect(hasTextContaining(tree.root, "Diagnóstico da IA")).toBe(false);
+    expect(hasTextContaining(tree.root, "[Difficulty")).toBe(false);
   });
 });

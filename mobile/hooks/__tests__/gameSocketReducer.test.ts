@@ -145,3 +145,57 @@ describe("fluxo de proposta de empate no gameSocketReducer", () => {
     expect(state.incomingDrawOffer).toBe(false);
   });
 });
+
+// ── Teardown do convite (ROOM_CLOSED) ────────────────────────────────────
+// Mesmo evento fecha os dois lados: quem hospeda a sala e quem recebeu o
+// convite. Ver gameRoom.closeRoom no node-api.
+
+describe("teardown de sala/convite no gameSocketReducer", () => {
+  const INVITATION = { fromId: "9", fromName: "Renan", roomCode: "ABC123" };
+
+  function hosting(code = "ABC123"): State {
+    return gameSocketReducer(
+      { ...initialState, status: "connected" },
+      { type: "ROOM_CREATED", code }
+    );
+  }
+
+  it("quem hospeda: limpa o código e sai do estado de espera", () => {
+    let state = hosting();
+    expect(state.roomCode).toBe("ABC123");
+    expect(state.status).toBe("queued");
+
+    state = gameSocketReducer(state, { type: "ROOM_CLOSED", code: "ABC123" });
+    expect(state.roomCode).toBeNull();
+    expect(state.status).toBe("connected");
+  });
+
+  it("quem foi convidado: some com o convite da tela", () => {
+    let state = gameSocketReducer(
+      { ...initialState, status: "connected" },
+      { type: "FRIEND_INVITATION", invitation: INVITATION }
+    );
+    expect(state.friendInvitation).not.toBeNull();
+
+    state = gameSocketReducer(state, { type: "ROOM_CLOSED", code: "ABC123" });
+    expect(state.friendInvitation).toBeNull();
+  });
+
+  it("ignora teardown de outra sala — não apaga convite novo", () => {
+    let state = gameSocketReducer(
+      hosting("NOVA01"),
+      { type: "FRIEND_INVITATION", invitation: INVITATION }
+    );
+
+    state = gameSocketReducer(state, { type: "ROOM_CLOSED", code: "VELHA0" });
+    expect(state.roomCode).toBe("NOVA01");
+    expect(state.friendInvitation).toEqual(INVITATION);
+  });
+
+  it("não derruba partida em andamento", () => {
+    let state = inGame();
+    state = gameSocketReducer(state, { type: "ROOM_CLOSED", code: "ABC123" });
+    expect(state.status).toBe("in_game");
+    expect(state.game).not.toBeNull();
+  });
+});

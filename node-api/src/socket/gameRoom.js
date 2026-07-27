@@ -260,20 +260,78 @@ async function updateSocket(gameId, userId, newSocketId) {
   await updateGame(gameId, { [isWhite ? "white_socket" : "black_socket"]: newSocketId });
 }
 
-// Private rooms (play by code)
-async function createRoom(creatorId, creatorSocketId, meta = {}) {
+// ── Salas privadas / convites ───────────────────────────────────────────────
+//
+// Handshake genérico de convite sobre uma sala, com quatro passos:
+//
+//   PROPOR  → createRoom()            (+ emissão do convite, no index.js)
+//   ACEITAR → joinRoom()              (vira partida)
+//   RECUSAR → closeRoom() pelo convidado
+//   SAIR    → closeRoom() pelo criador
+//
+// RECUSAR e SAIR são o MESMO teardown — só muda o `reason` derivado do papel
+// de quem fechou. `kind` identifica QUAL convite é ("friend" hoje; a revanche
+// entra como outro kind e reaproveita createRoom/joinRoom/closeRoom sem
+// duplicar ciclo de vida).
+const ROOM_KIND_FRIEND = "friend";
+
+// Motivos de fechamento reportados aos dois lados. Derivados no servidor (do
+// papel de quem fecha), nunca aceitos do cliente.
+const ROOM_CLOSE_CANCELLED = "cancelled"; // criador desistiu de esperar
+const ROOM_CLOSE_DECLINED = "declined"; // convidado recusou
+const ROOM_CLOSE_EXPIRED = "expired"; // sala já não existe (TTL/2º fechamento)
+
+async function createRoom(creatorId, creatorSocketId, meta = {}, options = {}) {
   const redis = getRedis();
   const code = generateId(6);
   const roomData = {
     creator_id: String(creatorId),
     creator_socket: creatorSocketId,
     creator_meta: JSON.stringify(meta),
+    kind: options.kind || ROOM_KIND_FRIEND,
+    // Preenchido quando a sala nasce de um convite direto — é quem precisa
+    // ser avisado se o criador cancelar. Sala só-por-código não tem alvo
+    // conhecido e fica vazio.
+    invitee_id: options.inviteeId != null ? String(options.inviteeId) : "",
     status: "waiting",
     created_at: String(Date.now()),
   };
   await redis.hset(`${ROOM_PREFIX}${code}`, roomData);
   await redis.expire(`${ROOM_PREFIX}${code}`, 600); // 10 min to join
   return code;
+}
+
+/**
+ * Invalida a sala e diz QUEM precisa ser avisado do outro lado.
+ *
+ * Idempotente por construção: fechar uma sala inexistente devolve
+ * `reason: "expired"` em vez de erro — quem chamou ainda precisa destravar a
+ * própria tela, e a sala pode ter morrido pelo TTL de 10 min.
+ */
+async function closeRoom(code, userId) {
+  const redis = getRedis();
+  const room = await redis.hgetall(`${ROOM_PREFIX}${code}`);
+
+  if (!room || !room.creator_id) {
+    return { reason: ROOM_CLOSE_EXPIRED, notifyUserId: null, kind: null };
+  }
+
+  const isCreator = String(room.creator_id) === String(userId);
+  const isInvitee =
+    !!room.invitee_id && String(room.invitee_id) === String(userId);
+  if (!isCreator && !isInvitee) {
+    return { error: "Você não participa desta sala" };
+  }
+
+  await redis.del(`${ROOM_PREFIX}${code}`);
+
+  return {
+    kind: room.kind || ROOM_KIND_FRIEND,
+    reason: isCreator ? ROOM_CLOSE_CANCELLED : ROOM_CLOSE_DECLINED,
+    // O outro lado do convite. Criador fechando → avisa o convidado (se
+    // houver); convidado fechando → avisa o criador.
+    notifyUserId: isCreator ? room.invitee_id || null : room.creator_id,
+  };
 }
 
 async function joinRoom(code, joinerId, joinerSocketId, joinerMeta = {}) {
@@ -309,4 +367,9 @@ module.exports = {
   updateSocket,
   createRoom,
   joinRoom,
+  closeRoom,
+  ROOM_KIND_FRIEND,
+  ROOM_CLOSE_CANCELLED,
+  ROOM_CLOSE_DECLINED,
+  ROOM_CLOSE_EXPIRED,
 };

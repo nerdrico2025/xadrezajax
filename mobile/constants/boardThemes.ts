@@ -119,11 +119,30 @@ export function isBoardThemeId(value: unknown): value is BoardThemeId {
   return typeof value === "string" && value in BOARD_THEMES;
 }
 
+/** Escurecimento do tabuleiro atrás do seletor de promoção. Fixo entre temas:
+ *  o papel dele é apagar o tabuleiro, não decorar. */
+const PROMOTION_BACKDROP = "rgba(0, 0, 0, 0.62)";
+
+/**
+ * Rótulos acessíveis do seletor de promoção (a lib só teria a letra da peça).
+ */
+export const PROMOTION_LABELS = {
+  q: "Promover para dama",
+  r: "Promover para torre",
+  b: "Promover para bispo",
+  n: "Promover para cavalo",
+} as const;
+
 /**
  * Converte um BoardTheme no objeto `colors` esperado pelo prop do
  * react-native-chessboard. `white` = casa clara, `black` = casa escura
- * (convenção interna da lib). `selectedSquareHighlight` é um campo adicionado
- * via patch-package (ver patches/react-native-chessboard+0.1.2.patch).
+ * (convenção interna da lib). `selectedSquareHighlight` e os tokens
+ * `promotion*` são campos adicionados via patch-package (ver
+ * patches/react-native-chessboard+0.1.2.patch).
+ *
+ * O card do seletor de promoção usa a CASA CLARA do tema como fundo: é uma cor
+ * opaca que já pertence ao tabuleiro em qualquer um dos 5 temas, e as peças
+ * (brancas e pretas) são desenhadas para serem legíveis exatamente sobre ela.
  */
 export function toChessboardColors(theme: BoardTheme) {
   return {
@@ -132,5 +151,11 @@ export function toChessboardColors(theme: BoardTheme) {
     lastMoveHighlight: theme.lastMoveHighlight,
     checkmateHighlight: theme.checkHighlight,
     selectedSquareHighlight: theme.selectedHighlight,
+    promotionBackdrop: PROMOTION_BACKDROP,
+    promotionSurface: theme.lightSquare,
+    promotionBorder: theme.darkSquare,
+    // Toque na opção: Dourado AJAX. Substitui o '#FF9B71' (laranja) que vinha
+    // do default da lib e aparecia em produção — laranja é proibido (D4).
+    promotionPieceButton: GOLD_SELECTED,
   };
 }

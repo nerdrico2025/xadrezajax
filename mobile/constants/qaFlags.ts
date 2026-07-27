@@ -25,3 +25,17 @@ import { IS_PROD } from "@/services/api";
  */
 export const QA_UNLOCK_ALL_AI_LEVELS =
   !IS_PROD && process.env.EXPO_PUBLIC_QA_UNLOCK_LEVELS === "true";
+
+/**
+ * Mostra o bloco de diagnóstico com o PGN da partida no modal de fim de jogo.
+ *
+ * Por que existe: a análise da calibragem da IA precisa da partida lance a
+ * lance (ver utils/aiGamePgn.ts), e o PGN não é persistido em lugar nenhum —
+ * copiar do modal é o único canal. Só que o bloco é ruído puro para o usuário
+ * final, e estava aparecendo em TODOS os builds.
+ *
+ * Usa a MESMA variável de ambiente do destravamento de níveis: as duas coisas
+ * servem à mesma campanha de QA em device, e ligar uma sem a outra não faz
+ * sentido — a partida de diagnóstico é jogada justamente nos níveis destravados.
+ */
+export const QA_SHOW_AI_DIAGNOSTIC_PGN = QA_UNLOCK_ALL_AI_LEVELS;
