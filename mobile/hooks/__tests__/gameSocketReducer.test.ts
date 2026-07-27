@@ -199,3 +199,69 @@ describe("teardown de sala/convite no gameSocketReducer", () => {
     expect(state.game).not.toBeNull();
   });
 });
+
+// ── Reconnect durante a partida (regressão do lance descartado) ──────────
+// O bug: `CONNECTED` devolvia "connected" incondicional, rebaixando uma
+// partida ativa. Como `makeMove` só envia em "in_game", todo lance depois de
+// uma queda era descartado em silêncio até chegar o `game_rejoined` — que
+// podia nunca chegar (o ponteiro de recuperação no servidor vencia antes).
+
+describe("reconnect durante a partida", () => {
+  it("queda + reconexão devolve o estado para in_game sem depender do rejoin", () => {
+    let state = inGame();
+    expect(state.status).toBe("in_game");
+
+    // Socket cai no meio da partida
+    state = gameSocketReducer(state, { type: "DISCONNECTED" });
+    expect(state.status).toBe("reconnecting");
+    expect(state.game).not.toBeNull();
+
+    // Socket volta — ANTES de qualquer game_rejoined do servidor
+    state = gameSocketReducer(state, { type: "CONNECTED" });
+    expect(state.status).toBe("in_game");
+  });
+
+  it("várias reconexões seguidas não rebaixam a partida", () => {
+    let state = inGame();
+    for (let i = 0; i < 3; i++) {
+      state = gameSocketReducer(state, { type: "RECONNECTING" });
+      state = gameSocketReducer(state, { type: "CONNECTED" });
+    }
+    expect(state.status).toBe("in_game");
+  });
+
+  it("game_rejoined depois da reconexão continua funcionando (caminho normal)", () => {
+    let state = gameSocketReducer(inGame(), { type: "DISCONNECTED" });
+    state = gameSocketReducer(state, { type: "CONNECTED" });
+    state = gameSocketReducer(state, { type: "GAME_STARTED", game: GAME });
+    expect(state.status).toBe("in_game");
+  });
+
+  it("partida encerrada NÃO volta para in_game ao reconectar", () => {
+    let state = gameSocketReducer(inGame(), {
+      type: "GAME_OVER",
+      winnerId: "1",
+      reason: "checkmate",
+    });
+    state = gameSocketReducer(state, { type: "CONNECTED" });
+    expect(state.status).toBe("connected");
+  });
+
+  it("sem partida, reconectar continua devolvendo connected", () => {
+    const state = gameSocketReducer(
+      { ...initialState, status: "reconnecting" },
+      { type: "CONNECTED" }
+    );
+    expect(state.status).toBe("connected");
+  });
+
+  it("erro de lance não derruba a partida do estado in_game", () => {
+    let state = inGame();
+    state = gameSocketReducer(state, {
+      type: "MOVE_ERROR",
+      error: "Sem conexão — o lance não foi enviado.",
+    });
+    expect(state.status).toBe("in_game");
+    expect(state.error).toContain("não foi enviado");
+  });
+});

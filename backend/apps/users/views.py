@@ -556,6 +556,10 @@ class GameResultView(APIView):
             b_name = (
                 getattr(white_profile, "username", None) or white_profile.user.full_name
             )
+            # `color`: a informação de quem jogou de brancas/pretas já chegava
+            # no payload (white_id/black_id) e era descartada. Registrar aqui
+            # é o passo barato que permite, numa PR futura, balancear a cor no
+            # pareamento a partir do histórico de cada jogador.
             GameHistory.objects.create(
                 user=white_profile.user,
                 opponent_name=w_name,
@@ -565,6 +569,7 @@ class GameResultView(APIView):
                 rating_before=w_before,
                 rating_after=round(white_rating.rating),
                 rated=not unrated,
+                color=GameHistory.COLOR_WHITE,
             )
             GameHistory.objects.create(
                 user=black_profile.user,
@@ -575,6 +580,7 @@ class GameResultView(APIView):
                 rating_before=b_before,
                 rating_after=round(black_rating.rating),
                 rated=not unrated,
+                color=GameHistory.COLOR_BLACK,
             )
 
         return Response(

@@ -253,10 +253,23 @@ export function useGameSocket() {
     dispatch({ type: "ROOM_CLOSED", code });
   }, []);
 
+  // NUNCA descarta um lance em silêncio: em partida ranqueada, um lance que
+  // some sem aviso é indistinguível de um bug do tabuleiro. Se não dá para
+  // enviar, o jogador é avisado e o tabuleiro é ressincronizado com a posição
+  // autoritativa (ver o efeito de `moveError` no OnlineGameScreen).
   const makeMove = useCallback((from: string, to: string, promotion?: string) => {
     const socket = socketRef.current;
-    const { game, status } = stateRef.current;
-    if (!socket || !game || status !== "in_game") return;
+    const { game } = stateRef.current;
+    if (!game || game.gameOver) return;
+
+    if (!socket?.connected) {
+      dispatch({
+        type: "MOVE_ERROR",
+        error: "Sem conexão — o lance não foi enviado. Tente de novo assim que reconectar.",
+      });
+      return;
+    }
+
     socket.emit("make_move", { game_id: game.gameId, from, to, promotion });
   }, []);
 

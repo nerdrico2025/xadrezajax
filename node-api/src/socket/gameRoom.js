@@ -1,10 +1,21 @@
 const { Chess } = require("chess.js");
 const { getRedis } = require("../services/redis.service");
-const { setUserGame } = require("./matchmaking");
+const { setUserGame, renewUserGame } = require("./matchmaking");
+const { GAME_TTL } = require("./ttl");
 
 const GAME_PREFIX = "game:";
 const ROOM_PREFIX = "room:";
-const GAME_TTL = 7200; // 2 hours
+
+// Relógio padrão de partida humana, decidido no SERVIDOR (10 min). Toda
+// partida humano-vs-humano tem relógio — não existe partida humana sem
+// relógio. O seletor de tempo no convite é PR futura; até lá este é o valor,
+// e ele nunca vem do cliente.
+const DEFAULT_TIME_CONTROL_SECS = 600;
+
+// Carência para reconectar antes de a partida ser encerrada por abandono.
+// Limitada pelo relógio do jogador que caiu — vale o que terminar primeiro
+// (ver abandonGraceMs).
+const ABANDON_GRACE_MS = 60_000;
 
 function generateId(len = 8) {
   return Math.random().toString(36).slice(2, 2 + len).toUpperCase();
@@ -135,6 +146,14 @@ async function applyMove(gameId, userId, from, to, promotion) {
 
   await updateGame(gameId, { fen: newFen, status, ...timeUpdates });
 
+  // Renova o ponteiro de recuperação dos DOIS jogadores junto com a partida.
+  // `updateGame` já esticou o `game:`; sem esta linha o `user:game:` vencia
+  // sozinho e o reconnect deixava de funcionar no meio da partida.
+  if (status === "active") {
+    await renewUserGame(game.white_id);
+    await renewUserGame(game.black_id);
+  }
+
   if (status === "finished") {
     await setUserGame(game.white_id, null);
     await setUserGame(game.black_id, null);
@@ -170,6 +189,39 @@ async function resignGame(gameId, userId) {
     black_id: game.black_id,
     time_control: game.time_control ? parseInt(game.time_control) : null,
   };
+}
+
+/**
+ * Quanto tempo dar a `userId` para reconectar antes de perder por abandono.
+ *
+ * Nunca excede o relógio que resta ao próprio jogador: se ele tem 12s de
+ * relógio, a carência é de 12s. Senão o abandono viraria tempo extra de
+ * graça — quem estivesse perdendo no relógio ganharia 60s fechando o app.
+ *
+ * Decisão inteiramente do servidor: o cliente não informa nem negocia este
+ * valor. Retorna 0 quando o relógio já zerou (encerra imediatamente).
+ */
+function abandonGraceMs(game, userId) {
+  const timeControlSecs = game.time_control ? parseInt(game.time_control) : null;
+  // Partida legada sem relógio (anterior ao relógio obrigatório): só a
+  // carência fixa limita.
+  if (!timeControlSecs) return ABANDON_GRACE_MS;
+
+  const isWhite = String(game.white_id) === String(userId);
+  const storedMs = isWhite
+    ? parseInt(game.white_time_ms)
+    : parseInt(game.black_time_ms);
+  if (!Number.isFinite(storedMs)) return ABANDON_GRACE_MS;
+
+  let remainingMs = storedMs;
+  // Se for a vez dele, o relógio dele corre desde o último lance — o que já
+  // escorreu não conta como carência.
+  const isTheirTurn = (new Chess(game.fen).turn() === "w") === isWhite;
+  if (isTheirTurn && game.last_move_at) {
+    remainingMs -= Date.now() - parseInt(game.last_move_at);
+  }
+
+  return Math.max(0, Math.min(ABANDON_GRACE_MS, remainingMs));
 }
 
 // Proposta de empate expira sozinha para não travar a partida se o
@@ -352,7 +404,10 @@ async function joinRoom(code, joinerId, joinerSocketId, joinerMeta = {}) {
     ? { userId: joinerId, socketId: joinerSocketId, meta: joinerMeta }
     : { userId: room.creator_id, socketId: room.creator_socket, meta: JSON.parse(room.creator_meta || "{}") };
 
-  const gameId = await createGame(white, black);
+  // Relógio decidido no servidor: sala humana nasce COM relógio, sempre.
+  // Antes nascia sem (3º argumento omitido) e a partida ficava sem timeout,
+  // sem pressão de tempo e sem fim natural possível.
+  const gameId = await createGame(white, black, DEFAULT_TIME_CONTROL_SECS);
   return { gameId, white, black };
 }
 
@@ -368,6 +423,9 @@ module.exports = {
   createRoom,
   joinRoom,
   closeRoom,
+  abandonGraceMs,
+  DEFAULT_TIME_CONTROL_SECS,
+  ABANDON_GRACE_MS,
   ROOM_KIND_FRIEND,
   ROOM_CLOSE_CANCELLED,
   ROOM_CLOSE_DECLINED,

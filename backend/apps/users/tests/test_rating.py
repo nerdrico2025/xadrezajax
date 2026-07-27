@@ -272,6 +272,30 @@ class GameResultViewGlickoTests(APITestCase):
         black_history = GameHistory.objects.get(user=self.black)
         self.assertEqual(black_history.rating_before, black_history.rating_after)
 
+    def test_game_history_records_color_of_each_player(self):
+        """A cor jogada fica registrada por partida (GAP 3). É só registro —
+        o balanceamento de cor no pareamento é PR futura, mas sem gravar
+        agora ela nasceria sem dado histórico."""
+        self.post_result("white", time_control=300)
+
+        self.assertEqual(
+            GameHistory.objects.get(user=self.white).color, GameHistory.COLOR_WHITE
+        )
+        self.assertEqual(
+            GameHistory.objects.get(user=self.black).color, GameHistory.COLOR_BLACK
+        )
+
+    def test_color_is_recorded_for_unrated_game_too(self):
+        """Registro da cor não depende de a partida valer rating."""
+        self.post_result("draw", time_control=None)
+
+        self.assertEqual(
+            GameHistory.objects.get(user=self.white).color, GameHistory.COLOR_WHITE
+        )
+        self.assertEqual(
+            GameHistory.objects.get(user=self.black).color, GameHistory.COLOR_BLACK
+        )
+
     def test_timed_game_still_rated_regression(self):
         """Regressão: com relógio (mesmo rápido, >10 min) segue rateando."""
         self.post_result("white", time_control=900)
@@ -331,6 +355,9 @@ class AiGameResultViewTests(APITestCase):
         self.assertEqual(history.mode, GameHistory.MODE_AI)
         self.assertFalse(history.rated)
         self.assertEqual(history.rating_before, history.rating_after)
+        # Partida vs IA não informa cor no payload — fica nula, e nula é
+        # simplesmente ignorada por qualquer contagem de cor.
+        self.assertIsNone(history.color)
 
     def test_payload_without_time_control_defaults_to_blitz(self):
         """Compatibilidade: app antigo envia só result + difficulty."""

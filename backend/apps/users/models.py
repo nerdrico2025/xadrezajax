@@ -212,6 +212,24 @@ class GameHistory(models.Model):
             "nas estatísticas, mas não alteram o rating."
         ),
     )
+    COLOR_WHITE = "w"
+    COLOR_BLACK = "b"
+    COLOR_CHOICES = [(COLOR_WHITE, "Brancas"), (COLOR_BLACK, "Pretas")]
+    # Cor que ESTE usuário jogou nesta partida. Nullable de propósito: o
+    # histórico anterior a esta migration não tem como saber a cor (ela só
+    # existia no hash `game:` do Redis, com TTL de 2h, já expirado), e
+    # partidas vs IA não informam cor no payload. Null = desconhecida.
+    #
+    # Só REGISTRO nesta PR. O consumo (balanceamento de cor no pareamento da
+    # busca rápida) é PR futura — mas sem começar a gravar agora, essa PR
+    # nasceria sem dado histórico nenhum de onde partir.
+    color = models.CharField(
+        max_length=1,
+        choices=COLOR_CHOICES,
+        null=True,
+        blank=True,
+        verbose_name="Cor jogada",
+    )
     played_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

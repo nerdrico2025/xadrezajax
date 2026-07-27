@@ -114,7 +114,16 @@ export function gameSocketReducer(state: State, action: Action): State {
     case "CONNECTING":
       return { ...initialState, status: "connecting" };
     case "CONNECTED":
-      return { ...state, status: "connected", error: null };
+      // Reconectar NÃO pode rebaixar uma partida ativa. `makeMove` só envia
+      // em "in_game"; enquanto este case devolvia "connected" incondicional,
+      // todo lance depois de uma queda era descartado até chegar o
+      // `game_rejoined` — que podia nunca chegar se o ponteiro de recuperação
+      // já tivesse expirado no servidor.
+      return {
+        ...state,
+        status: state.game && !state.game.gameOver ? "in_game" : "connected",
+        error: null,
+      };
     case "DISCONNECTED":
       // Se havia partida ativa, mantém o game e vai para reconnecting
       return state.game && state.status === "in_game"
