@@ -4,10 +4,16 @@ import GameScreen from "../GameScreen";
 import type { SavedAiGame } from "@/utils/savedGame";
 
 // Módulos pesados/nativos fora do escopo destes testes
-// React 19 aceita ref como prop comum — mock simples cobre o uso de chessboardRef
+// React 19 aceita ref como prop comum — mock simples cobre o uso de chessboardRef.
+// O mock guarda as props de CADA render do tabuleiro: é assim que se verifica
+// que ele nunca monta antes de saber o próprio tamanho.
+const chessboardRenders: Record<string, any>[] = [];
 jest.mock("react-native-chessboard", () => ({
   __esModule: true,
-  default: () => null,
+  default: (props: Record<string, any>) => {
+    chessboardRenders.push(props);
+    return null;
+  },
 }));
 jest.mock("react-native-chessboard/lib/commonjs/constants", () => ({
   PIECES: {},
@@ -78,7 +84,19 @@ function render(difficulty: "beginner" | "easy" | "medium" | "hard" | "master" =
     );
   });
   mountedTrees.push(tree);
+  // O tabuleiro só monta depois de medido (ver `measureBoard` no GameScreen),
+  // então nenhum teste que dependa dele funciona sem passar por aqui.
+  layoutBoard(tree.root);
   return tree;
+}
+
+/** Dispara o onLayout da caixa de medição do tabuleiro. */
+function layoutBoard(root: ReactTestInstance, side = 320) {
+  const box = root.findAll((n) => typeof n.props?.onLayout === "function")[0];
+  expect(box).toBeTruthy();
+  act(() => {
+    box.props.onLayout({ nativeEvent: { layout: { width: side, height: side } } });
+  });
 }
 
 /** Encerra a partida por abandono — caminho mais curto até a tela de fim. */
@@ -129,6 +147,7 @@ afterEach(() => {
   for (const tree of mountedTrees.splice(0)) {
     act(() => tree.unmount());
   }
+  chessboardRenders.length = 0;
   jest.clearAllMocks();
   jest.useRealTimers();
 });
@@ -145,6 +164,7 @@ async function renderAiTurn(difficulty = "medium") {
     );
   });
   mountedTrees.push(tree);
+  layoutBoard(tree.root);
   return tree;
 }
 
@@ -562,5 +582,76 @@ describe("instrumentação de PGN (diagnóstico temporário da calibragem)", () 
     expect(diagnosticPgn(tree.root)).toContain("[Event");
     expect(hasTextContaining(tree.root, "Diagnóstico da IA")).toBe(false);
     expect(hasTextContaining(tree.root, "[Difficulty")).toBe(false);
+  });
+});
+
+// ── Tamanho do tabuleiro ─────────────────────────────────────────────────
+// O default da lib é `floor(larguraDaTela / 8) * 8`: só largura, resolvido uma
+// vez no import, sem olhar altura nem o padding da seção. Além de transbordar,
+// dimensionava errado o card do seletor de promoção, que deriva a célula de
+// `boardSize / 4`. Mesmo contrato já garantido em PuzzleScreen e
+// OnlineGameScreen: nada monta antes da medição.
+
+describe("tamanho do tabuleiro medido (paridade com Puzzle/Online)", () => {
+  /** Monta SEM disparar o onLayout — `render()` já mede por padrão. */
+  function renderSemMedir() {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <GameScreen savedGame={ACTIVE_GAME} difficulty="medium" playerColor="w" timeControl={null} />
+      );
+    });
+    mountedTrees.push(tree);
+    return tree;
+  }
+
+  it("não monta o tabuleiro antes de medir o espaço disponível", () => {
+    renderSemMedir();
+    expect(chessboardRenders).toHaveLength(0);
+  });
+
+  it("passa o tamanho medido ao tabuleiro em vez do default da lib", () => {
+    const tree = renderSemMedir();
+    layoutBoard(tree.root, 300);
+    // Múltiplo de 8 mais próximo por baixo de 300.
+    expect(chessboardRenders[0].boardSize).toBe(296);
+  });
+
+  it("limita pelo MENOR lado — altura curta não deixa o tabuleiro transbordar", () => {
+    const tree = renderSemMedir();
+    const box = tree.root.findAll((n) => typeof n.props?.onLayout === "function")[0];
+    act(() => {
+      box.props.onLayout({ nativeEvent: { layout: { width: 400, height: 260 } } });
+    });
+    expect(chessboardRenders[0].boardSize).toBe(256);
+  });
+
+  it("nas pretas, o PRIMEIRO render já traz a contra-rotação dimensionada pela casa", () => {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <GameScreen
+          savedGame={{ ...ACTIVE_GAME, playerColor: "b" }}
+          difficulty="medium"
+          playerColor="b"
+          timeControl={null}
+        />
+      );
+    });
+    mountedTrees.push(tree);
+    layoutBoard(tree.root, 320);
+
+    const first = chessboardRenders[0];
+    expect(first.boardSize).toBe(320);
+    expect(first.flipped).toBe(true);
+    // Nenhum render intermediário sem a contra-rotação.
+    expect(chessboardRenders.every((p) => typeof p.renderPiece === "function")).toBe(true);
+  });
+
+  it("nas brancas não contra-rotaciona (o contêiner não gira)", () => {
+    const tree = renderSemMedir();
+    layoutBoard(tree.root);
+    expect(chessboardRenders[0].flipped).toBe(false);
+    expect(chessboardRenders[0].renderPiece).toBeUndefined();
   });
 });

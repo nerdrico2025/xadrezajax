@@ -1,4 +1,12 @@
-import { View, StyleSheet, Alert, Pressable, Image, Text } from "react-native";
+import {
+  View,
+  StyleSheet,
+  Alert,
+  Pressable,
+  Image,
+  Text,
+  type LayoutChangeEvent,
+} from "react-native";
 import { useRef, useState, useEffect, useCallback } from "react";
 import Chessboard from "react-native-chessboard";
 import type { ChessboardRef } from "react-native-chessboard";
@@ -147,7 +155,10 @@ export default function GameScreen({
   const boardColors = toChessboardColors(boardTheme);
   const { token: authToken } = useAuth();
   const isFlipped = playerColor === "b";
-  const [squareSize, setSquareSize] = useState(0);
+  // Lado do tabuleiro em pixels. Medido antes de montar o tabuleiro (ver
+  // `measureBoard`), nunca herdado do default da lib — que é calculado uma
+  // única vez, no import, a partir da largura da janela.
+  const [boardSize, setBoardSize] = useState(0);
 
   const [game, setGame] = useState(() => savedGame ? new Chess(savedGame.fen) : new Chess());
   const [playerCaptures, setPlayerCaptures] = useState<string[]>(savedGame?.playerCaptures ?? []);
@@ -175,6 +186,27 @@ export default function GameScreen({
   const [showDrawConfirm, setShowDrawConfirm] = useState(false);
   const [moveCount, setMoveCount] = useState(savedGame?.moveCount ?? 0);
   const chessboardRef = useRef<ChessboardRef>(null);
+
+  /**
+   * Mede a área livre da seção do tabuleiro e deriva o lado dele.
+   *
+   * Por que não deixar a lib decidir: o default do react-native-chessboard é
+   * `floor(larguraDaTela / 8) * 8` — só largura, sem olhar a altura disponível
+   * nem o padding do contêiner, e resolvido uma única vez no import. Aqui isso
+   * transbordava a `boardSection` (que tem `paddingHorizontal: 8`) e, de
+   * quebra, dimensionava errado o card do seletor de promoção, que deriva a
+   * célula de `boardSize / 4`. Mesmo padrão do PuzzleScreen e do
+   * OnlineGameScreen.
+   *
+   * Múltiplo de 8 para as 8 casas fecharem em pixels inteiros (mesma razão do
+   * default da lib).
+   */
+  const measureBoard = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    const side = Math.floor(Math.min(width, height) / 8) * 8;
+    setBoardSize((prev) => (prev === side ? prev : side));
+  }, []);
+
   // ⚠️ TEMPORÁRIO: lances em SAN da partida, só p/ Iniciante/Fácil. Ver
   // utils/aiGamePgn.ts para o porquê e para o TODO de remoção.
   const sanHistoryRef = useRef<string[]>([]);
@@ -583,28 +615,55 @@ export default function GameScreen({
           advantage={playerAdvantage < 0 ? -playerAdvantage : 0}
           colors={colors}
         />
-        <View
-          style={[styles.boardWrapper, isFlipped && styles.boardFlipped]}
-          onLayout={(e) => setSquareSize(e.nativeEvent.layout.width / 8)}
-        >
-          <Chessboard
-            ref={chessboardRef}
-            fen={game.fen()}
-            onMove={onMove}
-            colors={boardColors}
-            // `flipped` só existe para o seletor de promoção se contra-rotacionar
-            // (o contêiner do tabuleiro é que gira 180°, aqui embaixo).
-            flipped={isFlipped}
-            promotionLabels={PROMOTION_LABELS}
-            withLetters={!isFlipped}
-            withNumbers={!isFlipped}
-            renderPiece={isFlipped && squareSize > 0 ? (piece) => (
-              <Image
-                source={PIECES[piece]}
-                style={{ width: squareSize, height: squareSize, transform: [{ rotate: "180deg" }] }}
+        {/* Caixa de medição: mede o espaço disponível ANTES de o tabuleiro
+            existir. O tabuleiro só monta com o tamanho já conhecido, então a
+            contra-rotação das peças (`renderPiece`, que depende do tamanho da
+            casa) já está valendo no PRIMEIRO paint. Mesmo padrão do
+            PuzzleScreen e do OnlineGameScreen. */}
+        <View style={styles.boardBox} onLayout={measureBoard}>
+          {boardSize > 0 && (
+            <View
+              // `boardSize` na chave porque a lib calcula a posição de cada
+              // peça UMA vez, na montagem: mudar o tamanho sem remontar
+              // deixaria as peças fora das casas. `playerColor` mantém o
+              // tabuleiro montado durante toda a partida (partida nova reusa
+              // o mesmo tabuleiro via `resetBoard`).
+              key={`${playerColor}-${boardSize}`}
+              style={[
+                styles.boardWrapper,
+                { width: boardSize, height: boardSize },
+                isFlipped && styles.boardFlipped,
+              ]}
+            >
+              <Chessboard
+                ref={chessboardRef}
+                fen={game.fen()}
+                boardSize={boardSize}
+                onMove={onMove}
+                colors={boardColors}
+                // `flipped` só existe para o seletor de promoção se contra-rotacionar
+                // (o contêiner do tabuleiro é que gira 180°, aqui embaixo).
+                flipped={isFlipped}
+                promotionLabels={PROMOTION_LABELS}
+                withLetters={!isFlipped}
+                withNumbers={!isFlipped}
+                renderPiece={
+                  isFlipped
+                    ? (piece) => (
+                        <Image
+                          source={PIECES[piece]}
+                          style={{
+                            width: boardSize / 8,
+                            height: boardSize / 8,
+                            transform: [{ rotate: "180deg" }],
+                          }}
+                        />
+                      )
+                    : undefined
+                }
               />
-            ) : undefined}
-          />
+            </View>
+          )}
         </View>
         <CapturedPieces
           pieces={playerCaptures as any}
@@ -698,6 +757,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 12,
     paddingHorizontal: 8,
+  },
+  boardBox: {
+    flex: 1,
+    alignSelf: "stretch",
+    alignItems: "center",
+    justifyContent: "center",
   },
   boardWrapper: {},
   boardFlipped: {
