@@ -2,7 +2,7 @@
   "expo": {
     "name": "AJAX",
     "slug": "xadrez-ajax",
-    "version": "1.7.1",
+    "version": "1.7.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon_new.png",
     "scheme": "ajax",
@@ -53,7 +53,9 @@
         }
       ],
       "expo-secure-store",
-      "expo-audio"
+      "expo-audio",
+      "expo-font",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
