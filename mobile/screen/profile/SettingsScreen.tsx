@@ -10,6 +10,7 @@ import { useBiometric } from "@/hooks/useBiometric";
 import { useSoundSettings } from "@/hooks/useSoundSettings";
 import { useAuth } from "@/context/AuthContext";
 import { Colors } from "@/constants/theme";
+import { APP_VERSION_LABEL } from "@/constants/appVersion";
 import { changePassword, deleteAccount } from "@/services/profile";
 import BoardThemePicker from "@/components/BoardThemePicker";
 
@@ -281,9 +282,14 @@ export default function SettingsScreen({ onBack }: Props) {
               <Text style={{ fontSize: 16 }}>♟</Text>
             </View>
             <Text style={[styles.rowLabel, { color: colors.text }]}>Clube de Xadrez AJAX</Text>
-            <Text style={[styles.rowSub, { color: colors.secondary }]}>v1.0.0</Text>
           </View>
         </View>
+
+        {/* Identifica a build instalada. `selectable` para o valor poder ser
+            copiado e colado num relato de bug. Ver constants/appVersion.ts. */}
+        <Text selectable style={[styles.versionLabel, { color: colors.secondary }]}>
+          {APP_VERSION_LABEL}
+        </Text>
       </ScrollView>
     </View>
   );
@@ -329,6 +335,11 @@ const styles = StyleSheet.create({
   },
   rowLabel: { flex: 1, fontSize: 15, fontWeight: "500" },
   rowSub: { fontSize: 12 },
+  versionLabel: {
+    fontSize: 11,
+    textAlign: "center",
+    marginTop: 12,
+  },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: 64 },
   pwdInput: {
     borderWidth: 1, borderRadius: 10,
