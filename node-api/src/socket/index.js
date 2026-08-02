@@ -2,7 +2,11 @@ const { Server } = require("socket.io");
 const { getRedis } = require("../services/redis.service");
 const { verifySocketToken } = require("./auth");
 const { addToQueue, removeFromQueue, findOpponent, getUserGame, renewUserGame, QUEUE_KEY, QUEUE_MAX_AGE_MS } = require("./matchmaking");
-const { reportGameResult, canPlayGame } = require("../services/gameResult.service");
+const {
+  reportGameResult,
+  canPlayGame,
+  getColorBalance,
+} = require("../services/gameResult.service");
 const {
   createGame,
   getGame,
@@ -16,8 +20,9 @@ const {
   joinRoom,
   closeRoom,
   abandonGraceMs,
-  DEFAULT_TIME_CONTROL_SECS,
+  resolveHumanTimeControl,
 } = require("./gameRoom");
+const { decideFirstPlaysWhite } = require("./colorBalance");
 
 // Timers de carência por abandono, por usuário desconectado. Cancelados
 // assim que o jogador reconecta. Processo único por design (o node-api roda
@@ -34,11 +39,39 @@ function clearAbandonTimer(userId) {
   }
 }
 
-/** Relógio de partida humana: sempre definido, sempre pelo servidor. O valor
- * que o cliente manda é uma sugestão — inválido ou ausente cai no padrão. */
-function resolveTimeControl(requested) {
-  const value = Number(requested);
-  return Number.isFinite(value) && value > 0 ? value : DEFAULT_TIME_CONTROL_SECS;
+/**
+ * Reporta o resultado ao Django e devolve aos DOIS jogadores o que o rating
+ * fez (Item 2). O app nunca calcula delta — quem rateia é o servidor.
+ *
+ * Emitido DEPOIS do `game_over`, num evento separado, de propósito: o modal
+ * de fim de partida não pode esperar um round-trip HTTP para aparecer. Ele
+ * abre na hora e completa com o delta quando ele chega. Se a chamada falhar
+ * (backend fora), nenhum evento é emitido e o modal só não mostra o número —
+ * nunca mostra um número errado.
+ */
+async function reportAndBroadcastRating(io, gameId, whiteId, blackId, result, timeControl) {
+  const data = await reportGameResult(whiteId, blackId, result, timeControl);
+  if (!data) return;
+
+  io.to(`game:${gameId}`).emit("game_rated", {
+    game_id: gameId,
+    rated: data.rated !== false,
+    modality: data.modality ?? null,
+    players: {
+      [String(whiteId)]: {
+        rating: data.white.rating,
+        rating_before: data.white.rating_before,
+        delta: data.white.delta,
+        provisional: data.white.provisional,
+      },
+      [String(blackId)]: {
+        rating: data.black.rating,
+        rating_before: data.black.rating_before,
+        delta: data.black.delta,
+        provisional: data.black.provisional,
+      },
+    },
+  });
 }
 
 function buildGameStartPayload(gameId, game) {
@@ -114,7 +147,11 @@ function setupSocket(httpServer) {
     // ── MATCHMAKING ──────────────────────────────────────────────────────
     socket.on("join_queue", async (data = {}) => {
       const meta = typeof data === "object" ? data : {};
-      const timeControl = resolveTimeControl(meta.time_control);
+      // Tempo pedido pelo cliente = preferência salva em Ajustes. Só entra se
+      // estiver na lista de tempos humanos; qualquer outra coisa vira o
+      // default. A busca rápida continua sendo UM TOQUE — nada é perguntado
+      // aqui, e não há toggle de "valer rating" (partida humana sempre vale).
+      const requestedTimeControl = resolveHumanTimeControl(meta.time_control);
       try {
         const existing = await getUserGame(userId);
         if (existing) {
@@ -151,7 +188,21 @@ function setupSocket(httpServer) {
 
         if (opponent) {
           const opponentSocket = io.sockets.sockets.get(opponent.socketId);
-          const meIsWhite = Math.random() < 0.5;
+
+          // Vale o tempo de quem JÁ ESTAVA na fila, não o de quem acabou de
+          // chegar. Com um só pareamento possível entre duas preferências
+          // diferentes, alguém tem que ceder; quem esperou mais tempo é o
+          // critério menos arbitrário — e é determinístico, decidido no
+          // servidor. (Filas separadas por tempo seriam o "certo" de um app
+          // grande, mas com a base atual ninguém pareava.)
+          const timeControl = resolveHumanTimeControl(
+            opponent.time_control ?? requestedTimeControl
+          );
+
+          // Cor balanceada pelo histórico do PAR, não sorteada por partida.
+          const balance = await getColorBalance([userId, opponent.userId]);
+          const meIsWhite = decideFirstPlaysWhite(balance, userId, opponent.userId);
+
           const white = meIsWhite
             ? { userId, socketId: socket.id, meta }
             : { userId: opponent.userId, socketId: opponent.socketId, meta: opponent };
@@ -167,9 +218,18 @@ function setupSocket(httpServer) {
           opponentSocket.join(`game:${gameId}`);
 
           io.to(`game:${gameId}`).emit("game_start", payload);
-          console.log(`[Socket] game_start id=${gameId} white=${white.userId} black=${black.userId} tc=${timeControl}`);
+          console.log(
+            `[Socket] game_start id=${gameId} white=${white.userId} ` +
+              `black=${black.userId} tc=${timeControl} ` +
+              `cor=${balance ? "balanceada" : "sorteada"}`
+          );
         } else {
-          await addToQueue(userId, socket.id, meta);
+          // O tempo pedido viaja com a entrada na fila: é ele que vale quando
+          // alguém parear com este jogador (ver acima).
+          await addToQueue(userId, socket.id, {
+            ...meta,
+            time_control: requestedTimeControl,
+          });
           socket.emit("queued", { message: "Procurando oponente..." });
         }
       } catch (err) {
@@ -188,9 +248,16 @@ function setupSocket(httpServer) {
     });
 
     // ── PRIVATE ROOM ─────────────────────────────────────────────────────
+    // `meta.color` e `meta.time_control` são a escolha explícita do anfitrião
+    // (Item 5). Normalizados dentro do createRoom — o cliente sugere, o
+    // servidor decide. Não há opção de "valer rating": partida humana sempre
+    // vale, e "amistosa" deixou de existir como categoria.
     socket.on("create_room", async (meta = {}) => {
       try {
-        const code = await createRoom(userId, socket.id, meta);
+        const code = await createRoom(userId, socket.id, meta, {
+          hostColor: meta.color,
+          timeControl: meta.time_control,
+        });
         socket.emit("room_created", { code });
       } catch (err) {
         console.error("[Socket] create_room error:", err);
@@ -293,7 +360,9 @@ function setupSocket(httpServer) {
             winner_id: winnerId,
             reason: "timeout",
           });
-          reportGameResult(
+          reportAndBroadcastRating(
+            io,
+            game_id,
             result.white_id,
             result.black_id,
             result.loser === "white" ? "black" : "white",
@@ -324,7 +393,9 @@ function setupSocket(httpServer) {
             const resultStr = result.gameOver.winner === "white" ? "white"
               : result.gameOver.winner === "black" ? "black"
               : "draw";
-            reportGameResult(
+            reportAndBroadcastRating(
+              io,
+              game_id,
               game.white_id,
               game.black_id,
               resultStr,
@@ -355,7 +426,9 @@ function setupSocket(httpServer) {
           reason: "resign",
         });
 
-        reportGameResult(
+        reportAndBroadcastRating(
+          io,
+          game_id,
           result.white_id,
           result.black_id,
           result.winner,
@@ -401,7 +474,9 @@ function setupSocket(httpServer) {
           reason: "agreement",
         });
 
-        reportGameResult(
+        reportAndBroadcastRating(
+          io,
+          game_id,
           result.white_id,
           result.black_id,
           "draw",
@@ -452,6 +527,10 @@ function setupSocket(httpServer) {
         // entrar numa sala já abandonada.
         const code = await createRoom(userId, socket.id, meta, {
           inviteeId: to_user_id,
+          // Escolha explícita do anfitrião no convite (Item 5): ele pega
+          // brancas ou pretas, o convidado recebe a outra.
+          hostColor: meta.color,
+          timeControl: meta.time_control,
         });
 
         // Corrida estreita: o amigo pode cair entre a checagem e o envio.
@@ -465,10 +544,16 @@ function setupSocket(httpServer) {
         socket.emit("room_created", { code });
 
         const fromName = meta.username || meta.full_name || `Usuário ${userId}`;
+        const room = await getRedis().hgetall(`room:${code}`);
         targetSocket.emit("friend_invitation", {
           from_id: userId,
           from_name: fromName,
           room_code: code,
+          // O convite diz ao convidado o que já foi decidido: quanto tempo e
+          // que cor sobrou para ele (o inverso da escolha do anfitrião). Vem
+          // da sala, já normalizado — não do que o convidante mandou.
+          time_control: room.time_control ? parseInt(room.time_control) : null,
+          your_color: room.host_color === "w" ? "b" : room.host_color === "b" ? "w" : null,
         });
         console.log(`[Socket] invite_friend from=${userId} to=${to_user_id} code=${code}`);
       } catch (err) {
@@ -521,7 +606,9 @@ function setupSocket(httpServer) {
                 winner_id: winnerId,
                 reason: "abandon",
               });
-              reportGameResult(
+              reportAndBroadcastRating(
+                io,
+                gameId,
                 result.white_id,
                 result.black_id,
                 result.winner,

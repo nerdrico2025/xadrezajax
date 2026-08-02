@@ -6,11 +6,33 @@ const { GAME_TTL } = require("./ttl");
 const GAME_PREFIX = "game:";
 const ROOM_PREFIX = "room:";
 
-// Relógio padrão de partida humana, decidido no SERVIDOR (10 min). Toda
-// partida humano-vs-humano tem relógio — não existe partida humana sem
-// relógio. O seletor de tempo no convite é PR futura; até lá este é o valor,
-// e ele nunca vem do cliente.
+// Relógio de partida humana. Toda partida humano-vs-humano tem relógio — não
+// existe partida humana sem relógio (e toda partida humana vale rating, então
+// "sem relógio" seria rota de fuga para quem está perdendo).
+//
+// O cliente SUGERE um valor (o anfitrião escolhe no convite, a busca rápida
+// manda a preferência salva em Ajustes); o servidor só aceita se estiver
+// nesta lista. Qualquer outra coisa cai no default.
+//
+// Os valores espelham as durações já usadas no wizard vs IA
+// (mobile/constants/aiGame.ts, AI_TIME_CONTROLS) MENOS "sem tempo", que não
+// existe para humano.
+const HUMAN_TIME_CONTROLS_SECS = [60, 180, 300, 600, 900];
 const DEFAULT_TIME_CONTROL_SECS = 600;
+
+/** Normaliza o tempo pedido pelo cliente. Fora da lista → default. */
+function resolveHumanTimeControl(requested) {
+  const value = Number(requested);
+  return HUMAN_TIME_CONTROLS_SECS.includes(value)
+    ? value
+    : DEFAULT_TIME_CONTROL_SECS;
+}
+
+/** Normaliza a cor pedida pelo anfitrião do convite. Só "w"/"b" valem;
+ *  qualquer outra coisa (inclusive ausente) vira sorteio no joinRoom. */
+function resolveHostColor(requested) {
+  return requested === "w" || requested === "b" ? requested : null;
+}
 
 // Carência para reconectar antes de a partida ser encerrada por abandono.
 // Limitada pelo relógio do jogador que caiu — vale o que terminar primeiro
@@ -336,6 +358,11 @@ const ROOM_CLOSE_EXPIRED = "expired"; // sala já não existe (TTL/2º fechament
 async function createRoom(creatorId, creatorSocketId, meta = {}, options = {}) {
   const redis = getRedis();
   const code = generateId(6);
+  // Cor e tempo são escolha EXPLÍCITA do anfitrião no convite, gravadas na
+  // sala para o joinRoom aplicar. Normalizadas aqui: o cliente sugere, o
+  // servidor decide. Não existe opção de "valer rating" nem de "amistosa" —
+  // partida humana sempre vale (ver GameResultView no Django).
+  const hostColor = resolveHostColor(options.hostColor);
   const roomData = {
     creator_id: String(creatorId),
     creator_socket: creatorSocketId,
@@ -345,6 +372,9 @@ async function createRoom(creatorId, creatorSocketId, meta = {}, options = {}) {
     // ser avisado se o criador cancelar. Sala só-por-código não tem alvo
     // conhecido e fica vazio.
     invitee_id: options.inviteeId != null ? String(options.inviteeId) : "",
+    // "" = anfitrião não escolheu (sala por código antiga) → sorteio.
+    host_color: hostColor || "",
+    time_control: String(resolveHumanTimeControl(options.timeControl)),
     status: "waiting",
     created_at: String(Date.now()),
   };
@@ -395,20 +425,29 @@ async function joinRoom(code, joinerId, joinerSocketId, joinerMeta = {}) {
 
   await redis.del(`${ROOM_PREFIX}${code}`);
 
-  // Randomly assign colors
-  const creatorIsWhite = Math.random() < 0.5;
-  const white = creatorIsWhite
-    ? { userId: room.creator_id, socketId: room.creator_socket, meta: JSON.parse(room.creator_meta || "{}") }
-    : { userId: joinerId, socketId: joinerSocketId, meta: joinerMeta };
-  const black = creatorIsWhite
-    ? { userId: joinerId, socketId: joinerSocketId, meta: joinerMeta }
-    : { userId: room.creator_id, socketId: room.creator_socket, meta: JSON.parse(room.creator_meta || "{}") };
+  // Cor: a escolha do anfitrião manda — ele pegou brancas ou pretas no
+  // convite e o convidado recebe a outra. Sala sem escolha gravada (código
+  // antigo, sala criada antes desta versão) mantém o sorteio.
+  const hostColor = resolveHostColor(room.host_color);
+  const creatorIsWhite = hostColor ? hostColor === "w" : Math.random() < 0.5;
 
-  // Relógio decidido no servidor: sala humana nasce COM relógio, sempre.
-  // Antes nascia sem (3º argumento omitido) e a partida ficava sem timeout,
-  // sem pressão de tempo e sem fim natural possível.
-  const gameId = await createGame(white, black, DEFAULT_TIME_CONTROL_SECS);
-  return { gameId, white, black };
+  const creator = {
+    userId: room.creator_id,
+    socketId: room.creator_socket,
+    meta: JSON.parse(room.creator_meta || "{}"),
+  };
+  const joiner = { userId: joinerId, socketId: joinerSocketId, meta: joinerMeta };
+
+  const white = creatorIsWhite ? creator : joiner;
+  const black = creatorIsWhite ? joiner : creator;
+
+  // Relógio decidido no servidor: sala humana nasce COM relógio, sempre — e
+  // agora com o tempo que o anfitrião escolheu no convite (já normalizado
+  // contra HUMAN_TIME_CONTROLS_SECS no createRoom). Sala sem tempo gravado
+  // cai no default.
+  const timeControl = resolveHumanTimeControl(room.time_control);
+  const gameId = await createGame(white, black, timeControl);
+  return { gameId, white, black, timeControl };
 }
 
 module.exports = {
@@ -424,6 +463,9 @@ module.exports = {
   joinRoom,
   closeRoom,
   abandonGraceMs,
+  resolveHumanTimeControl,
+  resolveHostColor,
+  HUMAN_TIME_CONTROLS_SECS,
   DEFAULT_TIME_CONTROL_SECS,
   ABANDON_GRACE_MS,
   ROOM_KIND_FRIEND,
