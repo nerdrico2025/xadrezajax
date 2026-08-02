@@ -366,7 +366,7 @@ describe("desistência vs IA (fluxo existente preservado)", () => {
 
     pressText(tree.root, "Abandonar");
 
-    expect(hasText(tree.root, "IA venceu!")).toBe(true);
+    expect(hasText(tree.root, "A IA venceu!")).toBe(true);
     expect(hasText(tree.root, "Abandono")).toBe(true);
     expect(reportAiResult).toHaveBeenCalledWith("test-token", "loss", "medium", null);
   });
@@ -379,7 +379,7 @@ describe("desistência vs IA (fluxo existente preservado)", () => {
     });
     pressText(tree.root, "Cancelar");
 
-    expect(hasText(tree.root, "IA venceu!")).toBe(false);
+    expect(hasText(tree.root, "A IA venceu!")).toBe(false);
     expect(reportAiResult).not.toHaveBeenCalled();
   });
 });

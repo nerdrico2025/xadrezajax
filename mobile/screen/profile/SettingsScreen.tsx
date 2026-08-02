@@ -8,8 +8,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { useBiometric } from "@/hooks/useBiometric";
 import { useSoundSettings } from "@/hooks/useSoundSettings";
+import { useOnlineTimePref } from "@/hooks/useOnlineTimePref";
 import { useAuth } from "@/context/AuthContext";
 import { Colors } from "@/constants/theme";
+import { HUMAN_TIME_CONTROLS } from "@/constants/onlineGame";
 import { APP_VERSION_LABEL } from "@/constants/appVersion";
 import { changePassword, deleteAccount } from "@/services/profile";
 import BoardThemePicker from "@/components/BoardThemePicker";
@@ -22,6 +24,7 @@ export default function SettingsScreen({ onBack }: Props) {
   const { theme, toggleTheme, resetToSystem, userPreference } = useTheme();
   const { isAvailable: biometricAvailable, isEnabled: biometricEnabled, enable: enableBiometric, disable: disableBiometric, authenticate } = useBiometric();
   const { soundEnabled, toggle: toggleSound } = useSoundSettings();
+  const { seconds: onlineTime, select: selectOnlineTime } = useOnlineTimePref();
   const { token, signOut } = useAuth();
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
@@ -162,6 +165,60 @@ export default function SettingsScreen({ onBack }: Props) {
           <BoardThemePicker
             colors={{ text: colors.text, secondary: colors.secondary, card: colors.background, divider: colors.divider }}
           />
+        </View>
+
+        {/* ── Partidas online ─── */}
+        <Text style={[styles.sectionLabel, { color: colors.secondary, marginTop: 24 }]}>
+          Partidas online
+        </Text>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.divider }]}>
+          {/* Só TEMPO. Não há preferência de cor de propósito: na busca rápida
+              a cor é automática e balanceada pelo servidor, e no convite de
+              amigo é escolha explícita a cada partida. Também não há opção de
+              "valer rating" — toda partida contra outra pessoa vale. */}
+          <Text
+            style={[
+              styles.rowSub,
+              { color: colors.secondary, paddingHorizontal: 16, paddingTop: 14 },
+            ]}
+          >
+            Tempo usado pela busca rápida. No convite a um amigo você escolhe o
+            tempo na hora.
+          </Text>
+
+          <View style={styles.timeGrid}>
+            {HUMAN_TIME_CONTROLS.map((tc) => {
+              const selected = tc.seconds === onlineTime;
+              return (
+                <Pressable
+                  key={tc.seconds}
+                  onPress={() => selectOnlineTime(tc.seconds)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`${tc.label}, ${tc.category}`}
+                  style={[
+                    styles.timeChip,
+                    {
+                      borderColor: selected ? colors.accent : colors.divider,
+                      backgroundColor: selected ? colors.accentMuted : "transparent",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.timeChipLabel,
+                      { color: selected ? colors.accentOnLight : colors.text },
+                    ]}
+                  >
+                    {tc.label}
+                  </Text>
+                  <Text style={[styles.timeChipCategory, { color: colors.secondary }]}>
+                    {tc.category}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
 
         {/* ── Som ─── */}
@@ -335,6 +392,24 @@ const styles = StyleSheet.create({
   },
   rowLabel: { flex: 1, fontSize: 15, fontWeight: "500" },
   rowSub: { fontSize: 12 },
+  timeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+  },
+  timeChip: {
+    minWidth: 78,
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
+  timeChipLabel: { fontSize: 14, fontWeight: "700" },
+  timeChipCategory: { fontSize: 10, marginTop: 2 },
   versionLabel: {
     fontSize: 11,
     textAlign: "center",

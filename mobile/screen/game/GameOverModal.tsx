@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
@@ -32,15 +33,50 @@ export type GameResult = {
   reason: GameEndReason;
 };
 
+/** Contra quem foi a partida. O modal é o MESMO componente nas duas telas
+ *  (GameScreen e OnlineGameScreen), então o modo precisa ser dito — não dá
+ *  para assumir. Era exatamente esse o bug: o modal se dizia "vs IA" também
+ *  em partida humana. */
+export type GameMode = "ai" | "online";
+
+/**
+ * O que o rating fez nesta partida, vindo do SERVIDOR (evento `game_rated`).
+ * O app nunca calcula delta.
+ *
+ * `null` = ainda não chegou. O modal abre antes da resposta do backend de
+ * propósito (ver reportAndBroadcastRating no node-api) e completa depois —
+ * enquanto isso mostra que a partida vale rating, sem inventar número.
+ */
+export type RatingOutcome = {
+  rated: boolean;
+  delta: number;
+  rating: number;
+};
+
 // Vitória usa colors.accent (Dourado AJAX, RF-VISUAL-01) — resolvido no
 // render porque o token vem do tema.
+//
+// O título de derrota depende do modo: "IA venceu!" era fixo e aparecia
+// também quando quem venceu era outra pessoa.
 const OUTCOME_CONFIG: Record<
   GameOutcome,
-  { icon: string; color: string | null; title: string }
+  { icon: string; color: string | null; title: Record<GameMode, string> }
 > = {
-  win: { icon: "trophy", color: null, title: "Você venceu!" },
-  loss: { icon: "sad-outline", color: "#E53935", title: "IA venceu!" },
-  draw: { icon: "remove-circle-outline", color: "#9BA1A6", title: "Empate!" },
+  win: {
+    icon: "trophy",
+    color: null,
+    title: { ai: "Você venceu!", online: "Você venceu!" },
+  },
+  loss: {
+    icon: "sad-outline",
+    color: "#E53935",
+    title: { ai: "A IA venceu!", online: "Seu oponente venceu!" },
+  },
+  draw: {
+    icon: "remove-circle-outline",
+    color: "#9BA1A6",
+    title: { ai: "Empate!", online: "Empate!" },
+  },
 };
 
 const REASON_LABEL: Record<GameEndReason, string> = {
@@ -59,6 +95,12 @@ const REASON_LABEL: Record<GameEndReason, string> = {
 
 interface GameOverModalProps {
   result: GameResult | null;
+  /** Contra quem foi a partida. Sem isto o modal não tem como saber, e a
+   *  versão anterior chutava "vs IA" nas duas telas. */
+  mode: GameMode;
+  /** Resultado do rating vindo do servidor. `null` enquanto não chegou (ou
+   *  quando o backend não respondeu). Ignorado em partida vs IA. */
+  ratingOutcome?: RatingOutcome | null;
   onNewGame: () => void;
   onLeave: () => void;
   /** Modo Campanha: presente só quando esta vitória dominou um nível. */
@@ -69,14 +111,16 @@ interface GameOverModalProps {
    * calibragem do Iniciante. Preenchido só em partidas vs IA nos níveis
    * Iniciante/Fácil; nos demais vem null e nada é renderizado.
    *
-   * Só é EXIBIDO em build de preview/QA (QA_SHOW_AI_DIAGNOSTIC_PGN). Em
-   * produção a prop pode vir preenchida e nada aparece.
+   * Só é EXIBIDO em build de preview/QA (QA_SHOW_AI_DIAGNOSTIC_PGN), e mesmo
+   * lá fica atrás de um link discreto — nunca como bloco de texto aberto.
    */
   diagnosticPgn?: string | null;
 }
 
 export default function GameOverModal({
   result,
+  mode,
+  ratingOutcome,
   onNewGame,
   onLeave,
   campaignUnlock,
@@ -84,10 +128,23 @@ export default function GameOverModal({
 }: GameOverModalProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
+  // Fechado por padrão: o PGN é diagnóstico, não conteúdo da tela de
+  // resultado. Só existe em build de QA (ver showDiagnosticToggle).
+  const [showPgn, setShowPgn] = useState(false);
 
   if (!result) return null;
 
   const config = OUTCOME_CONFIG[result.outcome];
+  const showDiagnosticToggle = QA_SHOW_AI_DIAGNOSTIC_PGN && !!diagnosticPgn;
+
+  // Delta em dourado na vitória, vermelho na queda, cinza no zero. Sem
+  // laranja em nenhuma variação (regra dura da marca).
+  const deltaColor =
+    !ratingOutcome || ratingOutcome.delta === 0
+      ? colors.secondary
+      : ratingOutcome.delta > 0
+      ? colors.accentOnLight
+      : colors.error;
 
   return (
     <Modal transparent animationType="fade" visible statusBarTranslucent>
@@ -101,45 +158,60 @@ export default function GameOverModal({
           />
 
           <Text style={[styles.title, { color: colors.text }]}>
-            {config.title}
+            {config.title[mode]}
           </Text>
 
           <Text style={[styles.reason, { color: colors.secondary }]}>
             {REASON_LABEL[result.reason]}
           </Text>
 
-          {/* Clareza no fim da partida vs IA (decisão D1): sem jargão técnico. */}
-          <Text style={[styles.ratingNote, { color: colors.secondary }]}>
-            Partida contra a IA — seu rating não mudou.
-          </Text>
-
-          {/* ⚠️ TEMPORÁRIO: PGN da partida para a análise da calibragem.
-              Texto selecionável (toque longo → Copiar) de propósito: evita
-              adicionar expo-clipboard só para uma instrumentação que vai ser
-              removida. Some sozinho nos níveis fora da investigação.
-
-              Gateado por QA_SHOW_AI_DIAGNOSTIC_PGN: era ruído visual no modal
-              de vitória do usuário final (bloco com tags [Event]/[Date]/... e a
-              lista de lances). Preview/QA continua vendo e copiando. */}
-          {QA_SHOW_AI_DIAGNOSTIC_PGN && diagnosticPgn ? (
-            <View
-              style={[
-                styles.diagnosticBox,
-                { borderColor: colors.divider, backgroundColor: colors.buttonSecondary },
-              ]}
+          {/* Rótulo de rating pelo MODO REAL da partida. Antes era o texto de
+              IA fixo, exibido também em partida humana ranqueada. */}
+          {mode === "ai" ? (
+            <Text
+              style={[styles.ratingNote, styles.ratingNoteAi, { color: colors.secondary }]}
             >
-              <Text style={[styles.diagnosticLabel, { color: colors.secondary }]}>
-                Diagnóstico da IA · toque e segure para copiar
+              Partida contra a IA — não vale rating.
+            </Text>
+          ) : (
+            <View style={styles.ratedRow}>
+              <Text style={[styles.ratingNote, { color: colors.secondary }]}>
+                Partida ranqueada
               </Text>
-              <Text
-                selectable
-                style={[styles.diagnosticPgn, { color: colors.text }]}
-                accessibilityLabel="PGN da partida para diagnóstico da calibragem da IA"
-              >
-                {diagnosticPgn}
-              </Text>
+              {ratingOutcome ? (
+                <View
+                  style={[
+                    styles.deltaChip,
+                    {
+                      backgroundColor: colors.accentMuted,
+                      borderColor: colors.divider,
+                    },
+                  ]}
+                  accessibilityLabel={
+                    ratingOutcome.delta === 0
+                      ? `Rating mantido em ${ratingOutcome.rating}`
+                      : `Rating ${ratingOutcome.delta > 0 ? "subiu" : "caiu"} ` +
+                        `${Math.abs(ratingOutcome.delta)} pontos, ` +
+                        `agora ${ratingOutcome.rating}`
+                  }
+                >
+                  <Text style={[styles.deltaValue, { color: deltaColor }]}>
+                    {ratingOutcome.delta > 0 ? "+" : ""}
+                    {ratingOutcome.delta}
+                  </Text>
+                  <Text style={[styles.deltaRating, { color: colors.text }]}>
+                    {ratingOutcome.rating}
+                  </Text>
+                </View>
+              ) : (
+                // O modal abre antes de o servidor responder. Sem número
+                // inventado: ou é o delta real do Glicko-2, ou nada.
+                <Text style={[styles.deltaPending, { color: colors.secondary }]}>
+                  atualizando rating…
+                </Text>
+              )}
             </View>
-          ) : null}
+          )}
 
           {/* Modo Campanha: comemoração discreta, nunca bloqueia o fluxo —
               dourado é a cor de conquista (sem laranja). */}
@@ -162,6 +234,60 @@ export default function GameOverModal({
                 </Text>
               </View>
             </View>
+          )}
+
+          {/* ⚠️ TEMPORÁRIO: PGN da partida para a análise da calibragem da IA.
+              TODO(remover): junto com utils/aiGamePgn.ts.
+
+              DUAS travas antes de aparecer: build de QA
+              (QA_SHOW_AI_DIAGNOSTIC_PGN) E toque no link. Antes, com a flag
+              ligada, era um bloco de texto grande e sempre aberto — tags
+              [Event]/[Date]/... e a lista de lances ocupando o modal de
+              vitória. Agora é um link pequeno, fechado por padrão.
+
+              Texto selecionável (toque longo → Copiar) de propósito: evita
+              adicionar expo-clipboard só para instrumentação temporária. */}
+          {showDiagnosticToggle && (
+            <>
+              <Pressable
+                onPress={() => setShowPgn((v) => !v)}
+                hitSlop={8}
+                style={styles.diagnosticToggle}
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name={showPgn ? "chevron-down" : "chevron-forward"}
+                  size={12}
+                  color={colors.secondary}
+                />
+                <Text style={[styles.diagnosticToggleText, { color: colors.secondary }]}>
+                  {showPgn ? "ocultar PGN (debug)" : "ver PGN (debug)"}
+                </Text>
+              </Pressable>
+
+              {showPgn && (
+                <View
+                  style={[
+                    styles.diagnosticBox,
+                    {
+                      borderColor: colors.divider,
+                      backgroundColor: colors.buttonSecondary,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.diagnosticLabel, { color: colors.secondary }]}>
+                    Diagnóstico da IA · toque e segure para copiar
+                  </Text>
+                  <Text
+                    selectable
+                    style={[styles.diagnosticPgn, { color: colors.text }]}
+                    accessibilityLabel="PGN da partida para diagnóstico da calibragem da IA"
+                  >
+                    {diagnosticPgn}
+                  </Text>
+                </View>
+              )}
+            </>
           )}
 
           <View style={styles.buttons}>
@@ -196,12 +322,24 @@ export default function GameOverModal({
 
 const styles = StyleSheet.create({
   // ⚠️ TEMPORÁRIO — remover junto com o bloco de diagnóstico.
+  diagnosticToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    alignSelf: "center",
+    paddingVertical: 4,
+    marginBottom: 8,
+  },
+  diagnosticToggleText: {
+    fontSize: 11,
+    textDecorationLine: "underline",
+  },
   diagnosticBox: {
     width: "100%",
     borderWidth: 1,
     borderRadius: 10,
     padding: 10,
-    marginTop: 12,
+    marginBottom: 16,
     gap: 6,
   },
   diagnosticLabel: {
@@ -244,8 +382,28 @@ const styles = StyleSheet.create({
   ratingNote: {
     fontSize: 13,
     textAlign: "center",
-    marginBottom: 28,
   },
+  ratingNoteAi: { marginBottom: 28 },
+  // Linha "Partida ranqueada" + delta. `marginBottom` aqui em vez de no
+  // ratingNote: em partida vs IA o texto é o último elemento antes dos
+  // botões e mantém o espaçamento antigo.
+  ratedRow: {
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 24,
+  },
+  deltaChip: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  deltaValue: { fontSize: 17, fontWeight: "800" },
+  deltaRating: { fontSize: 13, fontWeight: "600" },
+  deltaPending: { fontSize: 12, fontStyle: "italic" },
   campaignBanner: {
     flexDirection: "row",
     alignItems: "center",

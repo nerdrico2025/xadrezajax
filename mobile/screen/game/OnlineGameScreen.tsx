@@ -25,7 +25,7 @@ import { PROMOTION_LABELS, toChessboardColors } from "@/constants/boardThemes";
 import ChessClock from "@/components/ChessClock";
 import CapturedPieces from "./CapturedPieces";
 import ConfirmModal from "@/components/ConfirmModal";
-import type { OnlineGame, GameColor } from "@/hooks/useGameSocket";
+import type { OnlineGame, GameColor, RatingOutcome } from "@/hooks/useGameSocket";
 import { derivePromotion } from "@/utils/chessSpecialMoves";
 import type { GameResult } from "./GameOverModal";
 import GameOverModal from "./GameOverModal";
@@ -49,6 +49,9 @@ interface Props {
   incomingDrawOffer?: boolean;
   outgoingDrawOffer?: boolean;
   drawOfferDeclined?: boolean;
+  /** Delta de rating desta partida, vindo do servidor. Chega depois do fim
+   *  da partida — o modal abre antes e completa quando isto aparece. */
+  ratingOutcome?: RatingOutcome | null;
   onMakeMove: (from: string, to: string, promotion?: string) => void;
   onResign: () => void;
   onOfferDraw?: () => void;
@@ -87,6 +90,7 @@ export default function OnlineGameScreen({
   incomingDrawOffer = false,
   outgoingDrawOffer = false,
   drawOfferDeclined = false,
+  ratingOutcome = null,
   onMakeMove,
   onResign,
   onOfferDraw,
@@ -514,6 +518,19 @@ export default function OnlineGameScreen({
 
       <GameOverModal
         result={gameResult}
+        // Partida humana: o modal precisa saber disso para não se anunciar
+        // como "vs IA" (era o comportamento anterior, fixo no componente) e
+        // para mostrar o delta de rating.
+        mode="online"
+        ratingOutcome={
+          ratingOutcome
+            ? {
+                rated: ratingOutcome.rated,
+                delta: ratingOutcome.delta,
+                rating: ratingOutcome.rating,
+              }
+            : null
+        }
         onNewGame={onLeave}
         onLeave={onLeave}
       />

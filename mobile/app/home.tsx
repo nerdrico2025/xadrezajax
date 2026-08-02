@@ -15,7 +15,7 @@ import OfflineBanner from "@/components/OfflineBanner";
 import type { ColorChoice, Difficulty, PlayerColor } from "@/constants/aiGame";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
-import { useGameSocket } from "@/hooks/useGameSocket";
+import { useGameSocket, type HostGameSetup } from "@/hooks/useGameSocket";
 import { useAuth } from "@/context/AuthContext";
 import { useFriends } from "@/hooks/useFriends";
 import { loadSavedGame, clearSavedGame, type SavedAiGame } from "@/utils/savedGame";
@@ -25,6 +25,8 @@ import {
   saveAiSetupPrefs,
   type AiSetupPrefs,
 } from "@/utils/aiSetupPrefs";
+import { getOnlineTimePref, loadOnlineTimePref } from "@/utils/onlinePrefs";
+import { humanTimeLabel } from "@/constants/onlineGame";
 
 import HomeScreen from "@/screen/home/HomeScreen";
 import GameScreen from "@/screen/game/GameScreen";
@@ -83,6 +85,7 @@ export default function Home() {
     incomingDrawOffer,
     outgoingDrawOffer,
     drawOfferDeclined,
+    ratingOutcome,
     clearGame,
     inviteFriend,
     dismissInvitation,
@@ -98,6 +101,12 @@ export default function Home() {
     }),
     [user]
   );
+
+  // Carrega a preferência de tempo cedo, para a busca rápida poder lê-la de
+  // forma síncrona no toque do botão (ver handleQuickOnline).
+  useEffect(() => {
+    loadOnlineTimePref();
+  }, []);
 
   useEffect(() => {
     if (quickSearching && (socketStatus === "error" || socketStatus === "idle") && !onlineGame) {
@@ -141,10 +150,19 @@ export default function Home() {
 
   useEffect(() => {
     if (!friendInvitation) return;
-    const { fromName, roomCode: inviteCode } = friendInvitation;
+    const { fromName, roomCode: inviteCode, timeControl, yourColor } =
+      friendInvitation;
+    // Cor e tempo já foram decididos pelo anfitrião (item 5) — o convite
+    // informa, não pergunta. Quem recebe só aceita ou recusa.
+    const detalhes = [
+      timeControl ? humanTimeLabel(timeControl) : null,
+      yourColor === "w" ? "você joga de brancas" : yourColor === "b" ? "você joga de pretas" : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
     Alert.alert(
       "Convite de partida ♟",
-      `${fromName} te convidou para jogar!`,
+      `${fromName} te convidou para jogar!` + (detalhes ? `\n${detalhes}` : ""),
       [
         {
           // RECUSAR é teardown de verdade: invalida a sala e avisa quem
@@ -187,12 +205,18 @@ export default function Home() {
     }
   }, []);
 
-  const ONLINE_TIME_CONTROL = 5 * 60; // 5 minutos fixo para partidas online
-
+  // Busca rápida: UM TOQUE, sem tela de configuração (item 6). O tempo sai da
+  // preferência salva em Ajustes; a cor é decidida pelo servidor, balanceada
+  // pelo histórico do par; e a partida é sempre ranqueada — não há toggle
+  // para nada disso.
+  //
+  // A preferência é lida do cache do módulo (`getOnlineTimePref`), não de
+  // estado do React: sem await no caminho do botão, o toque continua sendo um
+  // toque. `loadOnlineTimePref` roda no mount da tela, muito antes.
   const handleQuickOnline = useCallback(() => {
     setActiveMenu(null);
     setQuickSearching(true);
-    joinQueue(ONLINE_TIME_CONTROL, playerMeta);
+    joinQueue(getOnlineTimePref(), playerMeta);
   }, [joinQueue, playerMeta]);
 
   const openAiSetup = useCallback(async () => {
@@ -255,15 +279,17 @@ export default function Home() {
     setActiveTab("home");
   }, [clearGame]);
 
+  // `setup` = cor e tempo que o anfitrião escolheu na tela de convite. O
+  // servidor valida os dois antes de gravar a sala.
   const handleInviteFriend = useCallback(
-    (friendId: number) => {
-      inviteFriend(friendId, playerMeta);
+    (friendId: number, setup: HostGameSetup) => {
+      inviteFriend(friendId, playerMeta, setup);
     },
     [inviteFriend, playerMeta]
   );
 
   const handleCreateRoom = useCallback(
-    () => createRoom(playerMeta),
+    (setup: HostGameSetup) => createRoom(playerMeta, setup),
     [createRoom, playerMeta]
   );
 
@@ -326,6 +352,7 @@ export default function Home() {
             incomingDrawOffer={incomingDrawOffer}
             outgoingDrawOffer={outgoingDrawOffer}
             drawOfferDeclined={drawOfferDeclined}
+            ratingOutcome={ratingOutcome}
             onMakeMove={makeMove}
             onResign={resign}
             onOfferDraw={offerDraw}

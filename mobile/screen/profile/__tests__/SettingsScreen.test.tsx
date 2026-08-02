@@ -1,5 +1,7 @@
 import renderer, { act } from "react-test-renderer";
 
+import { HUMAN_TIME_CONTROLS } from "@/constants/onlineGame";
+
 // O rótulo tem que vir de constants/appVersion (que lê o binário), nunca de um
 // texto fixo na tela — foi justamente um "v1.0.0" hardcoded aqui que ficou três
 // releases desatualizado.
@@ -42,7 +44,16 @@ jest.mock("@/components/BoardThemePicker", () => ({
   default: () => null,
 }));
 
+const mockSelectTime = jest.fn();
+jest.mock("@/hooks/useOnlineTimePref", () => ({
+  useOnlineTimePref: () => ({ seconds: 600, select: mockSelectTime }),
+}));
+
 import SettingsScreen from "../SettingsScreen";
+
+beforeEach(() => {
+  mockSelectTime.mockClear();
+});
 
 function renderScreen() {
   let tree!: renderer.ReactTestRenderer;
@@ -70,5 +81,64 @@ describe("SettingsScreen — identificação da build", () => {
       (t) => /v?\d+\.\d+\.\d+/.test(t) && t !== "Versão 9.9.9 (build 42)"
     );
     expect(hardcoded).toEqual([]);
+  });
+});
+
+// Item 7: a preferência de TEMPO mora em Ajustes e alimenta a busca rápida.
+describe("SettingsScreen — preferência de tempo de partida online", () => {
+  it("oferece todos os tempos humanos válidos", () => {
+    const textos = textsOf(renderScreen());
+    for (const tc of HUMAN_TIME_CONTROLS) {
+      expect(textos).toContain(tc.label);
+    }
+  });
+
+  it("explica que o tempo vale para a busca rápida", () => {
+    expect(textsOf(renderScreen()).join(" ")).toContain(
+      "Tempo usado pela busca rápida"
+    );
+  });
+
+  it("tocar num tempo salva a preferência", () => {
+    const tree = renderScreen();
+    const chip = tree.root.find(
+      (n) =>
+        typeof n.props?.onPress === "function" &&
+        n.props?.accessibilityLabel === "3 min, Rápido"
+    );
+
+    act(() => chip.props.onPress());
+
+    expect(mockSelectTime).toHaveBeenCalledWith(180);
+  });
+
+  it("só o tempo salvo aparece marcado como selecionado", () => {
+    const tree = renderScreen();
+    // Um Pressable vira vários nós na árvore carregando as mesmas props —
+    // desduplicar pelo rótulo é o que corresponde a "quantas opções estão
+    // marcadas" do ponto de vista de quem usa.
+    const selecionados = new Set(
+      tree.root
+        .findAll(
+          (n) =>
+            n.props?.accessibilityRole === "radio" &&
+            n.props?.accessibilityState?.selected
+        )
+        .map((n) => n.props.accessibilityLabel)
+    );
+
+    expect([...selecionados]).toEqual(["10 min, Pensado"]);
+  });
+
+  it("NÃO oferece preferência de cor — cor é automática ou por partida", () => {
+    const textos = textsOf(renderScreen()).join(" ").toLowerCase();
+    expect(textos).not.toContain("brancas");
+    expect(textos).not.toContain("pretas");
+  });
+
+  it("NÃO oferece toggle de 'valer rating' — partida humana sempre vale", () => {
+    const textos = textsOf(renderScreen()).join(" ").toLowerCase();
+    expect(textos).not.toContain("ranqueada");
+    expect(textos).not.toContain("amistosa");
   });
 });

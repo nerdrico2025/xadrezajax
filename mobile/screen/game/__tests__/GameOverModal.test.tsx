@@ -43,6 +43,10 @@ function render(props: Partial<React.ComponentProps<typeof GameOverModal>> = {})
     tree = renderer.create(
       <GameOverModal
         result={props.result ?? { outcome: "win", reason: "checkmate" }}
+        // Default "ai" só porque a maioria destes testes é da tela vs IA —
+        // os testes de modo passam o valor explicitamente.
+        mode={props.mode ?? "ai"}
+        ratingOutcome={props.ratingOutcome}
         onNewGame={props.onNewGame ?? jest.fn()}
         onLeave={props.onLeave ?? jest.fn()}
         campaignUnlock={props.campaignUnlock}
@@ -53,16 +57,37 @@ function render(props: Partial<React.ComponentProps<typeof GameOverModal>> = {})
   return tree;
 }
 
-/** Qualquer texto renderizado na árvore, concatenado. */
+/** Acha o Pressable mais próximo que responde ao toque, subindo a árvore. */
+function pressableWithText(root: ReactTestInstance, text: string) {
+  let node: ReactTestInstance | null = root.findAll(
+    (n) => n.props?.children === text
+  )[0];
+  while (node && typeof node.props?.onPress !== "function") {
+    node = node.parent as ReactTestInstance | null;
+  }
+  return node;
+}
+
+/**
+ * Qualquer texto renderizado na árvore, concatenado.
+ *
+ * Filhos numéricos contam: o delta e o rating chegam como number
+ * (`{delta}` → 12), e descartá-los faria um teste de "+12" passar vendo só
+ * o "+". Dentro de um mesmo <Text>, os pedaços são colados sem separador —
+ * é assim que o usuário lê ("+" + 12 = "+12").
+ */
 function allText(root: ReactTestInstance): string {
+  const flatten = (c: unknown): string =>
+    Array.isArray(c)
+      ? c.map(flatten).join("")
+      : typeof c === "string" || typeof c === "number"
+      ? String(c)
+      : "";
+
   return root
     .findAll((n) => typeof n.type === "string")
-    .flatMap((n) => {
-      const c = n.props?.children;
-      if (typeof c === "string") return [c];
-      if (Array.isArray(c)) return c.filter((x) => typeof x === "string") as string[];
-      return [];
-    })
+    .map((n) => flatten(n.props?.children))
+    .filter(Boolean)
     .join(" | ");
 }
 
@@ -100,8 +125,91 @@ describe("GameOverModal — Modo Campanha (feedback de desbloqueio)", () => {
       result: { outcome: "loss", reason: "checkmate" },
       campaignUnlock: null,
     });
-    expect(hasText(tree.root, "IA venceu!")).toBe(true);
+    expect(hasText(tree.root, "A IA venceu!")).toBe(true);
     expect(hasText(tree.root, "dominado!")).toBe(false);
+  });
+});
+
+// O modal é o MESMO componente nas duas telas. Antes ele era fixo em "vs IA":
+// dizia "IA venceu!" e "Partida contra a IA — seu rating não mudou" também
+// numa partida humana ranqueada.
+describe("GameOverModal — rótulo pelo modo REAL da partida", () => {
+  it("vs IA: diz que não vale rating e não mostra delta", () => {
+    const tree = render({ mode: "ai" });
+    const texto = allText(tree.root);
+
+    expect(texto).toContain("Partida contra a IA — não vale rating.");
+    expect(texto).not.toContain("Partida ranqueada");
+    expect(texto).not.toContain("atualizando rating");
+  });
+
+  it("derrota vs IA culpa a IA; derrota online culpa o oponente", () => {
+    const perdaIA = render({ mode: "ai", result: { outcome: "loss", reason: "resign" } });
+    expect(hasText(perdaIA.root, "A IA venceu!")).toBe(true);
+
+    const perdaOnline = render({
+      mode: "online",
+      result: { outcome: "loss", reason: "resign" },
+    });
+    expect(hasText(perdaOnline.root, "Seu oponente venceu!")).toBe(true);
+    // O bug antigo: partida humana anunciando a IA como vencedora.
+    expect(allText(perdaOnline.root)).not.toContain("IA");
+  });
+
+  it("online: anuncia partida ranqueada e nunca a nota de IA", () => {
+    const tree = render({ mode: "online" });
+    const texto = allText(tree.root);
+
+    expect(texto).toContain("Partida ranqueada");
+    expect(texto).not.toContain("Partida contra a IA");
+    expect(texto).not.toContain("não vale rating");
+  });
+});
+
+describe("GameOverModal — delta de rating (vem do servidor, nunca calculado aqui)", () => {
+  it("ganho aparece com sinal + e o rating novo ao lado", () => {
+    const tree = render({
+      mode: "online",
+      ratingOutcome: { rated: true, delta: 12, rating: 1512 },
+    });
+    const texto = allText(tree.root);
+
+    expect(texto).toContain("+12");
+    expect(texto).toContain("1512");
+  });
+
+  it("perda aparece com o sinal negativo do próprio número", () => {
+    const tree = render({
+      mode: "online",
+      result: { outcome: "loss", reason: "timeout" },
+      ratingOutcome: { rated: true, delta: -8, rating: 1492 },
+    });
+    const texto = allText(tree.root);
+
+    expect(texto).toContain("-8");
+    // Sem "+-8": o sinal + só entra em delta positivo.
+    expect(texto).not.toContain("+-8");
+  });
+
+  it("delta zero aparece sem sinal", () => {
+    const tree = render({
+      mode: "online",
+      result: { outcome: "draw", reason: "agreement" },
+      ratingOutcome: { rated: true, delta: 0, rating: 1500 },
+    });
+    const texto = allText(tree.root);
+
+    expect(texto).toContain("0");
+    expect(texto).not.toContain("+0");
+  });
+
+  it("enquanto o servidor não responde, mostra que está atualizando — sem número inventado", () => {
+    const tree = render({ mode: "online", ratingOutcome: null });
+    const texto = allText(tree.root);
+
+    expect(texto).toContain("atualizando rating");
+    // O modal abre antes do round-trip; o que não pode é aparecer um delta.
+    expect(texto).not.toMatch(/[+-]\d/);
   });
 });
 
@@ -116,9 +224,23 @@ describe("GameOverModal — bloco de diagnóstico da IA (só em preview/QA)", ()
     expect(texto).not.toContain("Diagnóstico da IA");
   });
 
-  it("com a flag ligada, o PGN aparece selecionável para copiar", () => {
+  it("com a flag ligada, aparece só um link discreto — o PGN começa FECHADO", () => {
     mockQaPgn = true;
     const tree = render({ diagnosticPgn: PGN_DE_EXEMPLO });
+    const texto = allText(tree.root);
+
+    expect(texto).toContain("ver PGN (debug)");
+    // O bloco grande de tags e lances não ocupa mais o modal de vitória.
+    expect(texto).not.toContain("[Event");
+    expect(texto).not.toContain("1. e4");
+  });
+
+  it("tocando no link, o PGN abre selecionável para copiar", () => {
+    mockQaPgn = true;
+    const tree = render({ diagnosticPgn: PGN_DE_EXEMPLO });
+
+    act(() => pressableWithText(tree.root, "ver PGN (debug)")!.props.onPress());
+
     const texto = allText(tree.root);
     expect(texto).toContain("[Event");
     expect(texto).toContain("Diagnóstico da IA · toque e segure para copiar");
@@ -128,15 +250,28 @@ describe("GameOverModal — bloco de diagnóstico da IA (só em preview/QA)", ()
     expect(pgn).toHaveLength(1);
   });
 
+  it("o link fecha de volta", () => {
+    mockQaPgn = true;
+    const tree = render({ diagnosticPgn: PGN_DE_EXEMPLO });
+
+    act(() => pressableWithText(tree.root, "ver PGN (debug)")!.props.onPress());
+    act(() =>
+      pressableWithText(tree.root, "ocultar PGN (debug)")!.props.onPress()
+    );
+
+    expect(allText(tree.root)).not.toContain("[Event");
+  });
+
   it("modal de produção fica enxuto: troféu, motivo, nota de rating e os 2 botões", () => {
     const tree = render({ diagnosticPgn: PGN_DE_EXEMPLO });
     expect(hasText(tree.root, "Você venceu!")).toBe(true);
     expect(hasText(tree.root, "Xeque-mate")).toBe(true);
-    expect(hasText(tree.root, "Partida contra a IA — seu rating não mudou.")).toBe(true);
+    expect(hasText(tree.root, "Partida contra a IA — não vale rating.")).toBe(true);
     expect(hasText(tree.root, "Novo jogo")).toBe(true);
     expect(hasText(tree.root, "Voltar")).toBe(true);
-    // Nada entre colchetes em nenhum texto da tela.
+    // Nada entre colchetes em nenhum texto da tela, e nem o link de debug.
     expect(allText(tree.root)).not.toMatch(/\[[A-Za-z]+ "/);
+    expect(allText(tree.root)).not.toContain("ver PGN");
   });
 });
 

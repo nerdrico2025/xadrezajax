@@ -14,9 +14,18 @@ export type {
   GamePlayer,
   OnlineGame,
   PlayerMeta,
+  RatingOutcome,
   SocketStatus,
   FriendInvitation,
 } from "./gameSocketReducer";
+
+/** O que o anfitrião escolhe explicitamente ao convidar um amigo (Item 5):
+ *  a cor que ELE joga (o convidado recebe a outra) e o tempo da partida.
+ *  Não há opção de "valer rating" — partida humana sempre vale. */
+export type HostGameSetup = {
+  color: GameColor;
+  timeControl: number;
+};
 
 // Espelha o TTL do servidor (60s) com folga: expira localmente antes para o
 // modal/botão não ficarem pendentes indefinidamente se a resposta nunca chegar.
@@ -144,6 +153,27 @@ export function useGameSocket() {
       })
     );
 
+    // Chega depois do game_over, com o Glicko-2 já aplicado no backend. O
+    // servidor manda os dois jogadores no mesmo payload; aqui só extraímos o
+    // nosso. Se a chamada ao Django falhar, este evento nunca vem e o modal
+    // simplesmente não mostra número — nunca um número inventado.
+    socket.on("game_rated", (data: any) => {
+      const myId = parseUserId(tokenRef.current ?? "");
+      const mine = myId ? data.players?.[myId] : null;
+      if (!mine) return;
+      dispatch({
+        type: "GAME_RATED",
+        gameId: data.game_id,
+        outcome: {
+          rated: data.rated !== false,
+          rating: mine.rating,
+          ratingBefore: mine.rating_before,
+          delta: mine.delta,
+          provisional: !!mine.provisional,
+        },
+      });
+    });
+
     socket.on("opponent_disconnected", () =>
       dispatch({ type: "OPPONENT_DISCONNECTED" })
     );
@@ -168,11 +198,20 @@ export function useGameSocket() {
       dispatch({ type: "ERROR", error: message })
     );
 
-    socket.on("friend_invitation", ({ from_id, from_name, room_code }: any) =>
-      dispatch({
-        type: "FRIEND_INVITATION",
-        invitation: { fromId: String(from_id), fromName: from_name, roomCode: room_code },
-      })
+    socket.on(
+      "friend_invitation",
+      ({ from_id, from_name, room_code, time_control, your_color }: any) =>
+        dispatch({
+          type: "FRIEND_INVITATION",
+          invitation: {
+            fromId: String(from_id),
+            fromName: from_name,
+            roomCode: room_code,
+            // Já decididos pelo anfitrião — o convite só informa.
+            timeControl: time_control ?? null,
+            yourColor: your_color ?? null,
+          },
+        })
     );
 
     socketRef.current = socket;
@@ -233,11 +272,21 @@ export function useGameSocket() {
   // `meta` é a identidade que o OPONENTE vai ver no topo da tela de jogo. Sem
   // ela o servidor monta o jogador só com o id e a tela cai em "Jogador #N" —
   // era exatamente o que acontecia em sala (a fila rápida já mandava).
-  const createRoom = useCallback((meta: PlayerMeta = {}) => {
-    const socket = socketRef.current;
-    if (!socket?.connected || stateRef.current.status !== "connected") return;
-    socket.emit("create_room", meta);
-  }, []);
+  //
+  // `setup` é a escolha explícita do anfitrião (cor + tempo). O servidor
+  // valida os dois antes de gravar na sala — aqui é sugestão, não decisão.
+  const createRoom = useCallback(
+    (meta: PlayerMeta = {}, setup?: HostGameSetup) => {
+      const socket = socketRef.current;
+      if (!socket?.connected || stateRef.current.status !== "connected") return;
+      socket.emit("create_room", {
+        ...meta,
+        color: setup?.color,
+        time_control: setup?.timeControl,
+      });
+    },
+    []
+  );
 
   const joinRoom = useCallback((code: string, meta: PlayerMeta = {}) => {
     const socket = socketRef.current;
@@ -311,8 +360,11 @@ export function useGameSocket() {
   }, []);
 
   const inviteFriend = useCallback(
-    (toUserId: number, meta: PlayerMeta = {}) => {
-      socketRef.current?.emit("invite_friend", { to_user_id: toUserId, meta });
+    (toUserId: number, meta: PlayerMeta = {}, setup?: HostGameSetup) => {
+      socketRef.current?.emit("invite_friend", {
+        to_user_id: toUserId,
+        meta: { ...meta, color: setup?.color, time_control: setup?.timeControl },
+      });
     },
     []
   );
@@ -332,6 +384,7 @@ export function useGameSocket() {
     incomingDrawOffer: state.incomingDrawOffer,
     outgoingDrawOffer: state.outgoingDrawOffer,
     drawOfferDeclined: state.drawOfferDeclined,
+    ratingOutcome: state.ratingOutcome,
     joinQueue,
     leaveQueue,
     createRoom,
