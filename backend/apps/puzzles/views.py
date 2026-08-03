@@ -101,7 +101,11 @@ class DailyPuzzleView(APIView):
             user=request.user, puzzle=puzzle
         ).first()
         exhausted = bool(progress and progress.is_exhausted_today())
-        solved = bool(progress and progress.solved)
+        # `is_solved_today()`, não `solved`: o segundo é permanente e pertence
+        # à progressão do Treino. Com o ciclo de 7 dias do diário, todo
+        # problema que voltava já tinha solved=True de um ciclo anterior e o
+        # usuário ficava preso em "volte amanhã" indefinidamente.
+        solved = bool(progress and progress.is_solved_today())
         attempts_used = progress.attempts_used_today() if progress else 0
 
         # A solução acompanha o payload porque a validação de lance é feita no
@@ -309,11 +313,24 @@ class PuzzleProgressView(APIView):
             if progress.daily_attempts_date != today:
                 progress.daily_attempts = 0
                 progress.daily_attempts_date = today
-            if not solved:
+            if solved:
+                # ÚNICO lugar que carimba o diário como resolvido. O Treino
+                # nunca passa por aqui, mesmo resolvendo o mesmo puzzle_id no
+                # mesmo dia — diário e treino são estados independentes.
+                #
+                # Incondicional (não é `if not progress.daily_solved_date`):
+                # um problema que volta pelo ciclo de 7 dias precisa poder ser
+                # marcado de novo, com a data de hoje.
+                progress.daily_solved_date = today
+            else:
                 progress.daily_attempts += 1
                 if progress.daily_attempts >= DAILY_PUZZLE_MAX_ATTEMPTS:
                     progress.exhausted_at = timezone.now()
 
+        # `solved`/`solved_at` seguem sendo a PRIMEIRA resolução, por qualquer
+        # fluxo: é progressão de Treino e fonte do streak. Não são reescritos
+        # numa re-resolução — e é por isso que o diário precisa do carimbo
+        # próprio acima.
         if solved and not progress.solved:
             progress.solved = True
             progress.solved_at = timezone.now()
@@ -372,7 +389,11 @@ class PuzzleStatsView(APIView):
             if daily
             else None
         )
-        daily_solved = bool(daily_progress and daily_progress.solved)
+        # Estado do DIÁRIO (por data), não a progressão do Treino — é este
+        # campo que vira o "Resolvido hoje — volte amanhã" no card da Home.
+        # `solved` logo acima continua permanente de propósito: ele conta
+        # quantos problemas o usuário já resolveu na vida.
+        daily_solved = bool(daily_progress and daily_progress.is_solved_today())
         daily_exhausted = bool(daily_progress and daily_progress.is_exhausted_today())
 
         return Response(

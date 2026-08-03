@@ -382,6 +382,21 @@ class DailyExhaustionTests(CleanPuzzleBankMixin, APITestCase):
             UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily).solved
         )
 
+    def test_resolver_o_diario_carimba_a_data_de_hoje(self):
+        """(b) Resolver hoje marca corretamente como resolvido HOJE."""
+        self.client.post(
+            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
+        )
+
+        progress = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
+        self.assertEqual(progress.daily_solved_date, timezone.localdate())
+        self.assertTrue(progress.is_solved_today())
+
+        response = self.client.get(DAILY_URL)
+        self.assertTrue(response.data["already_solved"])
+        self.assertTrue(self.client.get(STATS_URL).data["daily_solved"])
+        self.assertFalse(self.client.get(STATS_URL).data["daily_available"])
+
     def test_esgotamento_de_ontem_nao_vale_hoje(self):
         progress = UserPuzzleProgress.objects.create(
             user=self.user,
@@ -395,6 +410,207 @@ class DailyExhaustionTests(CleanPuzzleBankMixin, APITestCase):
         self.assertFalse(response.data["exhausted"])
         self.assertEqual(response.data["attempts_left"], DAILY_PUZZLE_MAX_ATTEMPTS)
         self.assertIn("solution", response.data)
+
+
+class DailyReciclagemTests(CleanPuzzleBankMixin, APITestCase):
+    """REGRESSÃO — "resolvi há 5 dias, o app diz 'volte amanhã' para sempre".
+
+    Causa raiz: `UserPuzzleProgress.solved` é permanente por (usuário,
+    problema) e não olha data. Com poucos problemas no banco o ciclo do diário
+    repete rápido, e todo problema que voltava a ser "o de hoje" já tinha
+    solved=True de um ciclo anterior — `already_solved` vinha True todos os
+    dias, para um problema DIFERENTE a cada dia.
+
+    O estado do diário passa a ser `daily_solved_date`, escrito só pelo fluxo
+    do diário e comparado com a data de hoje.
+    """
+
+    def setUp(self):
+        super().setUp()
+        make_puzzle("Único")
+        self.user = make_user()
+        self.client.force_authenticate(user=self.user)
+        self.daily = get_daily_puzzle()
+
+    def solve_daily(self):
+        return self.client.post(
+            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
+        )
+
+    # ── (a) o bug relatado ────────────────────────────────────────────────
+    def test_problema_resolvido_ha_5_dias_volta_jogavel_ao_reaparecer(self):
+        """O caso do Rafael: resolvido num ciclo anterior, hoje é o diário de
+        novo, e precisa estar jogável."""
+        UserPuzzleProgress.objects.create(
+            user=self.user,
+            puzzle=self.daily,
+            solved=True,
+            solved_at=timezone.now() - timedelta(days=5),
+            daily_solved_date=timezone.localdate() - timedelta(days=5),
+        )
+
+        response = self.client.get(DAILY_URL)
+        self.assertFalse(response.data["already_solved"])
+        self.assertFalse(response.data["exhausted"])
+        self.assertEqual(response.data["attempts_left"], DAILY_PUZZLE_MAX_ATTEMPTS)
+
+        stats = self.client.get(STATS_URL).data
+        self.assertFalse(stats["daily_solved"])
+        self.assertTrue(stats["daily_available"])
+
+    def test_e_pode_resolver_de_novo_carimbando_a_data_de_hoje(self):
+        """Não basta aparecer jogável: resolver tem que REGISTRAR.
+
+        `solved_at` sozinho não daria conta — ele só é escrito na primeira
+        resolução (`if solved and not progress.solved`), então numa
+        re-resolução o carimbo nunca avançaria e o diário ficaria eternamente
+        "não resolvido hoje", o bug espelhado.
+        """
+        UserPuzzleProgress.objects.create(
+            user=self.user,
+            puzzle=self.daily,
+            solved=True,
+            solved_at=timezone.now() - timedelta(days=5),
+            daily_solved_date=timezone.localdate() - timedelta(days=5),
+        )
+
+        self.assertTrue(self.solve_daily().data["solved"])
+
+        progress = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
+        self.assertEqual(progress.daily_solved_date, timezone.localdate())
+        self.assertTrue(self.client.get(DAILY_URL).data["already_solved"])
+
+    def test_solve_antigo_nao_e_reescrito_pela_re_resolucao(self):
+        """O streak conta a PRIMEIRA resolução — re-resolver não a desloca."""
+        original = timezone.now() - timedelta(days=5)
+        UserPuzzleProgress.objects.create(
+            user=self.user,
+            puzzle=self.daily,
+            solved=True,
+            solved_at=original,
+            daily_solved_date=timezone.localdate() - timedelta(days=5),
+        )
+
+        self.solve_daily()
+
+        progress = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
+        self.assertEqual(progress.solved_at, original)
+
+    # ── (c) desacoplamento Treino × Diário ────────────────────────────────
+    def test_resolver_no_treino_nao_marca_o_diario_do_mesmo_dia(self):
+        """Decisão de 2026-08-03: são estados independentes, mesmo sendo o
+        MESMO puzzle_id na MESMA data.
+
+        Este é o teste que prova por que `solved_at` não serve como fonte: ele
+        seria carimbado com hoje aqui, e o diário apareceria como resolvido
+        sem o usuário ter jogado o diário.
+        """
+        make_paid(self.user)
+        treino = make_puzzle("Outro do treino")
+        # Garante que o problema resolvido no Treino é o MESMO do diário.
+        self.assertNotEqual(treino.id, self.daily.id)
+
+        response = self.client.post(
+            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
+        )
+        # O `progress/` do diário É o fluxo do diário — resolver por aqui conta.
+        self.assertEqual(response.data["mode"], "daily")
+        self.assertTrue(self.client.get(DAILY_URL).data["already_solved"])
+
+    def test_treino_no_mesmo_dia_nao_vaza_para_o_diario(self):
+        """Resolver OUTRO problema no Treino hoje não toca o estado do diário."""
+        make_paid(self.user)
+        treino = make_puzzle("Só do treino")
+
+        self.client.post(
+            progress_url(treino), {"solved": True, "attempts": 1}, format="json"
+        )
+
+        progress = UserPuzzleProgress.objects.get(user=self.user, puzzle=treino)
+        self.assertTrue(progress.solved)  # progressão do Treino: permanente
+        self.assertIsNone(progress.daily_solved_date)  # diário: intocado
+        self.assertFalse(progress.is_solved_today())
+        self.assertFalse(self.client.get(DAILY_URL).data["already_solved"])
+
+    def test_treino_do_proprio_problema_do_dia_nao_marca_o_diario(self):
+        """O caso limite da decisão: o problema do dia alcançado pelo Treino.
+
+        Hoje o `progress/` do diário e o do Treino são o mesmo endpoint, e ele
+        classifica pelo pk — então este cenário não é alcançável pela API (o
+        pk do diário sempre entra como `mode: daily`). O teste trava a regra no
+        MODELO, que é onde ela vale se um dia houver outra porta de entrada.
+        """
+        progress = UserPuzzleProgress.objects.create(
+            user=self.user,
+            puzzle=self.daily,
+            solved=True,
+            solved_at=timezone.now(),  # resolvido HOJE, mas não pelo diário
+        )
+        self.assertTrue(progress.solved)
+        self.assertIsNone(progress.daily_solved_date)
+        self.assertFalse(progress.is_solved_today())
+        self.assertFalse(self.client.get(DAILY_URL).data["already_solved"])
+
+    # ── (d) linha legada ──────────────────────────────────────────────────
+    def test_linha_legada_sem_solved_at_conta_como_nao_resolvida_hoje(self):
+        """Pré-redesenho: solved=True, solved_at=NULL. Decisão de 2026-08-03 —
+        volta a ser jogável, e é isso que destrava quem está preso agora."""
+        progress = UserPuzzleProgress.objects.create(
+            user=self.user, puzzle=self.daily, solved=True, solved_at=None
+        )
+
+        self.assertFalse(progress.is_solved_today())
+        self.assertFalse(self.client.get(DAILY_URL).data["already_solved"])
+        self.assertTrue(self.client.get(STATS_URL).data["daily_available"])
+
+    def test_linha_pre_migration_sem_daily_solved_date_e_jogavel(self):
+        """Toda linha existente nasce com daily_solved_date=NULL (a migration
+        é aditiva e sem backfill) — nenhuma delas pode travar o diário."""
+        UserPuzzleProgress.objects.create(
+            user=self.user,
+            puzzle=self.daily,
+            solved=True,
+            solved_at=timezone.now(),
+            daily_solved_date=None,
+        )
+        self.assertFalse(self.client.get(DAILY_URL).data["already_solved"])
+
+    # ── o que NÃO pode ter mudado ─────────────────────────────────────────
+    def test_progressao_do_treino_continua_permanente(self):
+        """`solved` não vira estado diário: o mapa e o contador do stats/
+        continuam contando 'já resolvi este problema alguma vez'."""
+        make_paid(self.user)
+        antigo = make_puzzle("Resolvido faz tempo")
+        UserPuzzleProgress.objects.create(
+            user=self.user,
+            puzzle=antigo,
+            solved=True,
+            solved_at=timezone.now() - timedelta(days=30),
+        )
+
+        no_mapa = next(
+            item for item in self.client.get(MAP_URL).data if item["id"] == antigo.id
+        )
+        self.assertTrue(no_mapa["is_solved"])
+        self.assertGreaterEqual(self.client.get(STATS_URL).data["solved"], 1)
+
+    def test_esgotado_hoje_continua_valendo_mesmo_com_o_diario_jogavel(self):
+        """As duas regras de data convivem: resolvido num ciclo antigo (logo,
+        jogável) mas esgotado HOJE continua esgotado."""
+        UserPuzzleProgress.objects.create(
+            user=self.user,
+            puzzle=self.daily,
+            solved=True,
+            solved_at=timezone.now() - timedelta(days=5),
+            daily_solved_date=timezone.localdate() - timedelta(days=5),
+            exhausted_at=timezone.now(),
+            daily_attempts=DAILY_PUZZLE_MAX_ATTEMPTS,
+            daily_attempts_date=timezone.localdate(),
+        )
+
+        response = self.client.get(DAILY_URL)
+        self.assertFalse(response.data["already_solved"])
+        self.assertTrue(response.data["exhausted"])
 
 
 class StatsTests(CleanPuzzleBankMixin, APITestCase):

@@ -142,9 +142,15 @@ class UserPuzzleProgress(models.Model):
     puzzle = models.ForeignKey(
         Puzzle, on_delete=models.CASCADE, related_name="user_progress"
     )
+    # Progressão do TREINO: "já resolvi este problema alguma vez". Permanente
+    # de propósito — é o que o mapa do Treino e o contador do `stats/` usam.
+    # NÃO serve para o Problema do dia: ver `daily_solved_date` abaixo.
     solved = models.BooleanField(default=False)
     # Total acumulado de tentativas em todas as sessões — alimenta o `stats/`.
     attempts = models.IntegerField(default=0)
+    # Primeira resolução, por QUALQUER fluxo (diário ou treino). Alimenta o
+    # streak (`_current_streak`), que conta os dois. Não distingue origem, e
+    # por isso não pode decidir o estado do diário.
     solved_at = models.DateTimeField(null=True, blank=True)
     # Momento em que o usuário gastou as tentativas do dia neste problema.
     # Carimbado SEMPRE pelo servidor (nunca pelo cliente) e comparado por data:
@@ -163,6 +169,29 @@ class UserPuzzleProgress(models.Model):
     daily_attempts_date = models.DateField(
         null=True, blank=True, verbose_name="Data das tentativas"
     )
+    # Data em que este problema foi resolvido COMO PROBLEMA DO DIA. Escrito
+    # exclusivamente pelo fluxo do diário (PuzzleProgressView, ramo is_daily).
+    #
+    # POR QUE UM CAMPO NOVO EM VEZ DE DERIVAR DE `solved_at`:
+    #   1. `solved_at` não distingue a ORIGEM — é carimbado igual pelo Treino
+    #      (views.py, mesmo bloco). Resolver o problema #4 no Treino hoje
+    #      marcaria o diário de hoje como resolvido, que é exatamente o
+    #      desacoplamento pedido (decisão de 2026-08-03: diário e treino são
+    #      estados independentes, mesmo com o mesmo puzzle_id no mesmo dia).
+    #   2. `solved_at` só é gravado na PRIMEIRA resolução (`if solved and not
+    #      progress.solved`). Num problema que volta pelo ciclo de 7 dias,
+    #      resolver de novo não atualizaria o carimbo — o diário nunca
+    #      chegaria ao estado "resolvido hoje".
+    #   3. Reaproveitar `daily_attempts_date` não serve: ele marca "interagiu
+    #      com o diário hoje", inclusive em tentativa ERRADA. Combinado com
+    #      solved_at daria falso positivo para quem erra no diário e depois
+    #      acerta o mesmo problema no Treino, no mesmo dia.
+    #
+    # Nullable, sem backfill: linha antiga conta como não-resolvida-hoje, que é
+    # justamente o que destrava quem está preso (decisão de 2026-08-03).
+    daily_solved_date = models.DateField(
+        null=True, blank=True, verbose_name="Diário resolvido em"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -176,6 +205,23 @@ class UserPuzzleProgress(models.Model):
             return False
         today = today or timezone.localdate()
         return timezone.localtime(self.exhausted_at).date() == today
+
+    def is_solved_today(self, today=None):
+        """True se este problema foi resolvido HOJE, pelo Problema do dia.
+
+        Simétrico a `is_exhausted_today`: os dois são estado do DIÁRIO, valem
+        por um dia e deixam de valer sozinhos na virada, sem job de limpeza.
+
+        Não é o mesmo que `solved`, que é permanente e pertence à progressão
+        do Treino. Era justamente essa confusão que travava o diário: com 7
+        problemas, o ciclo repete a cada 7 dias, e todo problema que voltava
+        já tinha `solved=True` de um ciclo anterior — o backend respondia
+        `already_solved` todo dia, com um problema diferente a cada dia.
+        """
+        if not self.daily_solved_date:
+            return False
+        today = today or timezone.localdate()
+        return self.daily_solved_date == today
 
     def attempts_used_today(self, today=None):
         """Tentativas já gastas hoje — zero se o carimbo é de outro dia."""
