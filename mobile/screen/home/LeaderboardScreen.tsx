@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/context/AuthContext";
 import { Colors } from "@/constants/theme";
+import Button from "@/components/Button";
 import { getLeaderboard, type LeaderboardEntry } from "@/services/profile";
 
 interface Props {
@@ -29,13 +30,27 @@ export default function LeaderboardScreen({ onBack }: Props) {
 
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  // Falha do último fetch. Antes o catch engolia o erro em silêncio: a tela
+  // ficava exibindo a lista anterior sem nenhum indício de que os dados
+  // estavam velhos — foi assim que uma conta já EXCLUÍDA continuou aparecendo
+  // no ranking durante o teste em device. Regra do PR #77: erro sempre visível.
+  const [error, setError] = useState<string | null>(null);
+  // `entries` sozinho não distingue "nunca carregou" de "carregou vazio" — e
+  // vazio é um estado legítimo aqui (ninguém jogou partida ranqueada ainda).
+  // Sem isto, uma falha depois de um carregamento vazio cairia na tela de
+  // erro de primeiro carregamento, que é o estado errado.
+  const [everLoaded, setEverLoaded] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const data = await getLeaderboard(50);
       setEntries(data);
-    } catch {
-      // silently ignore
+      setEverLoaded(true);
+      setError(null);
+    } catch (e: unknown) {
+      // Mantém `entries` como está de propósito: com dados já na tela, some
+      // o ranking inteiro seria pior que mostrá-lo marcado como desatualizado.
+      setError((e as Error)?.message ?? "Falha ao carregar a classificação");
     } finally {
       setLoading(false);
     }
@@ -100,9 +115,45 @@ export default function LeaderboardScreen({ onBack }: Props) {
         </Pressable>
       </View>
 
+      {/* Falha COM dados já na tela: a lista continua visível, marcada como
+          possivelmente desatualizada. Mesmo padrão do aviso de reconexão da
+          partida online (OnlineGameScreen) — faixa em colors.warning. */}
+      {error && everLoaded && (
+        <View
+          style={[styles.staleBanner, { backgroundColor: colors.warning + "DD" }]}
+          accessibilityLiveRegion="polite"
+        >
+          <Ionicons name="cloud-offline-outline" size={15} color="#000" />
+          <Text style={styles.staleText}>
+            Não foi possível atualizar o ranking — os dados podem estar
+            desatualizados.
+          </Text>
+          <Pressable
+            onPress={load}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Tentar novamente"
+          >
+            <Text style={styles.staleRetry}>Tentar novamente</Text>
+          </Pressable>
+        </View>
+      )}
+
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : error && !everLoaded ? (
+        /* PRIMEIRO carregamento falhou: não há o que mostrar, então é estado
+           de erro cheio — mesmo desenho da PuzzleScreen (ícone, título, causa
+           e botão de retry). Nunca tela em branco. */
+        <View style={styles.centered}>
+          <Ionicons name="cloud-offline-outline" size={48} color={colors.icon} />
+          <Text style={[styles.errorTitle, { color: colors.text }]}>
+            Não foi possível carregar
+          </Text>
+          <Text style={[styles.errorSub, { color: colors.secondary }]}>{error}</Text>
+          <Button title="Tentar novamente" variant="accent" onPress={load} />
         </View>
       ) : entries.length === 0 ? (
         <View style={styles.centered}>
@@ -138,6 +189,30 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: "700" },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   empty: { fontSize: 14 },
+  // Estado de erro do primeiro carregamento (padrão da PuzzleScreen).
+  errorTitle: { fontSize: 20, fontWeight: "700", textAlign: "center" },
+  errorSub: {
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
+    paddingHorizontal: 32,
+  },
+  // Faixa de dado velho (padrão do aviso de reconexão da partida online).
+  // Texto preto porque o fundo é o amarelo de cautela do tema.
+  staleBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  staleText: { flex: 1, fontSize: 12, fontWeight: "600", color: "#000" },
+  staleRetry: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#000",
+    textDecorationLine: "underline",
+  },
   row: {
     flexDirection: "row",
     alignItems: "center",
