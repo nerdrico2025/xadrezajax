@@ -45,6 +45,27 @@ export type FriendInvitation = {
   fromId: string;
   fromName: string;
   roomCode: string;
+  /** Tempo já decidido pelo anfitrião, em segundos. */
+  timeControl: number | null;
+  /** Cor que sobrou para quem recebe o convite (o anfitrião escolheu a
+   *  outra). `null` em sala antiga, sem escolha gravada. */
+  yourColor: GameColor | null;
+};
+
+/**
+ * O que o rating fez nesta partida, calculado pelo Glicko-2 no SERVIDOR e
+ * repassado pelo evento `game_rated`. O app nunca calcula delta.
+ *
+ * Chega DEPOIS do `game_over`: o modal de fim de partida abre na hora e
+ * completa quando isto aparece, em vez de esperar o round-trip HTTP do
+ * node-api ao Django.
+ */
+export type RatingOutcome = {
+  rated: boolean;
+  rating: number;
+  ratingBefore: number;
+  delta: number;
+  provisional: boolean;
 };
 
 // ─── State machine ────────────────────────────────────────────────────────────
@@ -62,6 +83,10 @@ export type State = {
   incomingDrawOffer: boolean;
   outgoingDrawOffer: boolean;
   drawOfferDeclined: boolean;
+  /** Resultado do rating da partida que acabou. `null` até o `game_rated`
+   *  chegar (ou para sempre, se o backend não responder — melhor não mostrar
+   *  número nenhum do que mostrar um errado). */
+  ratingOutcome: RatingOutcome | null;
 };
 
 export type Action =
@@ -77,6 +102,7 @@ export type Action =
   | { type: "GAME_STARTED"; game: OnlineGame }
   | { type: "MOVE_MADE"; fen: string; turn: GameColor; check: boolean; lastMove: { from: string; to: string } | null; whiteTimeMs: number | null; blackTimeMs: number | null }
   | { type: "GAME_OVER"; winnerId: string | null; reason: string }
+  | { type: "GAME_RATED"; gameId: string; outcome: RatingOutcome }
   | { type: "OPPONENT_DISCONNECTED" }
   | { type: "MOVE_ERROR"; error: string }
   | { type: "OPPONENT_RECONNECTED" }
@@ -101,6 +127,7 @@ export const initialState: State = {
   incomingDrawOffer: false,
   outgoingDrawOffer: false,
   drawOfferDeclined: false,
+  ratingOutcome: null,
 };
 
 const noDrawOffers = {
@@ -170,6 +197,9 @@ export function gameSocketReducer(state: State, action: Action): State {
         roomCode: null,
         opponentDisconnected: false,
         error: null,
+        // Partida nova nunca herda o rating da anterior — na revanche o
+        // modal mostraria o delta da partida passada.
+        ratingOutcome: null,
         ...noDrawOffers,
       };
     case "MOVE_MADE":
@@ -196,6 +226,11 @@ export function gameSocketReducer(state: State, action: Action): State {
         },
         ...noDrawOffers,
       };
+    case "GAME_RATED":
+      // Ignora resultado de outra partida: um `game_rated` atrasado da
+      // partida anterior não pode pintar o modal da revanche.
+      if (!state.game || state.game.gameId !== action.gameId) return state;
+      return { ...state, ratingOutcome: action.outcome };
     case "OPPONENT_DISCONNECTED":
       // Proposta pendente expira — não deixa modal/botão travado esperando
       // resposta de quem caiu
@@ -211,6 +246,7 @@ export function gameSocketReducer(state: State, action: Action): State {
         opponentDisconnected: false,
         status: action.connected ? "connected" : "idle",
         error: null,
+        ratingOutcome: null,
         ...noDrawOffers,
       };
     case "FRIEND_INVITATION":

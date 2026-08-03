@@ -150,8 +150,16 @@ export interface LeaderboardEntry {
   rating: number;
   provisional: boolean;
   modality: RatingModality;
+  /** Partidas RANQUEADAS nesta modalidade — o mesmo campo que o servidor usa
+   *  para filtrar quem entra na lista. Antes vinha o total do perfil (que
+   *  soma vs IA e as outras modalidades) ao lado de um rating que não
+   *  considerava nada disso. */
   games_played: number;
-  wins: number;
+  /** Vitórias TOTAIS do perfil (todas as modalidades + vs IA). Não é
+   *  comparável com `games_played` — não existe contagem de vitórias por
+   *  modalidade no servidor, então não dá para derivar taxa de vitória
+   *  ranqueada a partir daqui. */
+  wins_total: number;
 }
 
 export async function getLeaderboard(limit = 50): Promise<LeaderboardEntry[]> {

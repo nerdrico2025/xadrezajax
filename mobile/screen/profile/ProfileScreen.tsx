@@ -238,8 +238,11 @@ export default function ProfileScreen() {
 
       {/* Estatísticas — dois blocos separados, nunca somados (decisão D2) */}
       <StatsBlockView title="Ranqueadas" stats={profile?.stats_ranked} colors={colors} />
+      {/* "vs IA e Amistosas" → "vs IA": não existe mais amistosa humana como
+          categoria (toda partida contra outra pessoa é ranqueada), então este
+          balde só recebe partidas vs IA. */}
       <StatsBlockView
-        title="vs IA e Amistosas"
+        title="vs IA"
         stats={profile?.stats_casual}
         colors={colors}
         footnote="Partidas contra a IA entram no seu histórico, mas não alteram seu rating."

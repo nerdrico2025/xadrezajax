@@ -45,9 +45,6 @@ export default function LeaderboardScreen({ onBack }: Props) {
 
   const renderItem = ({ item }: { item: LeaderboardEntry }) => {
     const isMe = item.user_id === user?.id;
-    const winRate = item.games_played > 0
-      ? Math.round((item.wins / item.games_played) * 100)
-      : 0;
 
     return (
       <View
@@ -73,8 +70,14 @@ export default function LeaderboardScreen({ onBack }: Props) {
             {item.username}
             {isMe ? " (você)" : ""}
           </Text>
+          {/* Só o nº de partidas ranqueadas da modalidade — o mesmo conjunto
+              que produziu o rating ao lado. A taxa de vitórias saiu: as
+              vitórias só existem como total do perfil (com vs IA dentro), e
+              dividir uma pela outra dava porcentagem sem significado (podia
+              passar de 100%). */}
           <Text style={[styles.meta, { color: colors.secondary }]}>
-            {item.games_played} partidas · {winRate}% vitórias
+            {item.games_played}{" "}
+            {item.games_played === 1 ? "partida ranqueada" : "partidas ranqueadas"}
           </Text>
         </View>
         {/* Destaque do próprio usuário em dourado (R2). accentOnLight passa AA no claro. */}

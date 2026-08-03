@@ -391,13 +391,18 @@ def _modality_from_request(data):
         return None
 
 
-def _is_unrated_request(data):
+def _is_clockless_request(data):
     """Partida sem relógio: chave `time_control` presente com valor None.
 
-    Decisão do PM (PLANO_FASE0 §8): essas partidas contam para
-    wins/losses/draws/games_played e para o GameHistory, mas não alteram
-    ModalityRating nem o espelho Profile.rating. Chave ausente é outro caso
-    (cliente antigo) e segue como blitz ratedo — não mexer.
+    ATENÇÃO — isto NÃO decide mais se a partida vale rating. Quem decide é o
+    MODO da partida, explicitamente (ver GameResultView/AiGameResultView):
+    humano-vs-humano SEMPRE vale, vs IA NUNCA vale. "Sem relógio" sobrou
+    apenas como critério do gating do plano Grátis em partidas vs IA, que
+    continua contando só as partidas COM relógio (regra de monetização
+    existente, RF-MON-05).
+
+    Chave ausente (clientes/node-api antigos) não é "sem relógio" — cai no
+    default blitz de `_modality_from_request`.
     """
     return "time_control" in data and data.get("time_control") is None
 
@@ -450,6 +455,17 @@ class GameResultView(APIView):
     Autenticado por INTERNAL_API_SECRET no header X-Internal-Secret.
     Sem throttle: é tráfego interno do node-api — o AnonRateThrottle global
     (20/min por IP) descartaria resultados em horário de pico de partidas.
+
+    TODA partida que chega aqui é humano-vs-humano, e TODA partida
+    humano-vs-humano vale rating — sem exceção, sem "amistosa humana"
+    (decisão de produto, 2026-08-02). `rated=True` é constante deste
+    endpoint, nunca derivado de `time_control` nem aceito do cliente; o
+    `time_control` só escolhe a MODALIDADE (bullet/blitz/rápido).
+
+    Antes disto o valor vinha de `time_control is None`, o que fazia o
+    relógio decidir se a partida contava — mesma classe de problema do furo
+    de spoofing fechado em node-api/src/socket/index.js (cliente decidindo
+    coisa que é do servidor).
     """
 
     authentication_classes = []
@@ -469,7 +485,6 @@ class GameResultView(APIView):
         # result: "white" | "black" | "draw"
         result = request.data.get("result")
         modality = _modality_from_request(request.data)
-        unrated = _is_unrated_request(request.data)
 
         if (
             not white_id
@@ -494,14 +509,8 @@ class GameResultView(APIView):
                     {"detail": "Perfil não encontrado."},
                     status=status.HTTP_404_NOT_FOUND,
                 )
-            if unrated:
-                # Partida sem relógio não mexe no rating: leitura sem
-                # lock/criação, só para histórico e resposta.
-                white_rating = _modality_rating_snapshot(white_profile, modality)
-                black_rating = _modality_rating_snapshot(black_profile, modality)
-            else:
-                white_rating = _locked_modality_rating(white_profile, modality)
-                black_rating = _locked_modality_rating(black_profile, modality)
+            white_rating = _locked_modality_rating(white_profile, modality)
+            black_rating = _locked_modality_rating(black_profile, modality)
 
             w_before = round(white_rating.rating)
             b_before = round(black_rating.rating)
@@ -534,12 +543,12 @@ class GameResultView(APIView):
                 black_profile.draws += 1
                 w_result = b_result = "draw"
 
-            if not unrated:
-                _apply_glicko2_result(white_rating, black_pre, score_white)
-                _apply_glicko2_result(black_rating, white_pre, score_black)
+            _apply_glicko2_result(white_rating, black_pre, score_white)
+            _apply_glicko2_result(black_rating, white_pre, score_black)
 
-                _sync_rating_mirror(white_profile, white_rating)
-                _sync_rating_mirror(black_profile, black_rating)
+            _sync_rating_mirror(white_profile, white_rating)
+            _sync_rating_mirror(black_profile, black_rating)
+
             white_profile.games_played += 1
             black_profile.games_played += 1
 
@@ -568,7 +577,9 @@ class GameResultView(APIView):
                 modality=modality,
                 rating_before=w_before,
                 rating_after=round(white_rating.rating),
-                rated=not unrated,
+                # Constante, não derivada: partida humano-vs-humano SEMPRE
+                # vale rating (ver docstring da view).
+                rated=True,
                 color=GameHistory.COLOR_WHITE,
             )
             GameHistory.objects.create(
@@ -579,20 +590,31 @@ class GameResultView(APIView):
                 modality=modality,
                 rating_before=b_before,
                 rating_after=round(black_rating.rating),
-                rated=not unrated,
+                rated=True,
                 color=GameHistory.COLOR_BLACK,
             )
 
+        # `rated`/`rating_before`/`delta` na resposta: o node-api repassa isto
+        # aos dois jogadores para a tela de resultado mostrar o delta REAL do
+        # Glicko-2 (+X/-Y) em vez de um texto genérico. O app nunca calcula o
+        # delta por conta própria — quem rateia é o servidor.
         return Response(
             {
                 "modality": modality,
+                "rated": True,
                 "white": {
+                    "id": white_profile.user_id,
                     "rating": round(white_rating.rating),
+                    "rating_before": w_before,
+                    "delta": round(white_rating.rating) - w_before,
                     "deviation": round(white_rating.deviation),
                     "provisional": white_rating.is_provisional,
                 },
                 "black": {
+                    "id": black_profile.user_id,
                     "rating": round(black_rating.rating),
+                    "rating_before": b_before,
+                    "delta": round(black_rating.rating) - b_before,
                     "deviation": round(black_rating.deviation),
                     "provisional": black_rating.is_provisional,
                 },
@@ -614,11 +636,11 @@ class AiGameResultView(APIView):
         result = request.data.get("result")
         difficulty = request.data.get("difficulty", "medium")
         modality = _modality_from_request(request.data)
-        # Decisão D1: TODA partida vs IA é congelada para efeito de rating —
-        # nunca altera o Glicko-2, tenha relógio ou não. `no_clock` fica só
-        # para o gating do plano Grátis (que continua contando as partidas
-        # COM relógio, preservando a regra de monetização existente).
-        no_clock = _is_unrated_request(request.data)
+        # TODA partida vs IA é congelada para efeito de rating — nunca altera
+        # o Glicko-2, tenha relógio ou não. `no_clock` fica só para o gating
+        # do plano Grátis (que continua contando as partidas COM relógio,
+        # preservando a regra de monetização existente).
+        no_clock = _is_clockless_request(request.data)
 
         if result not in ("win", "loss", "draw"):
             return Response(
@@ -673,7 +695,7 @@ class AiGameResultView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-            # D1: rating SEMPRE congelado numa partida vs IA — leitura sem
+            # Rating SEMPRE congelado numa partida vs IA — leitura sem
             # lock/criação, só para preencher histórico e resposta. Nada de
             # Glicko-2 nem de espelho Profile.rating aqui.
             modality_rating = _modality_rating_snapshot(profile, modality)
@@ -703,7 +725,9 @@ class AiGameResultView(APIView):
                 mode=GameHistory.MODE_AI,
                 modality=modality,
                 rating_before=rating_before,
-                rating_after=rating_before,  # D1: rating não muda
+                rating_after=rating_before,  # rating não muda vs IA
+                # Constante, igual e oposta ao GameResultView: partida vs IA
+                # NUNCA vale rating, tenha relógio ou não.
                 rated=False,
             )
 
@@ -720,9 +744,89 @@ class AiGameResultView(APIView):
                 "deviation": round(modality_rating.deviation),
                 "provisional": modality_rating.is_provisional,
                 "modality": modality,
+                # Espelha o campo do GameResultView para o app não precisar
+                # inferir o modo pela tela em que está (ver GameOverModal).
+                "rated": False,
+                "delta": 0,
             },
             status=status.HTTP_200_OK,
         )
+
+
+class InternalColorBalanceView(APIView):
+    """
+    GET /api/v1/auth/internal/color-balance/?user_id=N&user_id=M
+
+    Histórico de cor dos jogadores candidatos ao pareamento, para o node-api
+    decidir quem joga de brancas na busca rápida (Item 6). Aceita vários
+    `user_id` numa chamada só: o pareamento precisa dos DOIS jogadores ao
+    mesmo tempo, e duas idas ao Django no caminho crítico dobrariam a
+    latência do `join_queue`.
+
+    Por que no servidor: a alternativa barata seria o cliente mandar os
+    próprios contadores no `join_queue` — e aí ele escolheria a própria cor
+    mentindo o histórico. É o mesmo furo de spoofing já fechado no
+    node-api/src/socket/index.js (identidade vinda do token, não do payload).
+    Contagem de cor é do servidor.
+
+    Mesmo padrão de segredo compartilhado do GameResultView e do
+    /payments/internal/can-play/ (X-Internal-Secret), sem throttle por ser
+    tráfego interno.
+
+    Resposta: {"players": {"<user_id>": {"white": 7, "black": 4}, ...}}
+    Só conta partidas com cor registrada (o histórico anterior à migration
+    0016 tem `color` nulo e fica de fora — ver GameHistory.color).
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    def get(self, request):
+        secret = request.headers.get("X-Internal-Secret", "")
+        expected = getattr(settings, "INTERNAL_API_SECRET", "")
+        if not expected or secret != expected:
+            return Response(
+                {"detail": "Não autorizado."}, status=status.HTTP_403_FORBIDDEN
+            )
+
+        raw_ids = request.query_params.getlist("user_id")
+        if not raw_ids:
+            return Response(
+                {"detail": "user_id é obrigatório."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            user_ids = [int(v) for v in raw_ids]
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "user_id deve ser numérico."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.db.models import Count
+
+        from .models import GameHistory
+
+        # Uma query só para os dois jogadores. Usuário sem histórico
+        # simplesmente não aparece no agrupamento e cai no zero abaixo — o
+        # node-api sorteia a cor nesse caso (nada a balancear ainda).
+        rows = (
+            GameHistory.objects.filter(
+                user_id__in=user_ids,
+                mode=GameHistory.MODE_ONLINE,
+                color__isnull=False,
+            )
+            .values("user_id", "color")
+            .annotate(n=Count("id"))
+        )
+
+        players = {str(uid): {"white": 0, "black": 0} for uid in user_ids}
+        for row in rows:
+            key = "white" if row["color"] == GameHistory.COLOR_WHITE else "black"
+            players[str(row["user_id"])][key] = row["n"]
+
+        return Response({"players": players})
 
 
 class CampaignProgressView(APIView):
@@ -954,8 +1058,18 @@ class LeaderboardView(APIView):
                 "rating": round(r.rating),
                 "provisional": r.is_provisional,
                 "modality": modality,
-                "games_played": r.profile.games_played,
-                "wins": r.profile.wins,
+                # EXIBE O MESMO CAMPO QUE FILTRA. Antes vinha de
+                # `r.profile.games_played` — o total do perfil, que soma
+                # partidas vs IA e todas as modalidades — ao lado de um
+                # rating que só considera as ranqueadas DESTA modalidade.
+                # "1500 · 30 partidas" para quem tinha 1 partida ranqueada.
+                "games_played": r.games_played,
+                # `wins` NÃO tem equivalente por modalidade (ModalityRating
+                # guarda rating/RD/volatilidade/nº de partidas, não vitórias),
+                # então segue vindo do perfil e continua sendo um total
+                # global. Fica explícito no nome para o cliente não somar
+                # maçã com laranja; unificar exigiria coluna nova.
+                "wins_total": r.profile.wins,
             }
             for i, r in enumerate(ratings)
         ]

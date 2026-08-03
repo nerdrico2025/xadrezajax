@@ -15,8 +15,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
-import type { SocketStatus } from "@/hooks/useGameSocket";
+import type { GameColor, HostGameSetup, SocketStatus } from "@/hooks/useGameSocket";
+import { useOnlineTimePref } from "@/hooks/useOnlineTimePref";
 import { useFriends } from "@/hooks/useFriends";
+import {
+  HUMAN_TIME_CONTROLS,
+  humanTimeLabel,
+} from "@/constants/onlineGame";
 import type { Friend, FriendRequest } from "@/services/friends";
 
 interface Props {
@@ -28,10 +33,11 @@ interface Props {
    * (Cancelar emitindo `leave_queue`) que deixava a sala viva do lado do
    * convidado. */
   onCancelRoom: () => void;
-  onCreateRoom: () => void;
+  onCreateRoom: (setup: HostGameSetup) => void;
   onJoinRoom: (code: string) => void;
   onBack: () => void;
-  onInviteFriend: (friendId: number) => void;
+  /** Convida com a cor e o tempo escolhidos pelo anfitrião (item 5). */
+  onInviteFriend: (friendId: number, setup: HostGameSetup) => void;
   initialTab?: "friend" | "code";
 }
 
@@ -57,6 +63,21 @@ export default function MatchmakingScreen({
   const [invitedFriendName, setInvitedFriendName] = useState<string | null>(null);
   const [showPending, setShowPending] = useState(false);
 
+  // Escolha explícita do anfitrião para ESTA partida (item 5): cor e tempo.
+  // Não há "valer rating" nem "amistosa" — partida contra outra pessoa sempre
+  // vale rating, sem toggle.
+  //
+  // A cor é por partida e não vira preferência salva (é escolha situacional).
+  // O tempo começa na preferência de Ajustes, que é o palpite mais provável,
+  // mas pode ser mudado aqui sem alterar a preferência.
+  const { seconds: preferredTime } = useOnlineTimePref();
+  const [hostColor, setHostColor] = useState<GameColor>("w");
+  const [hostTime, setHostTime] = useState<number | null>(null);
+  const setup: HostGameSetup = {
+    color: hostColor,
+    timeControl: hostTime ?? preferredTime,
+  };
+
   const {
     friends,
     pendingRequests,
@@ -79,13 +100,13 @@ export default function MatchmakingScreen({
     onJoinRoom(code);
   };
 
-  const handleInvite = useCallback(
-    (friend: Friend) => {
-      setInvitedFriendName(friend.username ? `@${friend.username}` : friend.full_name);
-      onInviteFriend(friend.id);
-    },
-    [onInviteFriend]
-  );
+  // Sem useCallback: `setup` muda a cada escolha de cor/tempo, então
+  // memorizar aqui só criaria risco de convidar com a configuração antiga —
+  // e as linhas de amigo já são re-renderizadas junto de qualquer forma.
+  const handleInvite = (friend: Friend) => {
+    setInvitedFriendName(friend.username ? `@${friend.username}` : friend.full_name);
+    onInviteFriend(friend.id, setup);
+  };
 
   const handleAddFriend = useCallback(async () => {
     const username = addUsername.trim();
@@ -341,6 +362,97 @@ export default function MatchmakingScreen({
               <Text style={[styles.addError, { color: colors.error }]}>{addError}</Text>
             )}
 
+            {/* ── Como vai ser a partida (item 5) ──────────────────────────
+                Cor e tempo são perguntados EXPLICITAMENTE ao anfitrião antes
+                de convidar: ele escolhe brancas ou pretas e o convidado
+                recebe a outra. Não há opção de "valer rating" nem de
+                "amistosa" — toda partida contra outra pessoa vale rating. */}
+            <View style={[styles.section, { borderColor: colors.buttonSecondary + "60" }]}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  Sua próxima partida
+                </Text>
+                <Text style={[styles.setupSummary, { color: colors.secondary }]}>
+                  {humanTimeLabel(setup.timeControl)} ·{" "}
+                  {hostColor === "w" ? "brancas" : "pretas"}
+                </Text>
+              </View>
+
+              <Text style={[styles.setupLabel, { color: colors.secondary }]}>
+                Você joga de
+              </Text>
+              <View style={styles.setupRow}>
+                {([
+                  { value: "w" as const, label: "Brancas", piece: "♔" },
+                  { value: "b" as const, label: "Pretas", piece: "♚" },
+                ]).map(({ value, label, piece }) => {
+                  const selected = hostColor === value;
+                  return (
+                    <Pressable
+                      key={value}
+                      onPress={() => setHostColor(value)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={`Você joga de ${label.toLowerCase()}`}
+                      style={[
+                        styles.colorChip,
+                        {
+                          borderColor: selected ? colors.accent : colors.divider,
+                          backgroundColor: selected ? colors.accentMuted : "transparent",
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.colorChipPiece, { color: colors.text }]}>
+                        {piece}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.colorChipLabel,
+                          { color: selected ? colors.accentOnLight : colors.text },
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <Text style={[styles.setupLabel, { color: colors.secondary }]}>
+                Tempo
+              </Text>
+              <View style={[styles.setupRow, styles.setupRowWrap]}>
+                {HUMAN_TIME_CONTROLS.map((tc) => {
+                  const selected = setup.timeControl === tc.seconds;
+                  return (
+                    <Pressable
+                      key={tc.seconds}
+                      onPress={() => setHostTime(tc.seconds)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={`${tc.label}, ${tc.category}`}
+                      style={[
+                        styles.timeChip,
+                        {
+                          borderColor: selected ? colors.accent : colors.divider,
+                          backgroundColor: selected ? colors.accentMuted : "transparent",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.timeChipLabel,
+                          { color: selected ? colors.accentOnLight : colors.text },
+                        ]}
+                      >
+                        {tc.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
             {/* Pending requests */}
             {pendingRequests.length > 0 && (
               <View style={[styles.section, { borderColor: colors.buttonSecondary + "60" }]}>
@@ -491,6 +603,45 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   sectionTitle: { fontSize: 14, fontWeight: "700", flex: 1 },
+
+  // Escolha de cor + tempo do convite (item 5)
+  setupSummary: { fontSize: 12, fontWeight: "600" },
+  setupLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    paddingHorizontal: 14,
+    paddingTop: 6,
+  },
+  setupRow: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 10,
+  },
+  setupRowWrap: { flexWrap: "wrap" },
+  colorChip: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
+  colorChipPiece: { fontSize: 18 },
+  colorChipLabel: { fontSize: 14, fontWeight: "700" },
+  timeChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
+  timeChipLabel: { fontSize: 13, fontWeight: "700" },
+
   badge: {
     paddingHorizontal: 7,
     paddingVertical: 2,

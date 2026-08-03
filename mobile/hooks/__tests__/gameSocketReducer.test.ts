@@ -27,6 +27,72 @@ function inGame(): State {
   );
 }
 
+// O delta de rating chega DEPOIS do game_over, num evento próprio: o modal de
+// fim de partida abre na hora e completa quando o Glicko-2 volta do servidor.
+describe("GAME_RATED — delta de rating da partida", () => {
+  const OUTCOME = {
+    rated: true,
+    rating: 1512,
+    ratingBefore: 1500,
+    delta: 12,
+    provisional: false,
+  };
+
+  it("partida nova começa sem resultado de rating", () => {
+    expect(inGame().ratingOutcome).toBeNull();
+  });
+
+  it("guarda o resultado da partida corrente", () => {
+    const state = gameSocketReducer(inGame(), {
+      type: "GAME_RATED",
+      gameId: "G1",
+      outcome: OUTCOME,
+    });
+    expect(state.ratingOutcome).toEqual(OUTCOME);
+  });
+
+  it("ignora resultado de OUTRA partida — um evento atrasado não pinta a revanche", () => {
+    const state = gameSocketReducer(inGame(), {
+      type: "GAME_RATED",
+      gameId: "PARTIDA-ANTIGA",
+      outcome: OUTCOME,
+    });
+    expect(state.ratingOutcome).toBeNull();
+  });
+
+  it("sem partida ativa, não guarda nada", () => {
+    const state = gameSocketReducer(initialState, {
+      type: "GAME_RATED",
+      gameId: "G1",
+      outcome: OUTCOME,
+    });
+    expect(state.ratingOutcome).toBeNull();
+  });
+
+  it("uma partida nova zera o resultado da anterior", () => {
+    let state = gameSocketReducer(inGame(), {
+      type: "GAME_RATED",
+      gameId: "G1",
+      outcome: OUTCOME,
+    });
+    state = gameSocketReducer(state, {
+      type: "GAME_STARTED",
+      game: { ...GAME, gameId: "G2" },
+    });
+    expect(state.ratingOutcome).toBeNull();
+  });
+
+  it("sair da partida zera o resultado", () => {
+    let state = gameSocketReducer(inGame(), {
+      type: "GAME_RATED",
+      gameId: "G1",
+      outcome: OUTCOME,
+    });
+    state = gameSocketReducer(state, { type: "CLEAR_GAME", connected: true });
+    expect(state.ratingOutcome).toBeNull();
+  });
+});
+
 describe("fluxo de proposta de empate no gameSocketReducer", () => {
   it("começa sem proposta pendente", () => {
     const state = inGame();
@@ -151,7 +217,14 @@ describe("fluxo de proposta de empate no gameSocketReducer", () => {
 // convite. Ver gameRoom.closeRoom no node-api.
 
 describe("teardown de sala/convite no gameSocketReducer", () => {
-  const INVITATION = { fromId: "9", fromName: "Renan", roomCode: "ABC123" };
+  // Cor e tempo vêm decididos pelo anfitrião — o convite só informa.
+  const INVITATION = {
+    fromId: "9",
+    fromName: "Renan",
+    roomCode: "ABC123",
+    timeControl: 600,
+    yourColor: "b" as const,
+  };
 
   function hosting(code = "ABC123"): State {
     return gameSocketReducer(

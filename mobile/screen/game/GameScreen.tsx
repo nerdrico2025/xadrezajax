@@ -689,6 +689,9 @@ export default function GameScreen({
 
       <GameOverModal
         result={gameResult}
+        // Esta tela é SEMPRE vs IA — e o modal precisa ouvir isso, não
+        // assumir: o mesmo componente serve a OnlineGameScreen.
+        mode="ai"
         onNewGame={handleNewGame}
         onLeave={() => onLeave?.()}
         campaignUnlock={campaignUnlock}

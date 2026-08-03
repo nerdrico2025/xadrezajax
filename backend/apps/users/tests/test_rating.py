@@ -221,11 +221,14 @@ class GameResultViewGlickoTests(APITestCase):
         )
         self.assertLess(self.rating_of(self.white, "blitz").deviation, 350)
 
-    def test_unrated_game_counts_stats_but_not_rating(self):
-        """Partida sem relógio (time_control null): incrementa wins/losses/
-        games_played e cria GameHistory, mas não altera ModalityRating nem o
-        espelho Profile.rating (decisão do PM, PLANO_FASE0 §8)."""
-        # Estado prévio calibrado no rapid para provar que nada se move
+    def test_human_game_without_clock_is_still_rated(self):
+        """Regra travada: TODA partida humano-vs-humano vale rating, sem
+        exceção. Não existe mais "amistosa humana".
+
+        Antes, `time_control: null` gravava rated=False e o Glicko-2 nem
+        rodava — era o RELÓGIO decidindo se a partida contava. Agora `rated`
+        é constante deste endpoint e o único papel do time_control é escolher
+        a modalidade (aqui, rápido)."""
         white_profile = Profile.objects.get(user=self.white)
         ModalityRating.objects.create(
             profile=white_profile,
@@ -234,43 +237,52 @@ class GameResultViewGlickoTests(APITestCase):
             deviation=90,
             games_played=25,
         )
-        mirror_before = white_profile.rating
 
         response = self.post_result("white", time_control=None)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["modality"], "rapid")
-        # Resposta reflete o estado atual, sem cálculo de atualização
-        self.assertEqual(response.data["white"]["rating"], 1600)
-        self.assertEqual(response.data["white"]["deviation"], 90)
-        self.assertFalse(response.data["white"]["provisional"])
-        self.assertEqual(response.data["black"]["rating"], 1500)
-        self.assertEqual(response.data["black"]["deviation"], 350)
-        self.assertTrue(response.data["black"]["provisional"])
+        self.assertTrue(response.data["rated"])
 
-        # Rating intocado (nem linha nova para quem não tinha)
+        # Rating dos DOIS se moveu: vencedor sobe, perdedor desce.
         white_rapid = self.rating_of(self.white, "rapid")
-        self.assertEqual(
-            (white_rapid.rating, white_rapid.deviation, white_rapid.games_played),
-            (1600, 90, 25),
-        )
-        self.assertFalse(
-            ModalityRating.objects.filter(profile__user=self.black).exists()
-        )
+        self.assertGreater(white_rapid.rating, 1600)
+        self.assertEqual(white_rapid.games_played, 26)
+        black_rapid = self.rating_of(self.black, "rapid")
+        self.assertLess(black_rapid.rating, 1500)
+        self.assertEqual(black_rapid.games_played, 1)
 
-        # Espelho e contadores
+        # Contadores do perfil seguem contando (não mudou nesta regra)
         white_profile.refresh_from_db()
-        self.assertEqual(white_profile.rating, mirror_before)
         self.assertEqual((white_profile.wins, white_profile.games_played), (1, 1))
         black_profile = Profile.objects.get(user=self.black)
         self.assertEqual((black_profile.losses, black_profile.games_played), (1, 1))
 
-        # Histórico criado com rating congelado
+        # Histórico marcado como ranqueado, com delta real
         white_history = GameHistory.objects.get(user=self.white)
-        self.assertEqual(white_history.modality, "rapid")
-        self.assertEqual(white_history.rating_before, white_history.rating_after)
+        self.assertTrue(white_history.rated)
         self.assertEqual(white_history.rating_before, 1600)
+        self.assertGreater(white_history.rating_after, white_history.rating_before)
         black_history = GameHistory.objects.get(user=self.black)
-        self.assertEqual(black_history.rating_before, black_history.rating_after)
+        self.assertTrue(black_history.rated)
+        self.assertLess(black_history.rating_after, black_history.rating_before)
+
+    def test_response_carries_rated_flag_and_real_delta(self):
+        """A resposta traz `rated` e o delta real por jogador — é a fonte do
+        "+X/-Y" na tela de resultado. O app nunca calcula isso sozinho."""
+        response = self.post_result("white", time_control=300)
+
+        self.assertTrue(response.data["rated"])
+        white = response.data["white"]
+        black = response.data["black"]
+
+        self.assertEqual(white["id"], self.white.id)
+        self.assertEqual(black["id"], self.black.id)
+        self.assertEqual(white["rating_before"], 1500)
+        self.assertEqual(black["rating_before"], 1500)
+        self.assertEqual(white["delta"], white["rating"] - white["rating_before"])
+        self.assertEqual(black["delta"], black["rating"] - black["rating_before"])
+        self.assertGreater(white["delta"], 0)
+        self.assertLess(black["delta"], 0)
 
     def test_game_history_records_color_of_each_player(self):
         """A cor jogada fica registrada por partida (GAP 3). É só registro —
@@ -285,8 +297,8 @@ class GameResultViewGlickoTests(APITestCase):
             GameHistory.objects.get(user=self.black).color, GameHistory.COLOR_BLACK
         )
 
-    def test_color_is_recorded_for_unrated_game_too(self):
-        """Registro da cor não depende de a partida valer rating."""
+    def test_color_is_recorded_without_clock_too(self):
+        """Registro da cor não depende do controle de tempo."""
         self.post_result("draw", time_control=None)
 
         self.assertEqual(
@@ -485,6 +497,23 @@ class LeaderboardModalityTests(APITestCase):
     def test_invalid_modality_returns_400(self):
         response = self.client.get(LEADERBOARD_URL, {"modality": "correspondence"})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_games_played_is_the_field_used_to_filter(self):
+        """A lista exibe o MESMO campo que ela filtra.
+
+        `make_player` deixa Profile.games_played=1 e ModalityRating.bullet
+        .games_played=25 de propósito: antes o payload trazia o total do
+        perfil (1) ao lado de um rating construído a partir de 25 partidas de
+        bullet. Agora traz 25, que é o conjunto que produziu aquele rating.
+        """
+        self.make_player("c@chess.com", bullet=1900)
+
+        row = self.client.get(LEADERBOARD_URL, {"modality": "bullet"}).data[0]
+        self.assertEqual(row["games_played"], 25)
+        # Vitórias seguem sendo o total global do perfil e o nome diz isso —
+        # não existe contagem de vitórias por modalidade no servidor.
+        self.assertIn("wins_total", row)
+        self.assertNotIn("wins", row)
 
 
 class ProfileRatingsTests(APITestCase):
