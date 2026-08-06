@@ -307,3 +307,37 @@ describe("GameOverModal — confete na vitória", () => {
     expect(onNewGame).toHaveBeenCalled();
   });
 });
+
+describe("GameOverModal — título e motivo centralizados", () => {
+  // O cartão centraliza o BLOCO de texto, não as linhas dentro dele: títulos
+  // que quebram em duas linhas ("Seu oponente venceu!") apareciam alinhados
+  // à esquerda. Cobre TODAS as variações para nenhuma regredir.
+  const VARIACOES: {
+    mode: "ai" | "online";
+    outcome: "win" | "loss" | "draw";
+    titulo: string;
+  }[] = [
+    { mode: "ai", outcome: "win", titulo: "Você venceu!" },
+    { mode: "ai", outcome: "loss", titulo: "A IA venceu!" },
+    { mode: "ai", outcome: "draw", titulo: "Empate!" },
+    { mode: "online", outcome: "win", titulo: "Você venceu!" },
+    { mode: "online", outcome: "loss", titulo: "Seu oponente venceu!" },
+    { mode: "online", outcome: "draw", titulo: "Empate!" },
+  ];
+
+  function textAlignDe(root: ReactTestInstance, texto: string) {
+    const node = root.findAll((n) => n.props?.children === texto)[0];
+    const style = [node.props.style].flat(Infinity).filter(Boolean);
+    return Object.assign({}, ...style).textAlign;
+  }
+
+  it.each(VARIACOES)(
+    "$mode/$outcome: título e motivo centralizados",
+    ({ mode, outcome, titulo }) => {
+      const tree = render({ mode, result: { outcome, reason: "checkmate" } });
+      expect(hasText(tree.root, titulo)).toBe(true);
+      expect(textAlignDe(tree.root, titulo)).toBe("center");
+      expect(textAlignDe(tree.root, "Xeque-mate")).toBe("center");
+    }
+  );
+});

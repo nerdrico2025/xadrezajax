@@ -370,14 +370,20 @@ const styles = StyleSheet.create({
   icon: {
     marginBottom: 16,
   },
+  // `alignItems: center` do cartão só centraliza o BLOCO de texto: quando o
+  // título quebra em duas linhas ("Seu oponente venceu!" no tamanho 28), o
+  // bloco passa a ocupar a largura toda e as linhas ficam alinhadas à
+  // esquerda. `textAlign` é o que centraliza as linhas entre si.
   title: {
     fontSize: 28,
     fontWeight: "700",
     marginBottom: 8,
+    textAlign: "center",
   },
   reason: {
     fontSize: 15,
     marginBottom: 12,
+    textAlign: "center",
   },
   ratingNote: {
     fontSize: 13,
