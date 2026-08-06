@@ -18,11 +18,13 @@ jest.mock("../services/redis.service", () => {
 
 jest.mock("../socket/matchmaking", () => ({
   setUserGame: jest.fn(async () => {}),
+  renewUserGame: jest.fn(async () => {}),
 }));
 
 const {
   createGame,
   getGame,
+  applyMove,
   resignGame,
   offerDraw,
   acceptDraw,
@@ -179,5 +181,50 @@ describe("declineDraw", () => {
 
     await offerDraw(gameId, "1");
     expect(await declineDraw(gameId, "1")).toHaveProperty("error");
+  });
+});
+
+// ── applyMove ────────────────────────────────────────────────────────
+
+describe("applyMove", () => {
+  test("lance legal avança a partida", async () => {
+    const gameId = await newGame();
+    const result = await applyMove(gameId, "1", "e2", "e4");
+
+    expect(result.error).toBeUndefined();
+    expect(result.fen).toContain(" b ");
+    expect((await getGame(gameId)).fen).toBe(result.fen);
+  });
+
+  test("lance ILEGAL devolve 'Movimento inválido', não uma exceção", async () => {
+    // chess.js 1.x lança em lance ilegal (a v0 devolvia null). Sem o try/catch
+    // em volta do `chess.move`, a exceção subia até o catch genérico do
+    // handler `make_move` e chegava ao jogador como "Erro interno".
+    const gameId = await newGame();
+    const result = await applyMove(gameId, "1", "e2", "e5");
+
+    expect(result).toEqual({ error: "Movimento inválido" });
+    // Posição intacta: nada foi aplicado
+    expect((await getGame(gameId)).fen).toContain(" w ");
+  });
+
+  test("lance de peça que nem está na casa de origem também é inválido", async () => {
+    // É exatamente o caso do eco do lance do oponente que o app enviava de
+    // volta: casa de origem vazia na posição atual.
+    const gameId = await newGame();
+    await applyMove(gameId, "1", "e2", "e4");
+    const result = await applyMove(gameId, "2", "e7", "e5");
+    expect(result.error).toBeUndefined();
+
+    // Agora o mesmo lance de novo, com a casa já vazia
+    const repetido = await applyMove(gameId, "1", "e7", "e5");
+    expect(repetido).toEqual({ error: "Movimento inválido" });
+  });
+
+  test("erro de turno continua distinto de lance inválido", async () => {
+    const gameId = await newGame();
+    expect(await applyMove(gameId, "2", "e7", "e5")).toEqual({
+      error: "Não é sua vez",
+    });
   });
 });

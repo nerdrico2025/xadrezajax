@@ -77,6 +77,10 @@ export type State = {
   // Código de erro mapeável pela UI (ex.: daily_limit_reached → tela de
   // upgrade), quando o servidor envia um junto da mensagem
   errorCode: string | null;
+  /** Sobe a cada erro recebido. A UI reage a `error` por igualdade de string:
+   *  sem isto, dois erros IGUAIS seguidos viram um só — o segundo aviso
+   *  simplesmente não aparece. */
+  errorSeq: number;
   roomCode: string | null;
   opponentDisconnected: boolean;
   friendInvitation: FriendInvitation | null;
@@ -121,6 +125,7 @@ export const initialState: State = {
   game: null,
   error: null,
   errorCode: null,
+  errorSeq: 0,
   roomCode: null,
   opponentDisconnected: false,
   friendInvitation: null,
@@ -164,6 +169,7 @@ export function gameSocketReducer(state: State, action: Action): State {
         status: "error",
         error: action.error,
         errorCode: action.errorCode ?? null,
+        errorSeq: state.errorSeq + 1,
       };
     case "QUEUED":
       return { ...state, status: "queued" };
@@ -238,7 +244,7 @@ export function gameSocketReducer(state: State, action: Action): State {
     case "OPPONENT_RECONNECTED":
       return { ...state, opponentDisconnected: false };
     case "MOVE_ERROR":
-      return { ...state, error: action.error };
+      return { ...state, error: action.error, errorSeq: state.errorSeq + 1 };
     case "CLEAR_GAME":
       return {
         ...state,

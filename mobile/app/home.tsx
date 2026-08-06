@@ -69,6 +69,7 @@ export default function Home() {
     game: onlineGame,
     error: socketError,
     errorCode: socketErrorCode,
+    errorSeq: socketErrorSeq,
     roomCode,
     opponentDisconnected,
     friendInvitation,
@@ -348,6 +349,7 @@ export default function Home() {
             game={onlineGame}
             opponentDisconnected={opponentDisconnected}
             moveError={socketError}
+            moveErrorSeq={socketErrorSeq}
             isReconnecting={socketStatus === "reconnecting"}
             incomingDrawOffer={incomingDrawOffer}
             outgoingDrawOffer={outgoingDrawOffer}

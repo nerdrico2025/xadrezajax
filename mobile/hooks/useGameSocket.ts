@@ -378,6 +378,7 @@ export function useGameSocket() {
     game: state.game,
     error: state.error,
     errorCode: state.errorCode,
+    errorSeq: state.errorSeq,
     roomCode: state.roomCode,
     opponentDisconnected: state.opponentDisconnected,
     friendInvitation: state.friendInvitation,

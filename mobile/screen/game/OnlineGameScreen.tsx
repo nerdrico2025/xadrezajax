@@ -45,6 +45,9 @@ interface Props {
   game: OnlineGame;
   opponentDisconnected: boolean;
   moveError: string | null;
+  /** Contador de erros do socket. Dois erros IGUAIS seguidos precisam de dois
+   *  avisos: só a string não distingue um do outro. */
+  moveErrorSeq?: number;
   isReconnecting?: boolean;
   incomingDrawOffer?: boolean;
   outgoingDrawOffer?: boolean;
@@ -86,6 +89,7 @@ export default function OnlineGameScreen({
   game,
   opponentDisconnected,
   moveError,
+  moveErrorSeq = 0,
   isReconnecting = false,
   incomingDrawOffer = false,
   outgoingDrawOffer = false,
@@ -120,6 +124,14 @@ export default function OnlineGameScreen({
   const [opponentCaptures, setOpponentCaptures] = useState<string[]>([]);
   const [movePending, setMovePending] = useState(false);
   const movePendingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Lance do oponente que está sendo replicado no tabuleiro via
+  // `chessboardRef.move()`. A lib chama a prop `onMove` TAMBÉM em lance
+  // programático (piece.moveTo → moveProgrammatically → onMove), e nesse
+  // instante o turno já é meu — ou seja, o guarda `isMyTurn` não segura o eco
+  // e a tela devolvia o lance do oponente ao servidor como se fosse meu.
+  // Guardar as casas (e não só um booleano) mantém o descarte cirúrgico: só
+  // o eco exato é ignorado, um lance meu na mesma janela continua valendo.
+  const applyingRemoteMove = useRef<{ from: string; to: string } | null>(null);
 
   const isFlipped = game.myColor === "b";
   const opponentColor: GameColor = game.myColor === "w" ? "b" : "w";
@@ -166,6 +178,9 @@ export default function OnlineGameScreen({
   //   2. desfazer o lance que o tabuleiro já animou localmente — senão a tela
   //      mostra uma posição que o servidor não conhece;
   //   3. avisar o jogador. Silêncio em partida ranqueada é inaceitável.
+  // `moveErrorSeq` entra nas dependências porque dois erros iguais seguidos
+  // ("Sem conexão" duas vezes) não mudam a string: sem o contador, o segundo
+  // não destravaria o tabuleiro nem avisaria ninguém.
   useEffect(() => {
     if (!moveError) return;
     setMovePending(false);
@@ -174,7 +189,7 @@ export default function OnlineGameScreen({
     setMoveNotice(moveError);
     const t = setTimeout(() => setMoveNotice(null), MOVE_NOTICE_MS);
     return () => clearTimeout(t);
-  }, [moveError]);
+  }, [moveError, moveErrorSeq]);
 
   // Apply opponent's move when game.fen changes
   useEffect(() => {
@@ -199,7 +214,11 @@ export default function OnlineGameScreen({
       // O servidor só envia { from, to } — em promoções, a peça escolhida
       // pelo oponente é deduzida do FEN para o tabuleiro não abrir o
       // diálogo de promoção localmente.
-      chessboardRef.current?.move({
+      applyingRemoteMove.current = {
+        from: game.lastMove.from,
+        to: game.lastMove.to,
+      };
+      const applied = chessboardRef.current?.move({
         from: game.lastMove.from as any,
         to: game.lastMove.to as any,
         promotion: derivePromotion(
@@ -209,6 +228,14 @@ export default function OnlineGameScreen({
           game.lastMove.to
         ) as any,
       });
+      // A marca não pode sobreviver ao lance que a criou: se o eco não vier
+      // (tabuleiro recusou o lance, tela desmontou no meio), ela engoliria o
+      // PRÓXIMO lance de verdade. A lib resolve esta promise logo depois de
+      // chamar `onMove`, então limpar aqui é seguro nos dois caminhos.
+      Promise.resolve(applied).then(
+        () => { applyingRemoteMove.current = null; },
+        () => { applyingRemoteMove.current = null; }
+      );
       if (game.check) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         play("check");
@@ -240,9 +267,16 @@ export default function OnlineGameScreen({
 
   const onMove = useCallback(
     (data: any) => {
-      if (!isMyTurn) return;
       const { move } = data;
       if (!move) return;
+      // Eco do lance do oponente que ACABAMOS de replicar no tabuleiro: não é
+      // um lance do jogador, então não vai para o servidor nem trava a tela.
+      const remote = applyingRemoteMove.current;
+      if (remote && remote.from === move.from && remote.to === move.to) {
+        applyingRemoteMove.current = null;
+        return;
+      }
+      if (!isMyTurn) return;
       const isPromotion =
         move.piece === "p" && (move.to[1] === "8" || move.to[1] === "1");
       setMovePending(true);
