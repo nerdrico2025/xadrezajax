@@ -130,7 +130,16 @@ async function applyMove(gameId, userId, from, to, promotion) {
   // ─────────────────────────────────────────────────────────────────────────
 
   const moveOptions = promotion ? { from, to, promotion } : { from, to };
-  const moveResult = chess.move(moveOptions);
+  // chess.js 1.x LANÇA em lance ilegal (a v0 devolvia null), então sem este
+  // try/catch o `if (!moveResult)` abaixo era código morto: a exceção subia
+  // até o catch genérico do handler `make_move` e chegava ao jogador como
+  // "Erro interno" — mensagem errada para um lance simplesmente ilegal.
+  let moveResult;
+  try {
+    moveResult = chess.move(moveOptions);
+  } catch {
+    moveResult = null;
+  }
   if (!moveResult) return { error: "Movimento inválido" };
 
   const newFen = chess.fen();
