@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     DailyPuzzleView,
     NextPuzzleView,
+    PuzzleCheckMoveView,
     PuzzleDetailView,
     PuzzleMapView,
     PuzzleProgressView,
@@ -17,5 +18,6 @@ urlpatterns = [
     path("map/", PuzzleMapView.as_view(), name="map"),
     path("stats/", PuzzleStatsView.as_view(), name="stats"),
     path("<int:pk>/", PuzzleDetailView.as_view(), name="detail"),
+    path("<int:pk>/check-move/", PuzzleCheckMoveView.as_view(), name="check_move"),
     path("<int:pk>/progress/", PuzzleProgressView.as_view(), name="progress"),
 ]

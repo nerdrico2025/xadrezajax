@@ -17,8 +17,10 @@ export interface PuzzleData {
   description: string;
   fen: string;
   /** Solução em UCI ("e2e4"); lances pares são do jogador, ímpares do oponente.
-   *  Ausente quando o diário já está esgotado — o servidor não entrega a
-   *  resposta a quem gastou as tentativas. */
+   *
+   *  SÓ vem no estado terminal — problema resolvido ou tentativas esgotadas.
+   *  Enquanto está jogável o servidor não a entrega: a validação do lance é
+   *  dele, via `checkPuzzleMove`. Tratar como ausente por padrão. */
   solution?: string[];
   difficulty: PuzzleDifficulty;
   category: string;
@@ -60,6 +62,24 @@ export interface PuzzleProgressResult {
   attempts_left?: number;
   max_attempts?: number;
   exhausted?: boolean;
+  /** Solução completa — só no estado terminal (resolvido ou esgotado). É por
+   *  aqui que a tela a recebe para desenhar a seta; o payload do problema não
+   *  a traz mais enquanto ele está jogável. */
+  solution?: string[];
+}
+
+/** Veredito do servidor sobre UM lance da sequência. */
+export interface PuzzleCheckMoveResult {
+  correct: boolean;
+  /** Índice do próximo lance do JOGADOR na sequência; `null` quando acabou.
+   *  No lance errado volta o mesmo índice — não avança. */
+  next_index: number | null;
+  /** A sequência terminou com este lance (contando a resposta do oponente). */
+  solved: boolean;
+  /** Resposta do oponente em UCI, quando a sequência continua. Só vem no
+   *  lance certo — é a consequência de um lance que o usuário já encontrou,
+   *  não a solução. */
+  reply: string | null;
 }
 
 /** 403 do gating do Treino: o problema pedido não é o do dia e o usuário não
@@ -140,6 +160,36 @@ export async function getNextPuzzle(
   );
   if (!res.ok) {
     return throwForStatus(res, "Falha ao carregar o próximo problema");
+  }
+  return res.json();
+}
+
+/**
+ * Valida um lance da sequência no SERVIDOR.
+ *
+ * Substitui a comparação local contra `puzzle.solution`, que só era possível
+ * porque a solução vinha no payload do problema — quem lesse a resposta do
+ * `daily/` tinha o lance antes de jogar.
+ *
+ * @param index posição do lance do jogador na sequência (0 no primeiro).
+ */
+export async function checkPuzzleMove(
+  token: string,
+  puzzleId: number,
+  move: string,
+  index: number
+): Promise<PuzzleCheckMoveResult> {
+  const res = await authFetch(
+    `${API_URL}/api/v1/puzzles/${puzzleId}/check-move/`,
+    token,
+    {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ move, index }),
+    }
+  );
+  if (!res.ok) {
+    return throwForStatus(res, "Falha ao validar o lance");
   }
   return res.json();
 }

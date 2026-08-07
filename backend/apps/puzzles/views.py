@@ -58,7 +58,16 @@ def _current_streak(user):
     return streak
 
 
-def _puzzle_payload(puzzle, *, include_solution=True):
+def _puzzle_payload(puzzle, *, include_solution=False):
+    """Payload de um problema. `include_solution` é OPT-IN de propósito.
+
+    O default era `True`, e os três endpoints que servem problema chamavam sem
+    argumento — ou seja, a solução ia em texto plano no GET, antes de qualquer
+    tentativa. Bastava ler a resposta do `daily/` para ter o lance.
+
+    Quem decide revelar é `_solution_revealed()`; um default `False` garante
+    que um call site novo erre para o lado seguro.
+    """
     data = {
         "id": puzzle.id,
         "title": puzzle.title,
@@ -71,6 +80,44 @@ def _puzzle_payload(puzzle, *, include_solution=True):
     if include_solution:
         data["solution"] = puzzle.solution
     return data
+
+
+def _normalize_uci(move):
+    """Normaliza um lance UCI para comparação. Devolve "" se não for plausível.
+
+    Só aceita o formato que a solução usa: 4 caracteres (casa de origem +
+    destino) ou 5 com a peça da promoção. Comparar strings cruas deixaria
+    "A1A8" e " a1a8 " falharem contra "a1a8" — erro de digitação do cliente
+    virando "lance errado" e custando uma tentativa ao usuário.
+    """
+    if not isinstance(move, str):
+        return ""
+    normalized = move.strip().lower()
+    if len(normalized) not in (4, 5):
+        return ""
+    return normalized
+
+
+def _solution_revealed(progress, *, is_daily, today=None):
+    """REGRA ÚNICA de revelação da solução, para todos os endpoints.
+
+    Estado terminal: o usuário resolveu (revisão) ou esgotou as tentativas do
+    diário (aprendizado, decisão de produto). Fora disso a solução não sai do
+    servidor.
+
+    A regra do DIÁRIO é por DATA, não pelo `solved` permanente. Com o ciclo
+    curto de problemas, um problema já resolvido num ciclo anterior volta a ser
+    o do dia e é jogável de novo (ver DailyReciclagemTests) — usar `solved` ali
+    entregaria a solução de um problema que o usuário ainda vai jogar hoje.
+
+    No TREINO vale `solved` permanente: a progressão do treino é permanente por
+    (usuário, problema), e reabrir um problema já resolvido mostra a solução.
+    """
+    if not progress:
+        return False
+    if is_daily:
+        return progress.is_solved_today(today) or progress.is_exhausted_today(today)
+    return progress.solved
 
 
 class DailyPuzzleView(APIView):
@@ -108,12 +155,14 @@ class DailyPuzzleView(APIView):
         solved = bool(progress and progress.is_solved_today())
         attempts_used = progress.attempts_used_today() if progress else 0
 
-        # A solução acompanha o payload porque a validação de lance é feita no
-        # cliente (ver PuzzleScreen). Quem decide MOSTRAR a solução ao usuário
-        # é a tela — só ao resolver ou ao esgotar (decisão de produto). No
-        # esgotamento ela é revelada de propósito, como aprendizado; por isso
-        # o reabrir de um diário esgotado precisa dela aqui também.
-        payload = _puzzle_payload(puzzle)
+        # A solução SÓ acompanha o payload no estado terminal (resolvido hoje
+        # ou esgotado hoje) — é o que permite reabrir um diário esgotado e
+        # rever o lance. Enquanto o problema está jogável ela não sai daqui: a
+        # validação do lance é do servidor, via `check-move/`.
+        payload = _puzzle_payload(
+            puzzle,
+            include_solution=_solution_revealed(progress, is_daily=True),
+        )
         payload.update(
             {
                 "already_solved": solved,
@@ -203,9 +252,12 @@ class PuzzleDetailView(APIView):
         prog = UserPuzzleProgress.objects.filter(
             user=request.user, puzzle=puzzle
         ).first()
-        # Solução no payload por causa da validação client-side (mesma razão
-        # do daily/); a tela decide quando mostrá-la ao usuário.
-        payload = _puzzle_payload(puzzle)
+        # Mesma regra do daily/: solução só no estado terminal. Quando o pk
+        # pedido É o problema do dia, valem as regras por data do diário.
+        payload = _puzzle_payload(
+            puzzle,
+            include_solution=_solution_revealed(prog, is_daily=is_daily),
+        )
         payload["already_solved"] = bool(prog and prog.solved)
         return Response(payload)
 
@@ -252,9 +304,122 @@ class NextPuzzleView(APIView):
         progress = UserPuzzleProgress.objects.filter(
             user=request.user, puzzle=puzzle
         ).first()
-        payload = _puzzle_payload(puzzle)
+        # Treino: revela ao já-resolvido (progressão permanente). O `next/`
+        # normalmente devolve problema não resolvido, mas o fallback de "tudo
+        # resolvido" pode repetir um antigo — aí a solução acompanha.
+        payload = _puzzle_payload(
+            puzzle,
+            include_solution=_solution_revealed(progress, is_daily=False),
+        )
         payload["already_solved"] = progress.solved if progress else False
         return Response(payload)
+
+
+class PuzzleCheckMoveView(APIView):
+    """
+    POST /api/v1/puzzles/{pk}/check-move/
+    Body: { "move": "a1a8", "index": 0 }
+          ou { "from": "a1", "to": "a8", "promotion": "q", "index": 0 }
+
+    Valida UM lance da sequência contra a solução — sem devolver a solução.
+
+    POR QUE ESTE ENDPOINT EXISTE: até aqui a validação era 100% client-side, e
+    para isso o `daily/` precisava entregar `solution` no GET. Quem quisesse a
+    resposta lia o corpo da requisição. Movendo a comparação para cá, a solução
+    deixa de sair do servidor enquanto o problema está jogável.
+
+    NÃO conta tentativa e NÃO grava progresso: quem faz isso continua sendo o
+    `progress/`, que é onde o esgotamento é carimbado. Este endpoint é uma
+    função pura sobre (problema, índice, lance).
+
+    Formato UCI ("e2e4", "e7e8q"), que é como a solução está gravada. SAN
+    exigiria um motor de xadrez no backend (não há python-chess nas
+    dependências) e o cliente já trabalha em casas de origem/destino.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            puzzle = Puzzle.objects.get(id=pk, is_active=True)
+        except Puzzle.DoesNotExist:
+            return Response(
+                {"detail": "Problema não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Mesmo gating do progress/, pelo MESMO critério (o pk é o problema do
+        # dia?). Sem isto o check-move viraria a porta dos fundos do Treino:
+        # um usuário grátis resolveria problema pago lance a lance.
+        profile = get_or_create_profile(request.user)
+        daily = get_daily_puzzle()
+        is_daily = bool(daily and daily.id == puzzle.id)
+        if not is_daily and not can_train_puzzles(profile):
+            return _premium_required_response()
+
+        solution = puzzle.solution or []
+
+        played = _normalize_uci(
+            request.data.get("move")
+            or f"{request.data.get('from', '')}{request.data.get('to', '')}"
+            f"{request.data.get('promotion') or ''}"
+        )
+        if not played:
+            return Response(
+                {"detail": "Lance ausente ou malformado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            index = int(request.data.get("index", 0))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "Índice inválido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Índice fora da faixa é erro de cliente, não "lance errado": responder
+        # `correct: false` esconderia um dessincronismo real entre tela e
+        # servidor atrás de um feedback de xadrez.
+        if index < 0 or index >= len(solution):
+            return Response(
+                {"detail": "Índice fora da sequência da solução."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if played != _normalize_uci(solution[index]):
+            # Resposta mínima: só o booleano. Nada aqui pode deixar escapar
+            # qual era o lance certo, nem por omissão (tamanho da sequência,
+            # lance seguinte, etc.).
+            return Response(
+                {
+                    "correct": False,
+                    "next_index": index,
+                    "solved": False,
+                    "reply": None,
+                }
+            )
+
+        # Acertou. A sequência alterna jogador/oponente, então o próximo item
+        # (se houver) é a resposta do oponente — que o cliente precisa receber
+        # para animar no tabuleiro. Não é vazamento: é a consequência de um
+        # lance que o usuário já encontrou.
+        after_player = index + 1
+        if after_player >= len(solution):
+            return Response(
+                {"correct": True, "next_index": None, "solved": True, "reply": None}
+            )
+
+        reply = solution[after_player]
+        next_index = after_player + 1
+        finished = next_index >= len(solution)
+        return Response(
+            {
+                "correct": True,
+                "next_index": None if finished else next_index,
+                "solved": finished,
+                "reply": reply,
+            }
+        )
 
 
 class PuzzleProgressView(APIView):
@@ -356,12 +521,15 @@ class PuzzleProgressView(APIView):
                     "exhausted": exhausted,
                 }
             )
-        # Revela a solução SÓ no estado terminal: ao resolver (revisão) ou ao
-        # esgotar as tentativas do diário (aprendizado). Antes disso, a
-        # resposta do progress/ nunca a inclui — é o canal onde a garantia
-        # "não antes de resolver/esgotar" é observável e testável (a validação
-        # em si usa a solução que o daily/ já entregou ao cliente).
-        if progress.solved or exhausted:
+        # Revela a solução SÓ no estado terminal, pela MESMA regra dos demais
+        # endpoints. Este é o canal por onde a tela recebe a solução para
+        # desenhar a seta no tabuleiro — o payload inicial não a traz mais.
+        #
+        # `_solution_revealed` em vez do antigo `progress.solved or exhausted`:
+        # no diário, `solved` é permanente e um problema resolvido num ciclo
+        # anterior, hoje jogável de novo, revelaria a solução já na primeira
+        # tentativa errada de hoje.
+        if _solution_revealed(progress, is_daily=is_daily, today=today):
             data["solution"] = puzzle.solution
         return data
 
