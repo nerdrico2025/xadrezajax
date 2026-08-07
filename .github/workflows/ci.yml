@@ -2,7 +2,14 @@ name: CI — Lint, Tests & Build
 
 on:
   push:
-    branches: [main, dev, "feature/**"]
+    # Os prefixos precisam acompanhar a convenção de branches em uso, senão a
+    # CI só roda quando o PR é aberto — o push da branch não dispara nada, e o
+    # feedback chega tarde demais.
+    #
+    # `feature/**` fica: foi a convenção até meados de julho/2026 (16 branches
+    # mergeadas em main) e manter um padrão sem uso novo não custa nada.
+    branches:
+      [main, dev, "feat/**", "fix/**", "chore/**", "feature/**"]
   pull_request:
     branches: [main, dev]
 
