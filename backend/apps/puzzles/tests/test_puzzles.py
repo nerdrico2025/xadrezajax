@@ -84,6 +84,19 @@ def detail_url(puzzle):
     return reverse("puzzles:detail", args=[puzzle.id])
 
 
+def check_move_url(puzzle):
+    return reverse("puzzles:check_move", args=[puzzle.id])
+
+
+# Sequência de 3 lances (jogador, oponente, jogador) — o caso que prova que o
+# `check-move/` devolve a resposta do oponente sem entregar a solução inteira.
+SKEWER = {
+    "fen": "8/8/8/k2r4/8/8/8/K6R w - - 0 1",
+    "solution": ["h1h5", "a5a4", "h5d5"],
+    "category": "skewer",
+}
+
+
 class CleanPuzzleBankMixin:
     """Zera o banco semeado pela migration 0002 para que o problema do dia
     seja previsível nos testes."""
@@ -152,9 +165,19 @@ class DailyPuzzleAccessTests(CleanPuzzleBankMixin, APITestCase):
         response = self.client.get(DAILY_URL)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["id"], self.puzzle.id)
-        self.assertIn("solution", response.data)
         self.assertEqual(response.data["max_attempts"], DAILY_PUZZLE_MAX_ATTEMPTS)
         self.assertEqual(response.data["attempts_left"], DAILY_PUZZLE_MAX_ATTEMPTS)
+
+    def test_diario_jogavel_nao_entrega_a_solucao(self):
+        """Este teste afirmava o CONTRÁRIO (`assertIn`), cristalizando o
+        vazamento: o `daily/` devolvia a solução em texto plano no GET, antes
+        de qualquer tentativa. Bastava ler a resposta para ter o lance.
+
+        A validação passou a ser do servidor (`check-move/`), então o cliente
+        não precisa mais da solução para jogar.
+        """
+        response = self.client.get(DAILY_URL)
+        self.assertNotIn("solution", response.data)
 
     def test_usuario_pago_tambem_acessa_o_diario(self):
         make_paid(self.user)
@@ -409,7 +432,10 @@ class DailyExhaustionTests(CleanPuzzleBankMixin, APITestCase):
         response = self.client.get(DAILY_URL)
         self.assertFalse(response.data["exhausted"])
         self.assertEqual(response.data["attempts_left"], DAILY_PUZZLE_MAX_ATTEMPTS)
-        self.assertIn("solution", response.data)
+        # O esgotamento de ontem não vale hoje: o problema voltou a ser
+        # jogável, logo a solução volta a ser segredo. Este assert era
+        # `assertIn` e vazava a resposta de um problema ainda por jogar.
+        self.assertNotIn("solution", response.data)
 
 
 class DailyReciclagemTests(CleanPuzzleBankMixin, APITestCase):
@@ -611,6 +637,223 @@ class DailyReciclagemTests(CleanPuzzleBankMixin, APITestCase):
         response = self.client.get(DAILY_URL)
         self.assertFalse(response.data["already_solved"])
         self.assertTrue(response.data["exhausted"])
+
+
+class SolutionLeakTests(CleanPuzzleBankMixin, APITestCase):
+    """A solução não sai do servidor enquanto o problema está jogável.
+
+    Antes, `_puzzle_payload` tinha `include_solution=True` no default e os três
+    endpoints que servem problema chamavam sem argumento — `daily/`, `<pk>/` e
+    `next/` entregavam a resposta no GET. Estes testes fecham os três.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.puzzle = make_puzzle("Diário")
+        self.user = make_user()
+        self.client.force_authenticate(user=self.user)
+        self.daily = get_daily_puzzle()
+
+    def test_daily_nao_vaza_enquanto_jogavel(self):
+        self.assertNotIn("solution", self.client.get(DAILY_URL).data)
+
+    def test_detalhe_do_diario_nao_vaza_enquanto_jogavel(self):
+        response = self.client.get(detail_url(self.daily))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotIn("solution", response.data)
+
+    def test_next_do_treino_nao_vaza_problema_por_resolver(self):
+        make_paid(self.user)
+        response = self.client.get(NEXT_URL)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotIn("solution", response.data)
+
+    def test_detalhe_revela_ao_ja_resolvido_no_treino(self):
+        """Progressão de treino é permanente: reabrir o que já foi resolvido
+        mostra a solução."""
+        make_paid(self.user)
+        treino = make_puzzle("Do treino", rating=5000)
+        UserPuzzleProgress.objects.create(
+            user=self.user, puzzle=treino, solved=True, solved_at=timezone.now()
+        )
+        response = self.client.get(detail_url(treino))
+        self.assertIn("solution", response.data)
+
+    def test_diario_resolvido_hoje_revela(self):
+        self.client.post(
+            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
+        )
+        self.assertIn("solution", self.client.get(DAILY_URL).data)
+
+    def test_diario_de_ciclo_anterior_nao_revela_ao_voltar_jogavel(self):
+        """O caso que `progress.solved` sozinho erraria.
+
+        Resolvido num ciclo anterior (solved=True permanente), hoje é o diário
+        de novo e está JOGÁVEL — revelar aqui entregaria a resposta de um
+        problema que o usuário ainda vai jogar hoje.
+        """
+        UserPuzzleProgress.objects.create(
+            user=self.user,
+            puzzle=self.daily,
+            solved=True,
+            solved_at=timezone.now() - timedelta(days=5),
+            daily_solved_date=timezone.localdate() - timedelta(days=5),
+        )
+        response = self.client.get(DAILY_URL)
+        self.assertFalse(response.data["already_solved"])
+        self.assertNotIn("solution", response.data)
+
+    def test_progress_de_ciclo_anterior_tambem_nao_revela_na_falha(self):
+        """Mesma regra no `progress/`: errar hoje um problema resolvido num
+        ciclo antigo não pode revelar a solução."""
+        UserPuzzleProgress.objects.create(
+            user=self.user,
+            puzzle=self.daily,
+            solved=True,
+            solved_at=timezone.now() - timedelta(days=5),
+            daily_solved_date=timezone.localdate() - timedelta(days=5),
+        )
+        response = self.client.post(
+            progress_url(self.daily), {"solved": False, "attempts": 1}, format="json"
+        )
+        self.assertNotIn("solution", response.data)
+
+
+class CheckMoveTests(CleanPuzzleBankMixin, APITestCase):
+    """Validação do lance no servidor — o que substitui a comparação local."""
+
+    def setUp(self):
+        super().setUp()
+        make_puzzle("Único", **SKEWER)
+        self.user = make_user()
+        self.client.force_authenticate(user=self.user)
+        self.daily = get_daily_puzzle()
+
+    def check(self, move, index=0, **extra):
+        return self.client.post(
+            check_move_url(self.daily),
+            {"move": move, "index": index, **extra},
+            format="json",
+        )
+
+    # ── o lance certo avança a sequência ─────────────────────────────────
+    def test_lance_certo_devolve_a_resposta_do_oponente_e_avanca(self):
+        response = self.check("h1h5", index=0)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["correct"])
+        # O lance do oponente é consequência de um lance que o usuário já
+        # encontrou — o cliente precisa dele para animar o tabuleiro.
+        self.assertEqual(response.data["reply"], "a5a4")
+        self.assertEqual(response.data["next_index"], 2)
+        self.assertFalse(response.data["solved"])
+
+    def test_ultimo_lance_da_sequencia_encerra_o_problema(self):
+        response = self.check("h5d5", index=2)
+        self.assertTrue(response.data["correct"])
+        self.assertTrue(response.data["solved"])
+        self.assertIsNone(response.data["next_index"])
+        self.assertIsNone(response.data["reply"])
+
+    def test_mate_em_1_encerra_no_primeiro_lance(self):
+        Puzzle.objects.all().delete()
+        DailyPuzzle.objects.all().delete()
+        make_puzzle("Mate em 1")
+        self.daily = get_daily_puzzle()
+        response = self.check("a1a8", index=0)
+        self.assertTrue(response.data["correct"])
+        self.assertTrue(response.data["solved"])
+        self.assertIsNone(response.data["reply"])
+
+    def test_normaliza_caixa_e_espacos(self):
+        """Erro de formatação do cliente não pode virar 'lance errado' — isso
+        custaria uma tentativa ao usuário por um acerto."""
+        self.assertTrue(self.check(" H1H5 ", index=0).data["correct"])
+
+    def test_aceita_from_to_em_vez_de_move(self):
+        response = self.client.post(
+            check_move_url(self.daily),
+            {"from": "h1", "to": "h5", "index": 0},
+            format="json",
+        )
+        self.assertTrue(response.data["correct"])
+
+    # ── o lance errado não avança e não vaza ─────────────────────────────
+    def test_lance_errado_nao_avanca_o_indice(self):
+        response = self.check("h1h2", index=0)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["correct"])
+        self.assertEqual(response.data["next_index"], 0)
+        self.assertFalse(response.data["solved"])
+
+    def test_lance_errado_nao_expoe_a_proxima_jogada(self):
+        """O ponto do endpoint: a resposta do erro é só o booleano. Nem a
+        solução, nem o `reply`, nem o tamanho da sequência."""
+        response = self.check("h1h2", index=0)
+        self.assertNotIn("solution", response.data)
+        self.assertIsNone(response.data["reply"])
+        corpo = str(response.data)
+        for lance in SKEWER["solution"]:
+            self.assertNotIn(lance, corpo)
+
+    def test_check_move_nao_grava_progresso_nem_conta_tentativa(self):
+        """Quem conta tentativa e carimba esgotamento continua sendo o
+        `progress/` — o check-move é função pura."""
+        for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS + 2):
+            self.check("h1h2", index=0)
+        self.assertFalse(
+            UserPuzzleProgress.objects.filter(
+                user=self.user, puzzle=self.daily
+            ).exists()
+        )
+        self.assertFalse(self.client.get(DAILY_URL).data["exhausted"])
+
+    # ── entradas inválidas ───────────────────────────────────────────────
+    def test_indice_fora_da_sequencia_e_400_nao_lance_errado(self):
+        """Dessincronismo entre tela e servidor é erro de cliente; responder
+        'errado' esconderia o problema real atrás de feedback de xadrez."""
+        self.assertEqual(
+            self.check("h1h5", index=99).status_code, status.HTTP_400_BAD_REQUEST
+        )
+        self.assertEqual(
+            self.check("h1h5", index=-1).status_code, status.HTTP_400_BAD_REQUEST
+        )
+
+    def test_lance_malformado_e_400(self):
+        self.assertEqual(self.check("").status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.check("h1").status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_problema_inexistente_e_404(self):
+        response = self.client.post(
+            reverse("puzzles:check_move", args=[999999]),
+            {"move": "h1h5", "index": 0},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_nao_autenticado_e_rejeitado(self):
+        self.client.force_authenticate(user=None)
+        self.assertEqual(self.check("h1h5").status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ── gating: não pode virar a porta dos fundos do Treino ──────────────
+    def test_gratis_e_bloqueado_em_problema_de_treino(self):
+        """Sem este gating o usuário grátis resolveria problema pago lance a
+        lance, usando o check-move como oráculo."""
+        treino = make_puzzle("Do treino", rating=5000)
+        self.assertNotEqual(treino.id, self.daily.id)
+        response = self.client.post(
+            check_move_url(treino), {"move": "a1a8", "index": 0}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["code"], "training_requires_premium")
+
+    def test_pago_valida_lance_no_treino(self):
+        make_paid(self.user)
+        treino = make_puzzle("Do treino", rating=5000)
+        response = self.client.post(
+            check_move_url(treino), {"move": "a1a8", "index": 0}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["correct"])
 
 
 class StatsTests(CleanPuzzleBankMixin, APITestCase):

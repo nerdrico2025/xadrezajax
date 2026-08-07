@@ -46,6 +46,7 @@ const mockGetStats = jest.fn();
 const mockGetDaily = jest.fn();
 const mockGetNext = jest.fn();
 const mockReportProgress = jest.fn();
+const mockCheckMove = jest.fn();
 jest.mock("@/services/puzzles", () => {
   const actual = jest.requireActual("@/services/puzzles");
   return {
@@ -54,6 +55,7 @@ jest.mock("@/services/puzzles", () => {
     getDailyPuzzle: (...args: unknown[]) => mockGetDaily(...args),
     getNextPuzzle: (...args: unknown[]) => mockGetNext(...args),
     reportPuzzleProgress: (...args: unknown[]) => mockReportProgress(...args),
+    checkPuzzleMove: (...args: unknown[]) => mockCheckMove(...args),
   };
 });
 
@@ -72,12 +74,15 @@ const STATS = {
   training_unlocked: false,
 };
 
+// ⚠️ Nenhum destes payloads tem `solution`, e isso é o CONTRATO, não descuido:
+// o servidor só entrega a solução no estado terminal. Um problema jogável
+// chega sem ela, e a tela precisa funcionar assim — a validação do lance é do
+// servidor (`checkPuzzleMove`).
 const MATE_IN_1 = {
   id: 1,
   title: "Mate de Retaguarda",
   description: "Torre na última fileira.",
   fen: "6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1",
-  solution: ["a1a8"],
   difficulty: "medium",
   category: "mate_in_1",
   rating: 800,
@@ -97,12 +102,20 @@ const SKEWER = {
   title: "Espeto com Torre",
   description: "Force o rei a recuar.",
   fen: "8/8/8/k2r4/8/8/8/K6R w - - 0 1",
-  solution: ["h1h5", "a5a4", "h5d5"],
   difficulty: "medium",
   category: "skewer",
   rating: 1300,
   already_solved: false,
 };
+
+/** Veredito de lance certo que encerra o problema (mate em 1). */
+const ACERTOU_E_ACABOU = {
+  correct: true,
+  next_index: null,
+  solved: true,
+  reply: null,
+};
+const ERROU = { correct: false, next_index: 0, solved: false, reply: null };
 
 async function render(
   props: { mode?: "daily" | "training"; onBack?: jest.Mock; onUpgrade?: jest.Mock } = {}
@@ -201,6 +214,7 @@ beforeEach(() => {
   mockGetStats.mockResolvedValue(STATS);
   mockGetDaily.mockResolvedValue(DAILY);
   mockGetNext.mockResolvedValue(MATE_IN_1);
+  mockCheckMove.mockResolvedValue(ACERTOU_E_ACABOU);
   mockReportProgress.mockResolvedValue({
     puzzle_id: 1,
     solved: true,
@@ -226,9 +240,43 @@ describe("Problema do dia (mode=daily)", () => {
 
   it("NÃO revela a solução ao usuário durante o jogo", async () => {
     const tree = await render({ mode: "daily" });
-    // A tela tem a solução em mãos (validação client-side), mas não a mostra.
+    // Antes a tela TINHA a solução em mãos (validação client-side) e apenas
+    // não a desenhava. Agora nem tem: o payload do problema jogável não a
+    // traz, e o esconder deixou de depender do JSX.
     expect(hasText(tree.root, "A jogada certa era")).toBe(false);
     expect(hasText(tree.root, "Ra8#")).toBe(false);
+  });
+
+  it("valida o lance no SERVIDOR, com o índice da sequência", async () => {
+    await render({ mode: "daily" });
+    await makeMove("a1", "a8");
+    expect(mockCheckMove).toHaveBeenCalledWith("test-token", 1, "a1a8", 0);
+  });
+
+  it("o payload do problema jogável não traz a solução", async () => {
+    // Trava o contrato pelo lado do cliente: se o backend voltar a mandar a
+    // solução no GET, este teste continua passando — mas a tela não depende
+    // mais dela para jogar, que é o que impede a regressão de virar bug.
+    await render({ mode: "daily" });
+    expect(mockGetDaily).toHaveBeenCalled();
+    const payload = await mockGetDaily.mock.results[0].value;
+    expect(payload.solution).toBeUndefined();
+  });
+
+  it("falha de rede na validação NÃO consome tentativa", async () => {
+    mockCheckMove.mockRejectedValue(new Error("Sem conexão"));
+    const tree = await render({ mode: "daily" });
+
+    await makeMove("a1", "a8");
+
+    // Sem veredito não há tentativa: o servidor não pode ser informado de uma
+    // falha que talvez nem tenha acontecido.
+    expect(mockReportProgress).not.toHaveBeenCalled();
+    expect(hasText(tree.root, "Não deu para verificar o lance. Tente de novo.")).toBe(
+      true
+    );
+    // E o tabuleiro continua jogável — não trava em "Tentar novamente".
+    expect(hasText(tree.root, "Tentar novamente")).toBe(false);
   });
 
   it("registra puzzle_started com o modo", async () => {
@@ -238,6 +286,7 @@ describe("Problema do dia (mode=daily)", () => {
   });
 
   it("lance errado reporta a falha ao servidor e oferece retry", async () => {
+    mockCheckMove.mockResolvedValue(ERROU);
     mockReportProgress.mockResolvedValue({
       puzzle_id: 1,
       solved: false,
@@ -259,6 +308,7 @@ describe("Problema do dia (mode=daily)", () => {
   });
 
   it("contador avança conforme o servidor responde", async () => {
+    mockCheckMove.mockResolvedValue(ERROU);
     mockReportProgress.mockResolvedValue({
       puzzle_id: 1,
       solved: false,
@@ -284,6 +334,7 @@ describe("Problema do dia (mode=daily)", () => {
   });
 
   it("esgotar as tentativas revela a solução e diz para voltar amanhã", async () => {
+    mockCheckMove.mockResolvedValue(ERROU);
     mockReportProgress.mockResolvedValue({
       puzzle_id: 1,
       solved: false,
@@ -332,11 +383,13 @@ describe("Problema do dia (mode=daily)", () => {
   });
 
   it("acerto também mostra a solução no tabuleiro, somente leitura", async () => {
+    // A solução chega pela resposta do progress/, não do payload inicial.
     mockReportProgress.mockResolvedValue({
       puzzle_id: 1,
       solved: true,
       attempts: 1,
       mode: "daily",
+      solution: ["a1a8"],
     });
     const tree = await render({ mode: "daily" });
     await makeMove("a1", "a8");
@@ -386,7 +439,12 @@ describe("Tabuleiro dimensionado pela área disponível", () => {
   });
 
   it("a seta da solução usa o MESMO lado do tabuleiro", async () => {
-    mockGetDaily.mockResolvedValue({ ...DAILY, exhausted: true });
+    // Esgotado é estado terminal — aqui o payload TEM a solução.
+    mockGetDaily.mockResolvedValue({
+      ...DAILY,
+      exhausted: true,
+      solution: ["a1a8"],
+    });
     const tree = await render({ mode: "daily" });
     await layoutBoard(tree.root, 400, 300);
     expect(boardProps.boardSize).toBe(296);
@@ -407,6 +465,7 @@ describe("Treino (mode=training)", () => {
   });
 
   it("lance errado não reporta falha nem esgota", async () => {
+    mockCheckMove.mockResolvedValue(ERROU);
     const tree = await render({ mode: "training" });
     await makeMove("a1", "a2");
     expect(mockReportProgress).not.toHaveBeenCalled();
@@ -425,6 +484,16 @@ describe("Treino (mode=training)", () => {
 
   it("resolvido oferece o próximo problema", async () => {
     mockGetNext.mockResolvedValue(SKEWER);
+    // Sequência de 3 lances: o servidor devolve a resposta do oponente no
+    // primeiro veredito e encerra no segundo.
+    mockCheckMove
+      .mockResolvedValueOnce({
+        correct: true,
+        next_index: 2,
+        solved: false,
+        reply: "a5a4",
+      })
+      .mockResolvedValueOnce(ACERTOU_E_ACABOU);
     mockReportProgress.mockResolvedValue({
       puzzle_id: 2,
       solved: true,
@@ -438,6 +507,27 @@ describe("Treino (mode=training)", () => {
 
     expect(hasText(tree.root, "Muito bem! Problema resolvido!")).toBe(true);
     expect(hasText(tree.root, "Próximo problema")).toBe(true);
+  });
+
+  it("a resposta do oponente vem do servidor, com o índice que ele devolveu", async () => {
+    mockGetNext.mockResolvedValue(SKEWER);
+    mockCheckMove
+      .mockResolvedValueOnce({
+        correct: true,
+        next_index: 2,
+        solved: false,
+        reply: "a5a4",
+      })
+      .mockResolvedValueOnce(ACERTOU_E_ACABOU);
+    await render({ mode: "training" });
+
+    await makeMove("h1", "h5");
+    await makeMove("h5", "d5");
+
+    // O 2º lance é validado no índice 2 — o que o servidor mandou, não uma
+    // contagem local. A tela não sabe o tamanho da sequência.
+    expect(mockCheckMove).toHaveBeenNthCalledWith(1, "test-token", 2, "h1h5", 0);
+    expect(mockCheckMove).toHaveBeenNthCalledWith(2, "test-token", 2, "h5d5", 2);
   });
 });
 

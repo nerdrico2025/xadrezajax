@@ -24,7 +24,12 @@ import { useChessSound } from "@/hooks/useChessSound";
 import { usePuzzleSession } from "@/hooks/usePuzzleSession";
 import { parseUciMove } from "@/utils/chessSpecialMoves";
 import { logEvent } from "@/services/analytics";
-import { reportPuzzleProgress, type PuzzleMode } from "@/services/puzzles";
+import {
+  checkPuzzleMove,
+  reportPuzzleProgress,
+  type PuzzleCheckMoveResult,
+  type PuzzleMode,
+} from "@/services/puzzles";
 import SolutionArrow from "./SolutionArrow";
 
 type Props = {
@@ -68,8 +73,20 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
     refreshStats,
   } = usePuzzleSession(mode);
 
-  const [feedback, setFeedback] = useState<"ready" | "wrong" | "progress">("ready");
+  const [feedback, setFeedback] = useState<
+    "ready" | "wrong" | "progress" | "offline"
+  >("ready");
   const [replying, setReplying] = useState(false);
+  // Lance em validação no servidor. A peça já andou no tabuleiro (a lib move
+  // antes de chamar `onMove`), então o que espera a rede é só o VEREDITO —
+  // mas o tabuleiro fica travado nesse meio tempo para não aceitar um segundo
+  // lance em cima de um índice que ainda não avançou.
+  const [checking, setChecking] = useState(false);
+  // Solução revelada pelo servidor no estado terminal. Não vem mais no payload
+  // do problema enquanto ele está jogável — chega pela resposta do
+  // `progress/`, ou já no payload quando a tela abre num diário
+  // resolvido/esgotado.
+  const [revealedSolution, setRevealedSolution] = useState<string[] | null>(null);
   // Erro pendente: o lance errado fica no tabuleiro até o usuário pedir para
   // tentar de novo (o desfazer automático não deixava ver o próprio erro).
   const [pendingRetry, setPendingRetry] = useState(false);
@@ -96,6 +113,11 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
     attemptsRef.current = 1;
     setFeedback("ready");
     setPendingRetry(false);
+    setChecking(false);
+    // Só vem preenchida quando a tela abre já num estado terminal (reabrir um
+    // diário resolvido ou esgotado). Num problema jogável é `undefined`, e a
+    // seta da solução fica fora de cena até o servidor revelá-la.
+    setRevealedSolution(puzzle.solution ?? null);
     celebration.setValue(0);
     if (state === "playing") {
       logEvent("puzzle_started", {
@@ -131,7 +153,15 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
     setState("solved");
     celebrate();
     try {
-      await reportPuzzleProgress(token, puzzle.id, true, attemptsRef.current);
+      const result = await reportPuzzleProgress(
+        token,
+        puzzle.id,
+        true,
+        attemptsRef.current
+      );
+      // A solução chega aqui, não no payload do problema — é este canal que
+      // alimenta a seta de revisão sobre o tabuleiro.
+      if (result.solution) setRevealedSolution(result.solution);
     } catch {
       // Progresso é reconciliável: o próximo stats/ reflete o que o backend
       // aceitou; não bloqueia a celebração local.
@@ -154,6 +184,9 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
           attempts: result.attempts_used ?? attemptsRef.current,
           mode,
         });
+        // Esgotar revela a solução (decisão de produto: aprendizado). Ela vem
+        // nesta resposta — é a única vez que o servidor a entrega sem acerto.
+        if (result.solution) setRevealedSolution(result.solution);
         setState("exhausted");
         await refreshStats();
       }
@@ -215,16 +248,38 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
   );
 
   const onMove = async (data: any) => {
-    if (!puzzle || state !== "playing" || replying || pendingRetry) return;
+    if (!puzzle || state !== "playing" || replying || pendingRetry || checking) return;
     const { move } = data;
     if (!move) return;
     if (gameRef.current.turn() !== playerColor) return;
+    if (!token) return;
 
-    const solution = puzzle.solution ?? [];
-    const expected = solution[solutionIndexRef.current];
     const played = `${move.from}${move.to}${move.promotion ?? ""}`.toLowerCase();
 
-    if (played !== expected?.toLowerCase()) {
+    // Quem sabe a resposta é o servidor. A tela não tem mais `puzzle.solution`
+    // enquanto o problema está jogável — era exatamente isso que vazava.
+    let verdict: PuzzleCheckMoveResult | null = null;
+    setChecking(true);
+    try {
+      verdict = await checkPuzzleMove(
+        token,
+        puzzle.id,
+        played,
+        solutionIndexRef.current
+      );
+    } catch {
+      // Sem veredito não dá para saber se o lance estava certo, então NÃO
+      // conta tentativa: cair a rede não pode custar uma das 4 do dia.
+      // Desfaz o lance e devolve o tabuleiro ao usuário.
+      setFeedback("offline");
+      chessboardRef.current?.resetBoard(gameRef.current.fen());
+      return;
+    } finally {
+      setChecking(false);
+    }
+    if (!verdict) return;
+
+    if (!verdict.correct) {
       attemptsRef.current += 1;
       setFeedback("wrong");
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -248,20 +303,25 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
     play(applied.captured ? "capture" : "move");
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    solutionIndexRef.current += 1;
-    if (solutionIndexRef.current >= solution.length) {
+    // A resposta do oponente vem no veredito, não da solução local: é a
+    // consequência de um lance que o usuário JÁ encontrou, e sem ela o
+    // tabuleiro não teria como continuar a sequência.
+    if (verdict.reply) {
+      setFeedback("progress");
+      await playOpponentReply(verdict.reply);
+    }
+
+    if (verdict.solved) {
       await finishPuzzle();
       return;
     }
 
-    setFeedback("progress");
-    const replyUci = solution[solutionIndexRef.current];
-    solutionIndexRef.current += 1;
-    await playOpponentReply(replyUci);
-
-    if (solutionIndexRef.current >= solution.length) {
-      await finishPuzzle();
+    // O índice passa a ser o que o servidor devolveu — a tela não conta mais
+    // lances por conta própria.
+    if (verdict.next_index !== null) {
+      solutionIndexRef.current = verdict.next_index;
     }
+    setFeedback("progress");
   };
 
   const attemptsLeft = Math.max(0, maxAttempts - attemptsUsed);
@@ -272,6 +332,8 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
         : "Pretas jogam — encontre o melhor lance",
     wrong: "Esse não é o melhor lance. Tente outra ideia.",
     progress: "Boa! Continue a sequência",
+    // Sem rede não houve veredito — e sem veredito não houve tentativa.
+    offline: "Não deu para verificar o lance. Tente de novo.",
   }[feedback];
 
   const title = isDaily ? "Problema do dia" : "Treino";
@@ -282,8 +344,12 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
   //
   // Em problemas de vários lances mostramos o PRIMEIRO — é o lance-chave, o que
   // o usuário precisava enxergar; a sequência inteira viraria poluição visual.
+  //
+  // Fonte é `revealedSolution`, não `puzzle.solution`: durante o jogo a tela
+  // simplesmente não tem a solução, então não há o que desenhar mesmo que
+  // alguém remova o `isTerminal` do JSX por engano.
   const solution = (() => {
-    const first = puzzle?.solution?.[0];
+    const first = revealedSolution?.[0];
     if (!puzzle || !first) return null;
     const parsed = parseUciMove(first);
     if (!parsed) return null;
@@ -303,7 +369,7 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
       from: parsed.from,
       to: parsed.to,
       san,
-      hasMore: (puzzle.solution?.length ?? 0) > 1,
+      hasMore: (revealedSolution?.length ?? 0) > 1,
     };
   })();
 
@@ -526,7 +592,9 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
                     onMove={onMove}
                     colors={boardColors}
                     promotionLabels={PROMOTION_LABELS}
-                    gestureEnabled={state === "playing" && !replying && !pendingRetry}
+                    gestureEnabled={
+                      state === "playing" && !replying && !pendingRetry && !checking
+                    }
                   />
                   {isTerminal && solution && (
                     <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -591,7 +659,9 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
             ) : pendingRetry ? (
               <Button title="Tentar novamente" variant="accent" onPress={handleRetry} />
             ) : (
-              replying && <ActivityIndicator size="small" color={colors.secondary} />
+              (replying || checking) && (
+                <ActivityIndicator size="small" color={colors.secondary} />
+              )
             )}
           </View>
         </View>
