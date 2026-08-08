@@ -1,6 +1,7 @@
 import logging
 import secrets
 import threading
+from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
@@ -30,8 +31,11 @@ from .glicko2 import (
 )
 from .models import (
     Game,
+    GameAnalysis,
     ModalityRating,
+    enqueue_analysis,
     get_or_create_profile,
+    normalize_analysis_moves,
     normalize_moves,
     normalize_termination,
 )
@@ -479,6 +483,21 @@ def _parse_started_at(raw):
     return parsed
 
 
+def _opt_int(value):
+    """Inteiro do payload, ou None. Usado nos campos opcionais da análise."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _time_control_seconds(data):
     """Base do relógio em segundos, ou None (sem relógio / valor inválido).
 
@@ -741,6 +760,12 @@ class GameResultView(APIView):
                 color=GameHistory.COLOR_BLACK,
             )
 
+            # Fila de análise pós-jogo (Fase 2). Basta UM dos dois ser
+            # pagante — a partida é um tabuleiro só e a análise roda uma vez;
+            # quem não paga recebe "indisponível" na leitura. No-op com a
+            # flag desligada.
+            enqueue_analysis(game, [white_profile, black_profile])
+
         # `rated`/`rating_before`/`delta` na resposta: o node-api repassa isto
         # aos dois jogadores para a tela de resultado mostrar o delta REAL do
         # Glicko-2 (+X/-Y) em vez de um texto genérico. O app nunca calcula o
@@ -949,6 +974,12 @@ class AiGameResultView(APIView):
             if result == "win":
                 record_campaign_win(profile, difficulty, history.id)
 
+            # Fila de análise pós-jogo (Fase 2). `game` é None quando o app
+            # não mandou `player_color` — sem partida montada não há o que
+            # analisar. No-op com a flag desligada.
+            if game is not None:
+                enqueue_analysis(game, [profile])
+
         return Response(
             {
                 "rating": round(modality_rating.rating),
@@ -1038,6 +1069,291 @@ class InternalColorBalanceView(APIView):
             players[str(row["user_id"])][key] = row["n"]
 
         return Response({"players": players})
+
+
+# ─── Análise pós-jogo (Fase 2) ────────────────────────────────────────────────
+#
+# Três endpoints, dois públicos-alvo:
+#
+#   node-api  GET  internal/analysis/next/    pega trabalho (aluga)
+#             POST internal/analysis/result/  devolve o resultado
+#   app       GET  games/<public_id>/analysis/  lê, se o plano permitir
+#
+# A FILA MORA AQUI, no Postgres, e o node-api PUXA. Nenhum canal
+# Django → node-api é criado — a direção continua sendo só node-api → Django,
+# que é a que já existe e já tem segredo compartilhado. O ganho não é de
+# elegância: o node-api reinicia a cada deploy e perde o que está em memória,
+# então quem sabe que a análise está pendente precisa ser quem sobrevive.
+
+# Quanto tempo o node-api tem para terminar uma análise antes de o trabalho
+# voltar para a fila. Generoso de propósito: o pior caso (300 plies a 400ms,
+# com recuo cooperativo quando há partida ao vivo) passa de 2 min, e devolver
+# à fila cedo demais faria duas engines analisarem a mesma partida.
+ANALYSIS_LEASE_MINUTES = 15
+
+
+def _internal_secret_ok(request):
+    secret = request.headers.get("X-Internal-Secret", "")
+    expected = getattr(settings, "INTERNAL_API_SECRET", "")
+    return bool(expected) and secret == expected
+
+
+class InternalAnalysisNextView(APIView):
+    """
+    GET /api/v1/auth/internal/analysis/next/
+    O node-api pergunta se há partida para analisar. Autenticado por
+    INTERNAL_API_SECRET, sem throttle (tráfego interno, em polling).
+
+    Entrega no máximo UMA análise por chamada e a ALUGA: marca
+    `status=analisando` e `leased_until`. Aluguel vencido significa que o
+    worker morreu no meio (deploy, queda) — o trabalho volta a ser elegível
+    aqui mesmo, sem daemon nem cron.
+
+    Depois de MAX_ATTEMPTS tentativas a análise vira `falhou` em vez de
+    voltar para a fila: uma partida que derruba o worker toda vez ocuparia a
+    engine para sempre.
+
+    Responde 204 quando não há trabalho — o node-api trata como "dorme e
+    pergunta de novo", não como erro.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    def get(self, request):
+        if not _internal_secret_ok(request):
+            return Response(
+                {"detail": "Não autorizado."}, status=status.HTTP_403_FORBIDDEN
+            )
+
+        now = timezone.now()
+        with transaction.atomic():
+            # `select_for_update(skip_locked=True)`: se um dia houver mais de
+            # um worker, cada um pega uma linha diferente em vez de os dois
+            # disputarem a mesma. Com um worker só é inofensivo.
+            candidates = (
+                GameAnalysis.objects.select_for_update(skip_locked=True)
+                .filter(
+                    Q(status=GameAnalysis.STATUS_PENDING)
+                    | Q(status=GameAnalysis.STATUS_RUNNING, leased_until__lt=now)
+                )
+                .order_by("created_at")
+            )
+
+            for analysis in candidates:
+                analysis.attempts += 1
+                if analysis.attempts > GameAnalysis.MAX_ATTEMPTS:
+                    analysis.status = GameAnalysis.STATUS_FAILED
+                    analysis.failure_reason = (
+                        f"Excedeu {GameAnalysis.MAX_ATTEMPTS} tentativas."
+                    )
+                    analysis.leased_until = None
+                    analysis.completed_at = now
+                    analysis.save(
+                        update_fields=[
+                            "attempts",
+                            "status",
+                            "failure_reason",
+                            "leased_until",
+                            "completed_at",
+                        ]
+                    )
+                    continue
+
+                analysis.status = GameAnalysis.STATUS_RUNNING
+                analysis.leased_until = now + timedelta(minutes=ANALYSIS_LEASE_MINUTES)
+                analysis.save(update_fields=["attempts", "status", "leased_until"])
+
+                game = analysis.game
+                return Response(
+                    {
+                        "analysis_id": analysis.id,
+                        "game_public_id": str(game.public_id),
+                        # Os lances vão no MESMO payload: sem isto o node-api
+                        # precisaria de uma segunda chamada, e entre as duas a
+                        # partida já estaria alugada por ele mesmo.
+                        "moves": game.moves,
+                        "initial_fen": game.initial_fen,
+                        "result": game.result,
+                        "mode": game.mode,
+                        "max_plies": GameAnalysis.MAX_ANALYZED_PLIES,
+                        "lease_seconds": ANALYSIS_LEASE_MINUTES * 60,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class InternalAnalysisResultView(APIView):
+    """
+    POST /api/v1/auth/internal/analysis/result/
+    O node-api devolve o que calculou. Autenticado por INTERNAL_API_SECRET.
+
+    Aceita os dois desfechos:
+      sucesso  {analysis_id, moves, counts, accuracies, ...}
+      falha    {analysis_id, failed: true, failure_reason}
+
+    A falha reportada aqui é TERMINAL (partida com lance ilegal, payload
+    corrompido): não adianta tentar de novo, o dado não vai melhorar. Falha
+    por queda do worker é outra coisa — essa nem chega aqui, expira pelo
+    aluguel e volta para a fila.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    def post(self, request):
+        if not _internal_secret_ok(request):
+            return Response(
+                {"detail": "Não autorizado."}, status=status.HTTP_403_FORBIDDEN
+            )
+
+        analysis_id = request.data.get("analysis_id")
+        analysis = GameAnalysis.objects.filter(id=analysis_id).first()
+        if analysis is None:
+            return Response(
+                {"detail": "Análise não encontrada."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        now = timezone.now()
+
+        if request.data.get("failed"):
+            analysis.status = GameAnalysis.STATUS_FAILED
+            analysis.failure_reason = str(request.data.get("failure_reason", ""))[:200]
+            analysis.leased_until = None
+            analysis.completed_at = now
+            analysis.save(
+                update_fields=[
+                    "status",
+                    "failure_reason",
+                    "leased_until",
+                    "completed_at",
+                ]
+            )
+            return Response({"status": analysis.status}, status=status.HTTP_200_OK)
+
+        moves, _total, _truncated = normalize_analysis_moves(request.data.get("moves"))
+        analysis.moves = moves
+        analysis.analyzed_plies = len(moves)
+        analysis.counts = (
+            request.data.get("counts")
+            if isinstance(request.data.get("counts"), dict)
+            else {}
+        )
+        analysis.white_accuracy = _opt_float(request.data.get("white_accuracy"))
+        analysis.black_accuracy = _opt_float(request.data.get("black_accuracy"))
+        analysis.white_avg_loss = _opt_int(request.data.get("white_avg_loss"))
+        analysis.black_avg_loss = _opt_int(request.data.get("black_avg_loss"))
+        analysis.turning_point_ply = _opt_int(request.data.get("turning_point_ply"))
+        analysis.engine_depth = _opt_int(request.data.get("engine_depth"))
+        analysis.engine_movetime = _opt_int(request.data.get("engine_movetime"))
+        analysis.engine_id = str(request.data.get("engine_id", ""))[:60]
+        analysis.params_version = (
+            _opt_int(request.data.get("params_version")) or GameAnalysis.PARAMS_VERSION
+        )
+        analysis.status = GameAnalysis.STATUS_DONE
+        analysis.failure_reason = ""
+        analysis.leased_until = None
+        analysis.completed_at = now
+        analysis.save()
+
+        return Response({"status": analysis.status}, status=status.HTTP_200_OK)
+
+
+class GameAnalysisView(APIView):
+    """
+    GET /api/v1/auth/games/<public_id>/analysis/
+    Estado e conteúdo da análise, para o app fazer polling depois da partida.
+
+    DOIS portões, que protegem coisas diferentes:
+
+      1. PARTICIPAÇÃO — quem não jogou a partida recebe 404. Análise revela a
+         partida inteira lance a lance; não é dado público.
+      2. PLANO — `has_paid_access` do SOLICITANTE. Numa partida em que só um
+         dos dois paga, a análise existe (foi enfileirada por causa dele) e o
+         outro recebe `indisponivel` mesmo com o status `pronta`.
+
+    O gating de plano é do LEITOR, não da partida: é por isso que ele não
+    pode ser resolvido só no enfileiramento.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    STATUS_UNAVAILABLE = "indisponivel"
+    STATUS_NONE = "inexistente"
+
+    def get(self, request, public_id):
+        from apps.payments.access import has_paid_access
+
+        game = Game.objects.filter(public_id=public_id).first()
+        if game is None:
+            return Response(
+                {"detail": "Partida não encontrada."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        user_id = request.user.id
+        if user_id not in (game.white_player_id, game.black_player_id):
+            # 404 e não 403: quem não jogou não precisa nem saber que a
+            # partida existe.
+            return Response(
+                {"detail": "Partida não encontrada."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        profile = get_or_create_profile(request.user)
+        if not has_paid_access(profile):
+            return Response(
+                {"status": self.STATUS_UNAVAILABLE}, status=status.HTTP_200_OK
+            )
+
+        analysis = getattr(game, "analysis", None)
+        if analysis is None:
+            # Partida sem análise: anterior à feature, flag desligada quando
+            # ela terminou, ou nenhum dos jogadores era pagante na época.
+            return Response({"status": self.STATUS_NONE}, status=status.HTTP_200_OK)
+
+        if analysis.status != GameAnalysis.STATUS_DONE:
+            return Response(
+                {
+                    "status": analysis.status,
+                    "failure_reason": analysis.failure_reason,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {
+                "status": analysis.status,
+                "params_version": analysis.params_version,
+                "engine": {
+                    "id": analysis.engine_id,
+                    "depth": analysis.engine_depth,
+                    "movetime": analysis.engine_movetime,
+                },
+                "white": {
+                    "accuracy": analysis.white_accuracy,
+                    "avg_loss": analysis.white_avg_loss,
+                    "counts": (analysis.counts or {}).get("white", {}),
+                },
+                "black": {
+                    "accuracy": analysis.black_accuracy,
+                    "avg_loss": analysis.black_avg_loss,
+                    "counts": (analysis.counts or {}).get("black", {}),
+                },
+                "turning_point_ply": analysis.turning_point_ply,
+                "analyzed_plies": analysis.analyzed_plies,
+                # Menor que o total quando a partida passou do teto de
+                # análise — a tela precisa poder dizer "analisamos até aqui".
+                "total_plies": analysis.game.ply_count,
+                "moves": analysis.moves,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class CampaignProgressView(APIView):

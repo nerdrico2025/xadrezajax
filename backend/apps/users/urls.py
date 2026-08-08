@@ -9,9 +9,12 @@ from .views import (
     DeleteAccountView,
     FriendListView,
     FriendRequestActionView,
+    GameAnalysisView,
     GameHistoryView,
     GameResultView,
     GoogleLoginView,
+    InternalAnalysisNextView,
+    InternalAnalysisResultView,
     InternalColorBalanceView,
     LeaderboardView,
     MeView,
@@ -52,6 +55,23 @@ urlpatterns = [
         "internal/color-balance/",
         InternalColorBalanceView.as_view(),
         name="internal-color-balance",
+    ),
+    # Fila de análise pós-jogo: o node-api PUXA daqui (nenhum canal
+    # Django → node-api é criado — ver PLANO_FASE2_ANALISE_POS_JOGO.md).
+    path(
+        "internal/analysis/next/",
+        InternalAnalysisNextView.as_view(),
+        name="internal-analysis-next",
+    ),
+    path(
+        "internal/analysis/result/",
+        InternalAnalysisResultView.as_view(),
+        name="internal-analysis-result",
+    ),
+    path(
+        "games/<uuid:public_id>/analysis/",
+        GameAnalysisView.as_view(),
+        name="game-analysis",
     ),
     path("campaign/", CampaignProgressView.as_view(), name="campaign-progress"),
     path("game/history/", GameHistoryView.as_view(), name="game-history"),
