@@ -321,7 +321,7 @@ export default function GameScreen({
         let candidate: string | null = null;
         try {
           candidate = await withTimeout(
-            getBestMove(fen, difficulty),
+            getBestMove(fen, difficulty, authToken ?? ""),
             AI_TIMEOUT_MS,
             aiTimeoutRef
           );
@@ -332,7 +332,7 @@ export default function GameScreen({
       }
       return null;
     },
-    [difficulty]
+    [difficulty, authToken]
   );
 
   const makeAIMove = useCallback(async (currentGame: Chess) => {
