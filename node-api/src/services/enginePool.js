@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const fs = require("fs");
 const os = require("os");
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,14 +31,80 @@ const os = require("os");
 
 const BIN = process.env.STOCKFISH_PATH || "stockfish";
 
-/** Engines quentes simultâneos = teto de concorrência real da engine.
- *  Cada busca custa ~10-20ms de CPU depois que o processo está quente, então
- *  um pool pequeno sustenta muita requisição por segundo. */
-const POOL_SIZE = Math.max(
-  1,
-  Number(process.env.STOCKFISH_POOL_SIZE) ||
-    Math.min(4, os.cpus()?.length || 1)
-);
+/** Teto absoluto de engines, independente de quantos núcleos a caixa tenha. */
+const MAX_POOL_SIZE = 4;
+
+/**
+ * Núcleos que ESTE CONTAINER pode usar, lidos da cota do cgroup.
+ *
+ * `os.cpus().length` reporta os núcleos do HOST, não a cota do container:
+ * num VPS de 2 vCPU hospedado numa máquina de 32 núcleos ele devolve 32.
+ * Era assim que o pool acabava dimensionado para 4 engines (o teto) numa
+ * caixa que sustenta 1 ou 2 — cada engine é single-threaded (nunca mandamos
+ * `setoption name Threads`, então o default 1 vale), logo 4 engines em 2
+ * vCPU é oversubscription: eles disputam CPU entre si E com o event loop que
+ * atende os lances das partidas humanas.
+ *
+ * cgroup v2: `/sys/fs/cgroup/cpu.max` = "<quota> <period>", quota "max" = sem
+ * limite. cgroup v1: quota e período em arquivos separados, quota -1 = sem
+ * limite. Fora do Linux (dev no macOS) nenhum dos dois existe.
+ *
+ * `readFile` é injetável só para o teste poder simular os dois layouts sem
+ * container. Devolve null quando não há cota legível — o chamador cai no
+ * comportamento antigo.
+ */
+function cgroupCpuQuota(readFile = (p) => fs.readFileSync(p, "utf8")) {
+  // cgroup v2
+  try {
+    const [quota, period] = readFile("/sys/fs/cgroup/cpu.max").trim().split(/\s+/);
+    if (quota && quota !== "max") {
+      const cpus = Number(quota) / Number(period);
+      if (Number.isFinite(cpus) && cpus > 0) return cpus;
+    }
+    // "max" = sem limite declarado; não tenta o v1 (o arquivo existe, a
+    // resposta é "não há cota"), cai no fallback do chamador.
+    return null;
+  } catch {
+    // arquivo ausente → não é cgroup v2; segue para o v1
+  }
+
+  // cgroup v1
+  try {
+    const quota = Number(readFile("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").trim());
+    const period = Number(readFile("/sys/fs/cgroup/cpu/cpu.cfs_period_us").trim());
+    if (quota > 0 && period > 0) {
+      const cpus = quota / period;
+      if (Number.isFinite(cpus) && cpus > 0) return cpus;
+    }
+  } catch {
+    // nem v1 nem v2 (macOS, host sem container): sem cota a respeitar
+  }
+
+  return null;
+}
+
+/**
+ * Engines quentes simultâneos = teto de concorrência real da engine.
+ *
+ * Precedência: variável de ambiente (a palavra final de quem opera) → cota do
+ * cgroup → núcleos do host. Sempre limitado a MAX_POOL_SIZE e nunca menor
+ * que 1. Uma cota fracionária (0.5 vCPU) arredonda para baixo até o piso de
+ * 1: meio núcleo não sustenta dois engines.
+ */
+function resolvePoolSize({
+  env = process.env,
+  quota = cgroupCpuQuota(),
+  cpuCount = os.cpus()?.length || 1,
+} = {}) {
+  const configured = Number(env.STOCKFISH_POOL_SIZE);
+  if (Number.isFinite(configured) && configured >= 1) {
+    return Math.floor(configured);
+  }
+  const available = quota !== null ? Math.floor(quota) : cpuCount;
+  return Math.max(1, Math.min(MAX_POOL_SIZE, available || 1));
+}
+
+const POOL_SIZE = resolvePoolSize();
 
 /** Teto da fila de espera. Existe para que uma indisponibilidade prolongada
  *  vire erro rápido em vez de memória crescendo sem limite. */
@@ -225,6 +292,15 @@ class EnginePool {
     this.idle = [];
     this.total = 0;
     this.waiters = [];
+    // Contadores acumulados desde o start do processo. Existem para responder
+    // com DADO, e não com hipótese, se a lentidão de lance em partida humana
+    // vem de contenção pela engine: `queued` > 0 significa que houve
+    // requisição esperando por CPU de engine.
+    this.queuedCount = 0;
+    this.waitingPeak = 0;
+    this.queueFullCount = 0;
+    this.queueTimeoutCount = 0;
+    this.discardedCount = 0;
   }
 
   async acquire() {
@@ -238,13 +314,36 @@ class EnginePool {
     if (this.total < this.size) return this.create();
 
     if (this.waiters.length >= this.maxQueue) {
+      this.queueFullCount += 1;
+      console.warn(
+        `[EnginePool] fila CHEIA (${this.waiters.length}/${this.maxQueue}) — ` +
+          `503 devolvido. ${JSON.stringify(this.stats())}`
+      );
       throw queueError("Fila da engine cheia; tente novamente.");
     }
 
+    // Toda espera é registrada: é o sinal de contenção. Sem ele, "o lance
+    // demorou" fica sendo hipótese — com ele dá para separar engine ocupada
+    // de rede lenta de app travado. `waitingPeak` guarda o pior momento
+    // desde que o processo subiu, que o /health expõe.
+    const queued = this.waiters.length + 1;
+    if (queued > this.waitingPeak) this.waitingPeak = queued;
+    this.queuedCount += 1;
+    console.warn(
+      `[EnginePool] requisição ENFILEIRADA — ${queued} esperando, ` +
+        `${this.total}/${this.size} engines ocupados`
+    );
+
+    const queuedAt = Date.now();
     return new Promise((resolve, reject) => {
       const waiter = { resolve, reject };
       waiter.timer = setTimeout(() => {
         this.waiters = this.waiters.filter((w) => w !== waiter);
+        this.queueTimeoutCount += 1;
+        console.warn(
+          `[EnginePool] espera ESGOTADA após ${Date.now() - queuedAt}ms. ` +
+            JSON.stringify(this.stats())
+        );
         reject(queueError("Tempo de espera pela engine esgotado."));
       }, QUEUE_TIMEOUT_MS);
       this.waiters.push(waiter);
@@ -289,6 +388,14 @@ class EnginePool {
       this.total -= 1;
       engine.destroy();
     }
+    this.discardedCount += 1;
+    // Descarte é sempre anormal (timeout ou erro no meio de uma busca), e
+    // pagar o handshake UCI de novo custa ~163ms medidos. Descarte
+    // recorrente é sintoma de engine sem CPU, não de azar.
+    console.warn(
+      `[EnginePool] engine DESCARTADO (busca não terminou limpa) — ` +
+        `${this.discardedCount} no total. ${JSON.stringify(this.stats())}`
+    );
     this.drain();
   }
 
@@ -315,6 +422,12 @@ class EnginePool {
       total: this.total,
       idle: this.idle.length,
       waiting: this.waiters.length,
+      // Acumulados desde o start (ver constructor).
+      queued: this.queuedCount,
+      waitingPeak: this.waitingPeak,
+      queueFull: this.queueFullCount,
+      queueTimeouts: this.queueTimeoutCount,
+      discarded: this.discardedCount,
     };
   }
 
@@ -334,6 +447,10 @@ module.exports = {
   Engine,
   EnginePool,
   POOL_SIZE,
+  MAX_POOL_SIZE,
   MAX_QUEUE,
   QUEUE_TIMEOUT_MS,
+  // Exportados para teste: dimensionamento sem depender de estar num container.
+  resolvePoolSize,
+  cgroupCpuQuota,
 };
