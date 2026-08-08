@@ -5,6 +5,16 @@ const { GAME_TTL } = require("./ttl");
 
 const GAME_PREFIX = "game:";
 const ROOM_PREFIX = "room:";
+// Lances da partida em SAN, na ordem jogada (lista Redis, um RPUSH por lance
+// validado). Chave separada do hash `game:{id}` porque é uma LISTA que só
+// cresce — enfiá-la no hash exigiria reserializar a partida inteira a cada
+// lance. Vive e morre junto com o hash: mesmo GAME_TTL, renovado no mesmo
+// ponto (ver updateGame).
+const MOVES_SUFFIX = ":moves";
+
+function movesKey(gameId) {
+  return `${GAME_PREFIX}${gameId}${MOVES_SUFFIX}`;
+}
 
 // Relógio de partida humana. Toda partida humano-vs-humano tem relógio — não
 // existe partida humana sem relógio (e toda partida humana vale rating, então
@@ -39,13 +49,28 @@ function resolveHostColor(requested) {
 // (ver abandonGraceMs).
 const ABANDON_GRACE_MS = 60_000;
 
+// Um único Math.random() rende ~10 caracteres base36, então uma fatia maior
+// que isso saía CURTA (e com menos entropia do que o tamanho pedido sugere).
+// Concatenar sorteios até completar o tamanho resolve os dois: o id tem
+// sempre o comprimento pedido e a entropia cresce junto.
 function generateId(len = 8) {
-  return Math.random().toString(36).slice(2, 2 + len).toUpperCase();
+  let out = "";
+  while (out.length < len) out += Math.random().toString(36).slice(2);
+  return out.slice(0, len).toUpperCase();
 }
+
+// Tamanho do id de partida. 12 caracteres base36 (~62 bits) e não 8 (~41
+// bits) porque o id passou a ser CHAVE DE IDEMPOTÊNCIA permanente no Django
+// (`Game.external_id`, unique). Com 8 caracteres, a chance de duas partidas
+// diferentes colidirem ao longo do primeiro milhão de partidas beira 20% — e
+// uma colisão faria o Django tratar uma partida nova como resultado repetido
+// e descartá-la em silêncio. Não é o código de sala (6 chars, digitado por
+// gente); ninguém digita este id.
+const GAME_ID_LEN = 12;
 
 async function createGame(whitePlayer, blackPlayer, timeControlSecs = null) {
   const redis = getRedis();
-  const gameId = generateId(8);
+  const gameId = generateId(GAME_ID_LEN);
   const chess = new Chess();
   const timeMs = timeControlSecs ? timeControlSecs * 1000 : null;
 
@@ -85,6 +110,16 @@ async function updateGame(gameId, fields) {
   const redis = getRedis();
   await redis.hset(`${GAME_PREFIX}${gameId}`, fields);
   await redis.expire(`${GAME_PREFIX}${gameId}`, GAME_TTL);
+  // Os lances vencem JUNTO com a partida — mesmo TTL, renovado no mesmo
+  // ponto. Descasar os dois já custou caro uma vez (ver ttl.js): uma partida
+  // viva cujos lances expiraram chegaria ao Django sem nada para gravar.
+  await redis.expire(movesKey(gameId), GAME_TTL);
+}
+
+/** Lances validados da partida, em SAN, na ordem jogada. */
+async function getMoves(gameId) {
+  const redis = getRedis();
+  return (await redis.lrange(movesKey(gameId), 0, -1)) || [];
 }
 
 async function applyMove(gameId, userId, from, to, promotion) {
@@ -141,6 +176,11 @@ async function applyMove(gameId, userId, from, to, promotion) {
     moveResult = null;
   }
   if (!moveResult) return { error: "Movimento inválido" };
+
+  // Grava o lance SÓ depois de o chess.js tê-lo aceitado — a lista é o
+  // registro da partida REAL, então nada que não foi jogado pode entrar nela.
+  // O `expire` acompanha o do hash em updateGame, logo abaixo.
+  await getRedis().rpush(movesKey(gameId), moveResult.san);
 
   const newFen = chess.fen();
   let status = "active";
@@ -462,6 +502,7 @@ async function joinRoom(code, joinerId, joinerSocketId, joinerMeta = {}) {
 module.exports = {
   createGame,
   getGame,
+  getMoves,
   applyMove,
   resignGame,
   offerDraw,

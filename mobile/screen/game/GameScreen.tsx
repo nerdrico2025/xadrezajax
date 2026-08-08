@@ -207,8 +207,13 @@ export default function GameScreen({
     setBoardSize((prev) => (prev === side ? prev : side));
   }, []);
 
-  // ⚠️ TEMPORÁRIO: lances em SAN da partida, só p/ Iniciante/Fácil. Ver
-  // utils/aiGamePgn.ts para o porquê e para o TODO de remoção.
+  // Lances em SAN da partida, na ordem jogada. Acumulados em TODOS os níveis:
+  // é a partida que vai para o servidor no fim (`reportAiResult`), o registro
+  // definitivo do tabuleiro.
+  //
+  // O PGN de diagnóstico da calibragem (utils/aiGamePgn.ts) consome a MESMA
+  // lista, mas continua restrito a Iniciante/Fácil — ele é instrumentação
+  // temporária e sai depois; a captura abaixo é permanente.
   const sanHistoryRef = useRef<string[]>([]);
   const [diagnosticPgn, setDiagnosticPgn] = useState<string | null>(null);
   const { play } = useChessSound();
@@ -228,7 +233,10 @@ export default function GameScreen({
     saveGame({ fen, playerCaptures: pc, aiCaptures: ac, moveCount: mc, difficulty, playerColor }).catch(() => {});
   }, [timeControl, difficulty, playerColor]);
 
-  const finishGame = useCallback((result: GameResult) => {
+  // `finalFen` vem do chamador, não de `game`: nos fins de partida por lance
+  // o estado ainda é o do render anterior (o `setGame` da mesma passagem
+  // não valeu) — ler `game.fen()` aqui gravaria a posição de UM lance antes.
+  const finishGame = useCallback((result: GameResult, finalFen: string) => {
     clock.pause();
     clearSavedGame().catch(() => {});
     setGameResult(result);
@@ -249,7 +257,15 @@ export default function GameScreen({
       // Persiste a partida vs IA no histórico/estatísticas (decisão D1: nunca
       // altera o rating). Falha não pode ser silenciosa — era a causa provável
       // de partidas "sumirem" do Perfil (diagnóstico do PR B).
-      reportAiResult(authToken, result.outcome, difficulty, timeControl)
+      reportAiResult(authToken, result.outcome, difficulty, timeControl, {
+        // A partida em si, para o servidor guardar o tabuleiro e não só o
+        // extrato. `playerColor` fechava um buraco: sem ele o servidor não
+        // sabe de que lado a IA jogou e não consegue montar a partida.
+        moves: sanHistoryRef.current,
+        playerColor,
+        termination: result.reason,
+        finalFen,
+      })
         .then(async () => {
           // Modo Campanha: só vitória progride. Busca o estado pós-partida
           // para detectar se ESTA vitória cruzou o limiar de desbloqueio —
@@ -285,7 +301,7 @@ export default function GameScreen({
   useEffect(() => {
     if (!clockTimedOut || gameResult) return;
     const outcome = clockTimedOut === playerColor ? "loss" : "win";
-    finishGame({ outcome, reason: "timeout" });
+    finishGame({ outcome, reason: "timeout" }, game.fen());
   }, [clockTimedOut]);
 
   const PIECE_VALUE: Record<string, number> = { q: 9, r: 5, b: 3, n: 3, p: 1 };
@@ -366,13 +382,12 @@ export default function GameScreen({
       ? [...capturesRef.current.aiCaptures, aiMove.captured]
       : capturesRef.current.aiCaptures;
     if (aiMove.captured) setAiCaptures(newAiCaptures);
-    // ⚠️ TEMPORÁRIO: registra o lance da IA para o PGN de diagnóstico.
-    if (shouldRecordPgn(difficulty)) sanHistoryRef.current.push(aiMove.san);
+    sanHistoryRef.current.push(aiMove.san);
 
     const result = detectGameOver(updated, playerColor);
     if (result) {
       setGame(updated);
-      finishGame(result);
+      finishGame(result, updated.fen());
       setLoading(false);
       if (result.outcome === "loss") {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -490,8 +505,7 @@ export default function GameScreen({
       });
 
       if (!playerMove) return;
-      // ⚠️ TEMPORÁRIO: registra o lance do jogador para o PGN de diagnóstico.
-      if (shouldRecordPgn(difficulty)) sanHistoryRef.current.push(playerMove.san);
+      sanHistoryRef.current.push(playerMove.san);
 
       const newPlayerCaptures = playerMove.captured
         ? [...playerCaptures, playerMove.captured]
@@ -509,7 +523,7 @@ export default function GameScreen({
       const resultAfterPlayer = detectGameOver(currentGame, playerColor);
       if (resultAfterPlayer) {
         setGame(currentGame);
-        finishGame(resultAfterPlayer);
+        finishGame(resultAfterPlayer, currentGame.fen());
         if (resultAfterPlayer.outcome === "win") {
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           play("checkmate");
@@ -707,7 +721,7 @@ export default function GameScreen({
         destructive
         onConfirm={() => {
           setShowResignConfirm(false);
-          finishGame({ outcome: "loss", reason: "resign" });
+          finishGame({ outcome: "loss", reason: "resign" }, game.fen());
         }}
         onCancel={() => setShowResignConfirm(false)}
       />
@@ -720,7 +734,7 @@ export default function GameScreen({
         cancelLabel="Cancelar"
         onConfirm={() => {
           setShowDrawConfirm(false);
-          finishGame({ outcome: "draw", reason: "agreement" });
+          finishGame({ outcome: "draw", reason: "agreement" }, game.fen());
         }}
         onCancel={() => setShowDrawConfirm(false)}
       />

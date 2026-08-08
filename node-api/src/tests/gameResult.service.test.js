@@ -30,7 +30,7 @@ describe("reportGameResult", () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const [, options] = global.fetch.mock.calls[0];
-    expect(JSON.parse(options.body)).toEqual({
+    expect(JSON.parse(options.body)).toMatchObject({
       white_id: "1",
       black_id: "2",
       result: "white",
@@ -44,6 +44,51 @@ describe("reportGameResult", () => {
 
     const [, options] = global.fetch.mock.calls[0];
     expect(JSON.parse(options.body).time_control).toBeNull();
+  });
+
+  test("leva a partida junto: id, lances, motivo do fim, posição e início", async () => {
+    await reportGameResult("1", "2", "white", 300, {
+      externalId: "ABC123XYZ789",
+      moves: ["e4", "e5", "Qh5"],
+      termination: "checkmate",
+      finalFen: "8/8/8/8/8/8/8/K6k w - - 0 1",
+      startedAt: "2026-08-07T18:30:00.000Z",
+    });
+
+    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(body.external_id).toBe("ABC123XYZ789");
+    expect(body.moves).toEqual(["e4", "e5", "Qh5"]);
+    expect(body.termination).toBe("checkmate");
+    expect(body.final_fen).toBe("8/8/8/8/8/8/8/K6k w - - 0 1");
+    expect(body.started_at).toBe("2026-08-07T18:30:00.000Z");
+  });
+
+  test("sem dados da partida os campos novos vão nulos/vazios, nunca undefined", async () => {
+    await reportGameResult("1", "2", "draw", 600);
+
+    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(body.external_id).toBeNull();
+    expect(body.moves).toEqual([]);
+    expect(body.termination).toBeNull();
+    expect(body.final_fen).toBeNull();
+    expect(body.started_at).toBeNull();
+  });
+
+  test("resposta duplicada é repassada ao chamador (que não reemite o delta)", async () => {
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        duplicate: true,
+        modality: "blitz",
+        white: { rating: 1510, delta: 0 },
+        black: { rating: 1490, delta: 0 },
+      }),
+    }));
+
+    const data = await reportGameResult("1", "2", "white", 300, {
+      externalId: "DUP123456789",
+    });
+    expect(data.duplicate).toBe(true);
   });
 
   test("sem INTERNAL_API_SECRET não chama o backend", async () => {

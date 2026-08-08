@@ -10,6 +10,7 @@ const {
 const {
   createGame,
   getGame,
+  getMoves,
   applyMove,
   resignGame,
   offerDraw,
@@ -48,10 +49,50 @@ function clearAbandonTimer(userId) {
  * abre na hora e completa com o delta quando ele chega. Se a chamada falhar
  * (backend fora), nenhum evento é emitido e o modal só não mostra o número —
  * nunca mostra um número errado.
+ *
+ * Leva junto a PARTIDA (lances, posição final, motivo do fim, início) para o
+ * Django persistir o tabuleiro, não só o extrato. `gameId` vai como
+ * `external_id` e é a chave de idempotência lá: dois fins de partida
+ * concorrentes reportam o mesmo id e só o primeiro conta.
  */
-async function reportAndBroadcastRating(io, gameId, whiteId, blackId, result, timeControl) {
-  const data = await reportGameResult(whiteId, blackId, result, timeControl);
+async function reportAndBroadcastRating(
+  io,
+  gameId,
+  whiteId,
+  blackId,
+  result,
+  timeControl,
+  termination = null
+) {
+  // Leitura best-effort: o registro da partida é bônus em cima do resultado.
+  // Se o Redis falhar aqui, o resultado tem de ser reportado do mesmo jeito —
+  // rating e histórico não podem depender dos lances.
+  let moves = [];
+  let game = null;
+  try {
+    [moves, game] = await Promise.all([getMoves(gameId), getGame(gameId)]);
+  } catch (err) {
+    console.error("[GameResult] falha ao ler a partida do Redis:", err.message);
+  }
+
+  const data = await reportGameResult(whiteId, blackId, result, timeControl, {
+    externalId: gameId,
+    moves,
+    termination,
+    finalFen: game?.fen ?? null,
+    startedAt: game?.created_at
+      ? new Date(parseInt(game.created_at)).toISOString()
+      : null,
+  });
   if (!data) return;
+
+  // Resultado já registrado antes (fim de partida concorrente): o delta
+  // verdadeiro já foi para os dois jogadores na primeira chamada. Reemitir
+  // agora sobrescreveria o número certo por um delta 0 na tela deles.
+  if (data.duplicate) {
+    console.log(`[GameResult] resultado duplicado ignorado game=${gameId}`);
+    return;
+  }
 
   io.to(`game:${gameId}`).emit("game_rated", {
     game_id: gameId,
@@ -366,7 +407,8 @@ function setupSocket(httpServer) {
             result.white_id,
             result.black_id,
             result.loser === "white" ? "black" : "white",
-            result.time_control
+            result.time_control,
+            "timeout"
           );
           return;
         }
@@ -399,7 +441,8 @@ function setupSocket(httpServer) {
               game.white_id,
               game.black_id,
               resultStr,
-              game.time_control ? parseInt(game.time_control) : null
+              game.time_control ? parseInt(game.time_control) : null,
+              result.gameOver.reason
             );
           }
         }
@@ -432,7 +475,8 @@ function setupSocket(httpServer) {
           result.white_id,
           result.black_id,
           result.winner,
-          result.time_control
+          result.time_control,
+          "resign"
         );
       } catch (err) {
         console.error("[Socket] resign error:", err);
@@ -480,7 +524,8 @@ function setupSocket(httpServer) {
           result.white_id,
           result.black_id,
           "draw",
-          result.time_control
+          result.time_control,
+          "agreement"
         );
         console.log(`[Socket] draw accepted game=${game_id} by=${userId}`);
       } catch (err) {
@@ -612,7 +657,8 @@ function setupSocket(httpServer) {
                 result.white_id,
                 result.black_id,
                 result.winner,
-                result.time_control
+                result.time_control,
+                "abandon"
               );
               console.log(
                 `[Socket] abandono game=${gameId} por=${userId} apos=${graceMs}ms`

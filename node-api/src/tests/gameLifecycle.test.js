@@ -22,6 +22,14 @@ jest.mock("../services/redis.service", () => {
       ttls.set(key, ttl);
     },
     get: async (key) => store.get(key) ?? null,
+    // Lances da partida (`game:{id}:moves`) — lista, não hash.
+    rpush: async (key, value) => {
+      const list = store.get(key) || [];
+      list.push(value);
+      store.set(key, list);
+      return list.length;
+    },
+    lrange: async (key) => [...(store.get(key) || [])],
   };
   return { getRedis: () => redis, __store: store, __ttls: ttls };
 });
@@ -103,6 +111,19 @@ describe("TTL da chave de recuperação", () => {
     // É exatamente o que o handler de connection consulta ao reconectar.
     expect(await getUserGame(WHITE.userId)).toBe(gameId);
     expect(await getUserGame(BLACK.userId)).toBe(gameId);
+  });
+
+  test("os lances vencem junto com a partida, nunca antes", async () => {
+    // Mesma classe de bug do ponteiro de recuperação: uma chave da partida
+    // com janela menor que a outra. Se os lances expirassem primeiro, uma
+    // partida longa chegaria ao Django sem nada para gravar.
+    const gameId = await createGame(WHITE, BLACK, 300);
+    __ttls.set(`game:${gameId}:moves`, 5);
+
+    await applyMove(gameId, WHITE.userId, "e2", "e4");
+
+    expect(__ttls.get(`game:${gameId}:moves`)).toBe(GAME_TTL);
+    expect(__ttls.get(`game:${gameId}`)).toBe(GAME_TTL);
   });
 
   test("fim de partida limpa o ponteiro dos dois jogadores", async () => {

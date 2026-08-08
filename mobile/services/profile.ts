@@ -125,18 +125,41 @@ export async function getGameHistory(
   return res.json();
 }
 
+/** A PARTIDA em si (tabuleiro), ao lado do resultado. Tudo opcional no
+ *  servidor: sem estes campos ele registra o resultado do mesmo jeito, só sem
+ *  guardar o tabuleiro. */
+export interface AiGameRecord {
+  /** Lances em SAN, na ordem jogada (brancas e pretas alternando). */
+  moves?: string[];
+  /** Cor que o JOGADOR jogou. Sem ela o servidor não tem como saber de que
+   *  lado a IA estava e não consegue montar a partida — só o extrato. */
+  playerColor?: "w" | "b";
+  /** Como a partida terminou ("checkmate", "resign", "timeout", ...). */
+  termination?: string;
+  finalFen?: string;
+}
+
 export async function reportAiResult(
   token: string,
   result: "win" | "loss" | "draw",
   difficulty: Difficulty,
   // Segundos do relógio da partida (null = sem limite) — define a modalidade
   // Glicko-2 no backend (bullet < 3 min, blitz 3–10 min, rápido > 10/sem limite)
-  timeControl: number | null = null
+  timeControl: number | null = null,
+  game: AiGameRecord = {}
 ): Promise<{ rating: number; provisional: boolean; modality: RatingModality }> {
   const res = await authFetch(`${API_URL}/api/v1/auth/game/ai-result/`, token, {
     method: "POST",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ result, difficulty, time_control: timeControl }),
+    body: JSON.stringify({
+      result,
+      difficulty,
+      time_control: timeControl,
+      moves: game.moves ?? [],
+      player_color: game.playerColor ?? null,
+      termination: game.termination ?? null,
+      final_fen: game.finalFen ?? null,
+    }),
   });
   if (!res.ok) throw new Error("Falha ao salvar resultado");
   return res.json();

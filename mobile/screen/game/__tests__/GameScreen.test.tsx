@@ -368,7 +368,13 @@ describe("desistência vs IA (fluxo existente preservado)", () => {
 
     expect(hasText(tree.root, "A IA venceu!")).toBe(true);
     expect(hasText(tree.root, "Abandono")).toBe(true);
-    expect(reportAiResult).toHaveBeenCalledWith("test-token", "loss", "medium", null);
+    expect(reportAiResult).toHaveBeenCalledWith(
+      "test-token",
+      "loss",
+      "medium",
+      null,
+      expect.objectContaining({ termination: "resign", playerColor: "w" })
+    );
   });
 
   it("cancelar mantém a partida em andamento", () => {
@@ -397,7 +403,13 @@ describe("empate por acordo vs IA (aceito imediatamente)", () => {
 
     expect(hasText(tree.root, "Empate!")).toBe(true);
     expect(hasText(tree.root, "Acordo mútuo")).toBe(true);
-    expect(reportAiResult).toHaveBeenCalledWith("test-token", "draw", "medium", null);
+    expect(reportAiResult).toHaveBeenCalledWith(
+      "test-token",
+      "draw",
+      "medium",
+      null,
+      expect.objectContaining({ termination: "agreement", playerColor: "w" })
+    );
   });
 
   it("cancelar não encerra a partida", () => {
@@ -477,7 +489,13 @@ describe("Modo Campanha — feedback de desbloqueio na vitória vs IA (PR 2)", (
     await playScholarsMate(tree);
 
     expect(hasText(tree.root, "Você venceu!")).toBe(true);
-    expect(reportAiResult).toHaveBeenCalledWith("test-token", "win", "medium", null);
+    expect(reportAiResult).toHaveBeenCalledWith(
+      "test-token",
+      "win",
+      "medium",
+      null,
+      expect.objectContaining({ termination: "checkmate", playerColor: "w" })
+    );
 
     // Deixa o .then() assíncrono (busca do progresso pós-vitória) resolver.
     await act(async () => {
@@ -529,6 +547,60 @@ describe("Modo Campanha — feedback de desbloqueio na vitória vs IA (PR 2)", (
 
 // ⚠️ TEMPORÁRIO — instrumentação de diagnóstico da calibragem da IA.
 // TODO(remover): junto com utils/aiGamePgn.ts.
+// ── Registro definitivo da partida ───────────────────────────────────────
+// Diferente da instrumentação de PGN abaixo (temporária, restrita a
+// Iniciante/Fácil): a captura de lances é PERMANENTE e vale em TODOS os
+// níveis — é o que o servidor guarda como a partida.
+
+describe("captura da partida enviada ao servidor (vs IA)", () => {
+  function getBoard(tree: renderer.ReactTestRenderer) {
+    return tree.root.findAll((n) => typeof n.props?.onMove === "function")[0];
+  }
+
+  /** Último payload de partida entregue ao `reportAiResult`. */
+  function lastRecord() {
+    const calls = reportAiResult.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    return calls[calls.length - 1][4];
+  }
+
+  it.each(["beginner", "easy", "medium", "hard", "master"] as const)(
+    "grava os lances no nível %s (o gate por dificuldade não existe mais)",
+    (level) => {
+      const tree = render(level);
+      act(() => {
+        getBoard(tree).props.onMove({ move: { from: "e2", to: "e4" } });
+      });
+      resign(tree);
+
+      expect(lastRecord().moves).toEqual(["e4"]);
+    }
+  );
+
+  it("envia a cor jogada, o motivo do fim e a posição final", async () => {
+    const tree = render("hard");
+    // `await` de propósito: o `setGame` de `onMove` só acontece depois de um
+    // await interno — desistir antes disso leria a posição de um lance atrás,
+    // que é exatamente o que a assinatura de `finishGame` existe para evitar.
+    await act(async () => {
+      await getBoard(tree).props.onMove({ move: { from: "d2", to: "d4" } });
+    });
+    resign(tree);
+
+    const record = lastRecord();
+    expect(record.playerColor).toBe("w");
+    expect(record.termination).toBe("resign");
+    // Posição DEPOIS do lance — não a de um lance antes.
+    expect(record.finalFen).toContain("3P4");
+  });
+
+  it("partida sem lance nenhum reporta lista vazia, não quebra", () => {
+    const tree = render("master");
+    resign(tree);
+    expect(lastRecord().moves).toEqual([]);
+  });
+});
+
 describe("instrumentação de PGN (diagnóstico temporário da calibragem)", () => {
   function hasTextContaining(root: ReactTestInstance, part: string) {
     return (
