@@ -252,6 +252,15 @@ CORS_ALLOW_HEADERS = [
 INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 
 # ========================
+# ANÁLISE PÓS-JOGO (Fase 2)
+# ========================
+# DESLIGADA por padrão, de propósito. A análise divide CPU física com as
+# partidas ao vivo na mesma VPS; ligar é decisão a ser tomada OLHANDO o
+# `engine.queued` do /health do node-api, não no escuro. Com a flag desligada
+# nenhuma GameAnalysis é criada e os endpoints internos ficam ociosos.
+POST_GAME_ANALYSIS_ENABLED = os.getenv("POST_GAME_ANALYSIS_ENABLED", "False") == "True"
+
+# ========================
 # EMAIL (SendGrid)
 # ========================
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"

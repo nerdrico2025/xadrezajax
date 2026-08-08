@@ -361,6 +361,62 @@ def normalize_moves(raw):
     return sans[: Game.MAX_PLIES], total, total > Game.MAX_PLIES
 
 
+ANALYSIS_CLASSIFICATIONS = (
+    "brilliant",
+    "best",
+    "good",
+    "inaccuracy",
+    "mistake",
+    "blunder",
+)
+
+
+def normalize_analysis_moves(raw):
+    """Sanitiza a lista de lances analisados vinda do node-api.
+
+    Mesma disciplina de `normalize_moves`: nunca levanta, corta no teto de
+    análise e devolve `(moves, total, truncated)`. O que chega aqui é interno
+    (autenticado por segredo compartilhado), mas continua sendo JSON solto
+    indo para o banco — campo desconhecido é descartado, e não gravado por
+    inércia, para o formato do JSON não virar terra de ninguém.
+    """
+    if not isinstance(raw, list):
+        return [], 0, False
+
+    cleaned = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        classification = item.get("classification")
+        cleaned.append(
+            {
+                "ply": _as_int(item.get("ply")),
+                "san": str(item.get("san", ""))[:12],
+                "eval_cp": _as_int(item.get("eval_cp")),
+                "cp_loss": _as_int(item.get("cp_loss")),
+                "classification": (
+                    classification
+                    if classification in ANALYSIS_CLASSIFICATIONS
+                    else None
+                ),
+                "best_move_san": str(item.get("best_move_san", ""))[:12],
+                "is_only_move": bool(item.get("is_only_move")),
+                "is_book": bool(item.get("is_book")),
+            }
+        )
+
+    total = len(cleaned)
+    limit = GameAnalysis.MAX_ANALYZED_PLIES
+    return cleaned[:limit], total, total > limit
+
+
+def _as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 _TERMINATION_ALIASES = {"threefold": "repetition"}
 _TERMINATION_VALUES = {value for value, _label in Game.TERMINATION_CHOICES}
 
@@ -376,6 +432,196 @@ def normalize_termination(raw):
         return ""
     value = _TERMINATION_ALIASES.get(raw, raw)
     return value if value in _TERMINATION_VALUES else ""
+
+
+class GameAnalysis(models.Model):
+    """
+    Análise pós-jogo de uma partida (Fase 2) — o que o Stockfish achou de cada
+    lance, depois que a partida acabou.
+
+    UMA linha por partida, não uma por lance: o detalhe vive em `moves`
+    (JSON) e o resumo em colunas indexáveis. A tela de revisão sempre lê a
+    partida inteira de uma vez (1 query em vez de 80 linhas), e as colunas de
+    resumo cobrem as agregações que o produto vai querer (precisão média,
+    contagem por classificação) sem multiplicar linha. Se um dia algo exigir
+    SQL por lance, dá para derivar de `moves`; o caminho contrário — agregar
+    80 linhas para desenhar uma tela — seria pago desde o primeiro dia.
+
+    É TAMBÉM A FILA DE TRABALHO. O node-api não recebe ordem de ninguém: ele
+    pergunta ao Django se há análise pendente (ver InternalAnalysisNextView).
+    A fila morar no Postgres, e não na memória do node-api, é o que faz uma
+    análise interrompida por deploy voltar a ser processada em vez de sumir.
+    """
+
+    STATUS_PENDING = "pendente"
+    STATUS_RUNNING = "analisando"
+    STATUS_DONE = "pronta"
+    STATUS_FAILED = "falhou"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pendente"),
+        (STATUS_RUNNING, "Analisando"),
+        (STATUS_DONE, "Pronta"),
+        (STATUS_FAILED, "Falhou"),
+    ]
+
+    # Versão das FAIXAS de classificação e do método. Mudou limiar ou
+    # profundidade → incrementa, e as análises antigas ficam identificáveis
+    # como "feitas com outra régua". Sem isto, uma tela mostraria números de
+    # duas réguas diferentes sem ninguém perceber.
+    PARAMS_VERSION = 1
+
+    # Teto de lances analisados, MENOR que o teto de 1000 plies do `Game`:
+    # aquele protege o banco, este protege a CPU. 1000 posições a 400ms são
+    # ~6min40 de engine; 300 plies (150 lances de cada lado) cobrem qualquer
+    # partida normal e limitam o pior caso a ~2min.
+    MAX_ANALYZED_PLIES = 300
+
+    # Tentativas antes de desistir de uma partida problemática — senão ela
+    # ocuparia a engine em loop, para sempre.
+    MAX_ATTEMPTS = 3
+
+    game = models.OneToOneField(
+        Game,
+        on_delete=models.PROTECT,
+        related_name="analysis",
+        verbose_name="Partida",
+    )
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
+
+    # ── Parâmetros, para o resultado ser reprodutível ────────────────────
+    params_version = models.IntegerField(default=PARAMS_VERSION)
+    engine_depth = models.IntegerField(null=True, blank=True)
+    engine_movetime = models.IntegerField(null=True, blank=True)
+    engine_id = models.CharField(max_length=60, blank=True, default="")
+
+    # ── Resumo, indexável ────────────────────────────────────────────────
+    # Precisão em % (0-100), derivada da perda média — nula enquanto a
+    # análise não terminou.
+    white_accuracy = models.FloatField(null=True, blank=True)
+    black_accuracy = models.FloatField(null=True, blank=True)
+    white_avg_loss = models.IntegerField(null=True, blank=True)
+    black_avg_loss = models.IntegerField(null=True, blank=True)
+    # {"white": {"brilliant": 0, ...}, "black": {...}}
+    counts = models.JSONField(default=dict, blank=True)
+    # Lance que decidiu a partida. NULO É RESULTADO LEGÍTIMO: partida ganha
+    # do começo ao fim, ou derrota construída em dez imprecisões sem nenhum
+    # lance culpado, não têm momento decisivo — e apontar um que não existe é
+    # pior do que não apontar nada.
+    turning_point_ply = models.IntegerField(null=True, blank=True)
+
+    # ── Detalhe ──────────────────────────────────────────────────────────
+    # Uma entrada por lance: {ply, san, eval_cp, cp_loss, classification,
+    # best_move_san, is_only_move, is_book}.
+    moves = models.JSONField(default=list, blank=True)
+    # Quantos lances foram de fato analisados — menor que `Game.ply_count`
+    # quando bateu no MAX_ANALYZED_PLIES.
+    analyzed_plies = models.IntegerField(default=0)
+
+    # ── Operação da fila ─────────────────────────────────────────────────
+    attempts = models.IntegerField(default=0)
+    # Prazo do "aluguel" do trabalho pelo node-api. Vencido = o worker morreu
+    # no meio (deploy, queda) e o trabalho volta para a fila. É o que impede
+    # uma análise de ficar travada em `analisando` para sempre.
+    leased_until = models.DateTimeField(null=True, blank=True)
+    failure_reason = models.CharField(max_length=200, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Análise de partida"
+        verbose_name_plural = "Análises de partidas"
+        ordering = ["-created_at"]
+        indexes = [
+            # O índice que a fila usa: pega pendentes/vencidas em ordem de
+            # chegada, sem varrer a tabela.
+            models.Index(fields=["status", "leased_until"]),
+        ]
+
+    def __str__(self):
+        return f"Análise da partida #{self.game_id} ({self.status})"
+
+
+# Teto diário de análises de partida vs IA, por usuário.
+#
+# Partida vs IA é reportada pelo APP, com lances que o servidor nunca
+# validou: um POST barato compra minutos de engine. É amplificação de
+# recurso, mesma família do endpoint aberto que a PR #101 fechou. Dez por dia
+# é folgado para quem joga de verdade (o plano Grátis nem chega lá, e o pago
+# raramente passa disso) e fecha a porta para o abuso automatizado.
+#
+# Partida online não precisa de teto: os lances passaram pelo chess.js do
+# servidor e o adversário é outra pessoa — não dá para fabricar em volume.
+ANALYSIS_DAILY_LIMIT_AI = 10
+
+
+def analysis_enabled():
+    """Feature flag da análise pós-jogo (Fase 2).
+
+    Desligada por padrão de propósito: a análise divide CPU física com as
+    partidas ao vivo, e a decisão de ligar deve ser tomada olhando o `queued`
+    do pool ao vivo (ver /health do node-api), não no escuro.
+    """
+    from django.conf import settings
+
+    return bool(getattr(settings, "POST_GAME_ANALYSIS_ENABLED", False))
+
+
+def enqueue_analysis(game, profiles):
+    """Coloca a partida na fila de análise, se ela for elegível.
+
+    `profiles` são os perfis HUMANOS da partida (dois no online, um no vs IA).
+    Elegível quando a flag está ligada, a partida tem lances e PELO MENOS UM
+    dos jogadores tem plano pago.
+
+    O "pelo menos um" é decisão de produto (2026-08-08): a partida é um
+    tabuleiro só, então a análise roda UMA vez. Se o das brancas é pagante e o
+    das pretas não, quem paga vê e o outro recebe "indisponível" na leitura —
+    analisar duas vezes seria desperdício, e não analisar puniria o pagante
+    pelo plano do adversário.
+
+    Gating aqui, no ENFILEIRAMENTO, é o que protege CPU: partida que ninguém
+    vai poder ver não entra na fila. O gating de LEITURA é outro, mora na view
+    e protege acesso.
+
+    Nunca levanta: a análise é um bônus em cima da partida. Falhar aqui não
+    pode derrubar o registro do resultado, que é o que de fato importa.
+    """
+    from apps.payments.access import has_paid_access
+
+    if not analysis_enabled():
+        return None
+    if not game.moves:
+        return None
+
+    profiles = [p for p in profiles if p is not None]
+    if not any(has_paid_access(profile) for profile in profiles):
+        return None
+
+    if game.mode == Game.MODE_AI and _ai_analyses_today(profiles[0]) >= (
+        ANALYSIS_DAILY_LIMIT_AI
+    ):
+        return None
+
+    analysis, _created = GameAnalysis.objects.get_or_create(game=game)
+    return analysis
+
+
+def _ai_analyses_today(profile):
+    """Quantas análises de partida vs IA este perfil já pediu hoje."""
+    return (
+        GameAnalysis.objects.filter(
+            game__mode=Game.MODE_AI,
+            created_at__date=timezone.localdate(),
+        )
+        .filter(
+            models.Q(game__white_player=profile.user)
+            | models.Q(game__black_player=profile.user)
+        )
+        .count()
+    )
 
 
 class GameHistory(models.Model):
