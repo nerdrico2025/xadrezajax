@@ -774,6 +774,11 @@ class GameResultView(APIView):
             {
                 "modality": modality,
                 "rated": True,
+                # Endereço da partida para a tela de análise. O node-api
+                # repassa isto aos dois jogadores no evento `game_rated` — sem
+                # ele o app não teria como pedir a análise da partida que
+                # acabou de jogar.
+                "game_public_id": str(game.public_id),
                 "white": {
                     "id": white_profile.user_id,
                     "rating": round(white_rating.rating),
@@ -990,6 +995,11 @@ class AiGameResultView(APIView):
                 # inferir o modo pela tela em que está (ver GameOverModal).
                 "rated": False,
                 "delta": 0,
+                # Endereço da partida para a tela de análise
+                # (GET games/<public_id>/analysis/). Null quando não houve
+                # partida montada (app antigo, sem `player_color`) — e aí não
+                # há análise a buscar.
+                "game_public_id": str(game.public_id) if game is not None else None,
             },
             status=status.HTTP_200_OK,
         )

@@ -98,6 +98,10 @@ async function reportAndBroadcastRating(
     game_id: gameId,
     rated: data.rated !== false,
     modality: data.modality ?? null,
+    // Endereço da partida no Django, para a tela de análise pós-jogo. É
+    // diferente do `game_id` acima (que é a chave no Redis, efêmera): este
+    // sobrevive à partida e é o que o app usa em GET .../analysis/.
+    game_public_id: data.game_public_id ?? null,
     players: {
       [String(whiteId)]: {
         rating: data.white.rating,

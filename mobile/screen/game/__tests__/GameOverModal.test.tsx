@@ -4,6 +4,23 @@ import GameOverModal from "../GameOverModal";
 
 jest.mock("@/hooks/useTheme", () => ({ useTheme: () => ({ theme: "light" }) }));
 
+// Plano do usuário: o gate da análise pós-jogo. Grátis por padrão — é o que
+// a maioria dos testes deste arquivo assume.
+jest.mock("@/hooks/useHasPaidPlan", () => ({
+  useHasPaidPlan: () => mockHasPaidPlan,
+}));
+let mockHasPaidPlan = false;
+
+// A seção de análise tem suíte própria (GameAnalysisSection.test.tsx); aqui
+// só interessa SE ela é montada.
+jest.mock("../GameAnalysisSection", () => {
+  const { Text } = require("react-native");
+  return {
+    __esModule: true,
+    default: () => <Text>SECAO_DE_ANALISE</Text>,
+  };
+});
+
 // Padrão dos testes: flag de QA DESLIGADA — é o que produção vê.
 jest.mock("@/constants/qaFlags", () => ({
   get QA_SHOW_AI_DIAGNOSTIC_PGN() {
@@ -25,6 +42,7 @@ const PGN_DE_EXEMPLO = [
 
 beforeEach(() => {
   mockQaPgn = false;
+  mockHasPaidPlan = false;
 });
 
 function hasText(root: ReactTestInstance, text: string) {
@@ -51,6 +69,8 @@ function render(props: Partial<React.ComponentProps<typeof GameOverModal>> = {})
         onLeave={props.onLeave ?? jest.fn()}
         campaignUnlock={props.campaignUnlock}
         diagnosticPgn={props.diagnosticPgn}
+        gamePublicId={props.gamePublicId}
+        playerColor={props.playerColor}
       />
     );
   });
@@ -340,4 +360,34 @@ describe("GameOverModal — título e motivo centralizados", () => {
       expect(textAlignDe(tree.root, "Xeque-mate")).toBe("center");
     }
   );
+});
+
+
+// ── Análise pós-jogo (Fase 2) ────────────────────────────────────────
+//
+// Duas condições para a seção existir: a partida foi registrada no servidor
+// E o usuário tem plano pago. O gate no cliente evita pedir ao servidor o
+// que ele já responderia como "indisponivel".
+
+describe("gate da análise pós-jogo", () => {
+  const ANALYSIS = "SECAO_DE_ANALISE";
+
+  it("plano pago + partida registrada: a análise aparece", () => {
+    mockHasPaidPlan = true;
+    const tree = render({ gamePublicId: "abc-123" });
+    expect(hasText(tree.root, ANALYSIS)).toBe(true);
+  });
+
+  it("plano Grátis: nem chega a montar a seção", () => {
+    mockHasPaidPlan = false;
+    const tree = render({ gamePublicId: "abc-123" });
+    expect(hasText(tree.root, ANALYSIS)).toBe(false);
+  });
+
+  it("sem partida registrada, não há o que analisar", () => {
+    // Backend anterior à Fase 1, ou partida vs IA sem `player_color`.
+    mockHasPaidPlan = true;
+    expect(hasText(render({ gamePublicId: null }).root, ANALYSIS)).toBe(false);
+    expect(hasText(render().root, ANALYSIS)).toBe(false);
+  });
 });

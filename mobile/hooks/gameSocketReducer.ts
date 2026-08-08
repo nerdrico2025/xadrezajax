@@ -91,6 +91,10 @@ export type State = {
    *  chegar (ou para sempre, se o backend não responder — melhor não mostrar
    *  número nenhum do que mostrar um errado). */
   ratingOutcome: RatingOutcome | null;
+  /** Identificador da partida no servidor Django, para a análise pós-jogo.
+   *  Chega junto do `game_rated` (é a resposta do mesmo endpoint) e vale só
+   *  para a partida corrente — some na revanche, igual ao rating. */
+  gamePublicId: string | null;
 };
 
 export type Action =
@@ -106,7 +110,7 @@ export type Action =
   | { type: "GAME_STARTED"; game: OnlineGame }
   | { type: "MOVE_MADE"; fen: string; turn: GameColor; check: boolean; lastMove: { from: string; to: string } | null; whiteTimeMs: number | null; blackTimeMs: number | null }
   | { type: "GAME_OVER"; winnerId: string | null; reason: string }
-  | { type: "GAME_RATED"; gameId: string; outcome: RatingOutcome }
+  | { type: "GAME_RATED"; gameId: string; outcome: RatingOutcome; gamePublicId?: string | null }
   | { type: "OPPONENT_DISCONNECTED" }
   | { type: "MOVE_ERROR"; error: string }
   | { type: "OPPONENT_RECONNECTED" }
@@ -133,6 +137,7 @@ export const initialState: State = {
   outgoingDrawOffer: false,
   drawOfferDeclined: false,
   ratingOutcome: null,
+  gamePublicId: null,
 };
 
 const noDrawOffers = {
@@ -204,8 +209,10 @@ export function gameSocketReducer(state: State, action: Action): State {
         opponentDisconnected: false,
         error: null,
         // Partida nova nunca herda o rating da anterior — na revanche o
-        // modal mostraria o delta da partida passada.
+        // modal mostraria o delta da partida passada. Vale igual para o
+        // ponteiro da análise.
         ratingOutcome: null,
+        gamePublicId: null,
         ...noDrawOffers,
       };
     case "MOVE_MADE":
@@ -236,7 +243,11 @@ export function gameSocketReducer(state: State, action: Action): State {
       // Ignora resultado de outra partida: um `game_rated` atrasado da
       // partida anterior não pode pintar o modal da revanche.
       if (!state.game || state.game.gameId !== action.gameId) return state;
-      return { ...state, ratingOutcome: action.outcome };
+      return {
+        ...state,
+        ratingOutcome: action.outcome,
+        gamePublicId: action.gamePublicId ?? null,
+      };
     case "OPPONENT_DISCONNECTED":
       // Proposta pendente expira — não deixa modal/botão travado esperando
       // resposta de quem caiu
@@ -253,6 +264,7 @@ export function gameSocketReducer(state: State, action: Action): State {
         status: action.connected ? "connected" : "idle",
         error: null,
         ratingOutcome: null,
+        gamePublicId: null,
         ...noDrawOffers,
       };
     case "FRIEND_INVITATION":

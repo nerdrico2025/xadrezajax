@@ -55,6 +55,9 @@ interface Props {
   /** Delta de rating desta partida, vindo do servidor. Chega depois do fim
    *  da partida — o modal abre antes e completa quando isto aparece. */
   ratingOutcome?: RatingOutcome | null;
+  /** Identificador da partida no servidor, para a análise pós-jogo. Chega
+   *  junto do rating; null em backend/node-api anteriores à Fase 2. */
+  gamePublicId?: string | null;
   onMakeMove: (from: string, to: string, promotion?: string) => void;
   onResign: () => void;
   onOfferDraw?: () => void;
@@ -95,6 +98,7 @@ export default function OnlineGameScreen({
   outgoingDrawOffer = false,
   drawOfferDeclined = false,
   ratingOutcome = null,
+  gamePublicId = null,
   onMakeMove,
   onResign,
   onOfferDraw,
@@ -567,6 +571,8 @@ export default function OnlineGameScreen({
         }
         onNewGame={onLeave}
         onLeave={onLeave}
+        gamePublicId={gamePublicId}
+        playerColor={game.myColor}
       />
 
       {/* Sair no meio da partida: mesma consequência do "Desistir", e por isso

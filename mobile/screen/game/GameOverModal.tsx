@@ -5,7 +5,9 @@ import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { AI_LEVEL_BY_ID, type Difficulty } from "@/constants/aiGame";
 import { QA_SHOW_AI_DIAGNOSTIC_PGN } from "@/constants/qaFlags";
+import { useHasPaidPlan } from "@/hooks/useHasPaidPlan";
 import Confetti from "@/components/Confetti";
+import GameAnalysisSection from "./GameAnalysisSection";
 
 /** Modo Campanha: preenchido quando a vitória atual cruzou o limiar de 3
  * vitórias no nível jogado — dominatedLevel ganhou o selo; nextLevel é o
@@ -115,6 +117,14 @@ interface GameOverModalProps {
    * lá fica atrás de um link discreto — nunca como bloco de texto aberto.
    */
   diagnosticPgn?: string | null;
+  /**
+   * Identificador da partida no servidor, para a análise pós-jogo (Fase 2).
+   * Ausente quando a partida não foi registrada (app/servidor antigo) — e aí
+   * não há análise a pedir.
+   */
+  gamePublicId?: string | null;
+  /** Cor que ESTE usuário jogou, para o resumo da análise ser do lado certo. */
+  playerColor?: "w" | "b";
 }
 
 export default function GameOverModal({
@@ -125,9 +135,15 @@ export default function GameOverModal({
   onLeave,
   campaignUnlock,
   diagnosticPgn,
+  gamePublicId,
+  playerColor = "w",
 }: GameOverModalProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
+  // Gate de plano no CLIENTE: sem plano pago, nem chega a pedir a análise.
+  // O servidor também protege (responde "indisponivel"), mas fazer a chamada
+  // para receber uma negativa é gasto à toa em rede móvel.
+  const hasPaidPlan = useHasPaidPlan();
   // Fechado por padrão: o PGN é diagnóstico, não conteúdo da tela de
   // resultado. Só existe em build de QA (ver showDiagnosticToggle).
   const [showPgn, setShowPgn] = useState(false);
@@ -234,6 +250,17 @@ export default function GameOverModal({
                 </Text>
               </View>
             </View>
+          )}
+
+          {/* Análise pós-jogo (Fase 2). Três condições, todas necessárias:
+              a partida foi registrada no servidor (`gamePublicId`), o usuário
+              tem plano pago, e o backend tem o que mostrar. Sem plano, nem
+              chega a pedir — o servidor negaria de qualquer forma. */}
+          {gamePublicId && hasPaidPlan && (
+            <GameAnalysisSection
+              gamePublicId={gamePublicId}
+              playerColor={playerColor}
+            />
           )}
 
           {/* ⚠️ TEMPORÁRIO: PGN da partida para a análise da calibragem da IA.

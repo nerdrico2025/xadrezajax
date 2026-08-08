@@ -164,6 +164,10 @@ export function useGameSocket() {
       dispatch({
         type: "GAME_RATED",
         gameId: data.game_id,
+        // Endereço da partida no Django, para a análise pós-jogo. Vem null de
+        // um node-api/backend anteriores à Fase 2 — e aí não há análise a
+        // oferecer.
+        gamePublicId: data.game_public_id ?? null,
         outcome: {
           rated: data.rated !== false,
           rating: mine.rating,
@@ -386,6 +390,7 @@ export function useGameSocket() {
     outgoingDrawOffer: state.outgoingDrawOffer,
     drawOfferDeclined: state.drawOfferDeclined,
     ratingOutcome: state.ratingOutcome,
+    gamePublicId: state.gamePublicId,
     joinQueue,
     leaveQueue,
     createRoom,

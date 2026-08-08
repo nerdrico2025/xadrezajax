@@ -147,7 +147,14 @@ export async function reportAiResult(
   // Glicko-2 no backend (bullet < 3 min, blitz 3–10 min, rápido > 10/sem limite)
   timeControl: number | null = null,
   game: AiGameRecord = {}
-): Promise<{ rating: number; provisional: boolean; modality: RatingModality }> {
+): Promise<{
+  rating: number;
+  provisional: boolean;
+  modality: RatingModality;
+  /** Endereço da partida para a análise pós-jogo. Null quando o servidor não
+   *  montou a partida (sem `player_color`, ou backend anterior à Fase 1). */
+  game_public_id: string | null;
+}> {
   const res = await authFetch(`${API_URL}/api/v1/auth/game/ai-result/`, token, {
     method: "POST",
     headers: JSON_HEADERS,
