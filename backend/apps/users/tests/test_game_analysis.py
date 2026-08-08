@@ -120,6 +120,18 @@ class EnqueueGatingTests(APITestCase):
 
         self.assertEqual(GameAnalysis.objects.count(), 1)
 
+    def test_response_carries_the_public_id_for_the_app(self):
+        """Sem isto o app não teria como pedir a análise da partida que acabou
+        de jogar: `GET games/<public_id>/analysis/` precisa desse id, e ele não
+        chegava a lugar nenhum fora do servidor."""
+        make_paid(self.white)
+
+        response = self.post_online()
+
+        self.assertEqual(
+            response.data["game_public_id"], str(Game.objects.get().public_id)
+        )
+
     @override_settings(POST_GAME_ANALYSIS_ENABLED=False)
     def test_flag_off_creates_nothing(self):
         """O estado do primeiro deploy: a partida é gravada normalmente e
@@ -162,6 +174,24 @@ class AiEnqueueTests(APITestCase):
     def test_free_user_does_not_enqueue(self):
         self.post_ai()
         self.assertEqual(GameAnalysis.objects.count(), 0)
+
+    def test_response_carries_the_public_id_for_the_app(self):
+        make_paid(self.user)
+
+        response = self.post_ai()
+
+        self.assertEqual(
+            response.data["game_public_id"], str(Game.objects.get().public_id)
+        )
+
+    def test_public_id_is_null_when_there_is_no_game(self):
+        """App antigo (sem `player_color`): não há partida montada, então o
+        app recebe null e simplesmente não oferece análise."""
+        make_paid(self.user)
+
+        response = self.post_ai(player_color=None)
+
+        self.assertIsNone(response.data["game_public_id"])
 
     def test_legacy_payload_without_color_has_no_game_to_analyse(self):
         """Sem `player_color` a Fase 1 não monta `Game` — e sem partida não

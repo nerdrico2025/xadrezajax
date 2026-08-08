@@ -182,6 +182,9 @@ export default function GameScreen({
   }, []);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
   const [campaignUnlock, setCampaignUnlock] = useState<CampaignUnlockInfo | null>(null);
+  // Identificador da partida no servidor, devolvido pelo registro do
+  // resultado. É o que a tela de análise usa para pedir o relatório.
+  const [gamePublicId, setGamePublicId] = useState<string | null>(null);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [showDrawConfirm, setShowDrawConfirm] = useState(false);
   const [moveCount, setMoveCount] = useState(savedGame?.moveCount ?? 0);
@@ -266,7 +269,12 @@ export default function GameScreen({
         termination: result.reason,
         finalFen,
       })
-        .then(async () => {
+        .then(async (response) => {
+          // Endereço da partida para a análise pós-jogo. Null quando o
+          // servidor não montou a partida (backend anterior à Fase 1) — e aí
+          // o modal simplesmente não oferece análise.
+          setGamePublicId(response?.game_public_id ?? null);
+
           // Modo Campanha: só vitória progride. Busca o estado pós-partida
           // para detectar se ESTA vitória cruzou o limiar de desbloqueio —
           // vitorias === vitorias_para_desbloquear é o sinal exato (o
@@ -431,6 +439,7 @@ export default function GameScreen({
     setAiCaptures([]);
     setGameResult(null);
     setCampaignUnlock(null);
+    setGamePublicId(null);
     setMoveCount(0);
     setClockTimedOut(null);
     setAiError(false);
@@ -710,6 +719,8 @@ export default function GameScreen({
         onLeave={() => onLeave?.()}
         campaignUnlock={campaignUnlock}
         diagnosticPgn={diagnosticPgn}
+        gamePublicId={gamePublicId}
+        playerColor={playerColor}
       />
 
       <ConfirmModal

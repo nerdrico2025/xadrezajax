@@ -87,6 +87,7 @@ export default function Home() {
     outgoingDrawOffer,
     drawOfferDeclined,
     ratingOutcome,
+    gamePublicId,
     clearGame,
     inviteFriend,
     dismissInvitation,
@@ -355,6 +356,7 @@ export default function Home() {
             outgoingDrawOffer={outgoingDrawOffer}
             drawOfferDeclined={drawOfferDeclined}
             ratingOutcome={ratingOutcome}
+            gamePublicId={gamePublicId}
             onMakeMove={makeMove}
             onResign={resign}
             onOfferDraw={offerDraw}
