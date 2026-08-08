@@ -18,6 +18,9 @@ jest.mock("../services/stockfish.service", () => ({
     size: 2, total: 1, idle: 1, waiting: 0,
     queued: 0, waitingPeak: 0, queueFull: 0, queueTimeouts: 0, discarded: 0,
   })),
+  // O pool de análise consome este parser (é puro; vale o real).
+  parseMultipvLine: jest.requireActual("../services/stockfish.service.js")
+    .parseMultipvLine,
 }));
 
 const { getBestMove } = require("../services/stockfish.service");
@@ -154,6 +157,21 @@ describe("POST /api/v1/game/move", () => {
   test("/health continua ABERTO (sem token) — é sonda de infra", async () => {
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
+  });
+
+  test("GET /health expõe o pool de ANÁLISE separado do pool ao vivo", async () => {
+    // Ler os dois lado a lado é o que permite responder se a análise está
+    // tirando engine das partidas ao vivo.
+    const res = await request(app).get("/health");
+
+    expect(res.body.analysis).toMatchObject({
+      size: expect.any(Number),
+      waiting: expect.any(Number),
+      queued: expect.any(Number),
+    });
+    // Um engine para análise, contra o pool ao vivo (que vem do mock com 2).
+    expect(res.body.analysis.size).toBe(1);
+    expect(res.body.analysis.size).not.toBe(res.body.engine.size);
   });
 });
 
