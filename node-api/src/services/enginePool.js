@@ -240,12 +240,36 @@ class Engine {
    * `bestMove` vem null quando a engine responde "bestmove (none)" (posição sem
    * lance legal) — tratar isso aqui evita que a string "(none)" vaze como se
    * fosse um lance.
+   *
+   * `newGame` (default true) manda `ucinewgame` antes da busca. Partida vs IA
+   * PRECISA disso a cada lance; análise pós-jogo precisa do contrário (ver
+   * abaixo). `threads` só é enviado quando informado.
    */
-  async search({ skill, multipv, fen, goCmd, timeoutMs, parseLine }) {
+  async search({
+    skill,
+    multipv,
+    fen,
+    goCmd,
+    timeoutMs,
+    parseLine,
+    newGame = true,
+    threads = null,
+  }) {
     // ucinewgame: zera a hash entre lances. Ver nota de disciplina de estado
     // no topo — sem isso a IA fica mais forte que a calibragem medida.
-    this.write("ucinewgame\n");
+    //
+    // A ANÁLISE PÓS-JOGO passa `newGame: false` e é o caso oposto: as posições
+    // são da MESMA partida, em sequência, então a hash sobrevivendo entre elas
+    // acelera sem distorcer nada (não há calibragem de força a preservar). Lá
+    // o `ucinewgame` é mandado uma vez por partida, não por posição.
+    if (newGame) this.write("ucinewgame\n");
     this.write(`setoption name Skill Level value ${skill}\n`);
+    // Explícito quando informado: o default do Stockfish é 1, mas herdar esse
+    // número por acidente é frágil demais para o pool de análise, que não pode
+    // roubar CPU das partidas ao vivo.
+    if (threads !== null) {
+      this.write(`setoption name Threads value ${threads}\n`);
+    }
     // Sempre explícito (inclusive MultiPV 1): o engine é reutilizado, então um
     // MultiPV 16 de um lance anterior vazaria para o nível seguinte.
     this.write(`setoption name MultiPV value ${multipv}\n`);
