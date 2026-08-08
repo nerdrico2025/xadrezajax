@@ -10,7 +10,18 @@ const INTERNAL_SECRET = process.env.INTERNAL_API_SECRET || "";
 // null se a chamada falhar — o chamador usa isso para avisar os dois lados do
 // resultado do rating. Nunca lança: um erro aqui não pode derrubar o fim da
 // partida.
-async function reportGameResult(whiteId, blackId, result, timeControlSecs = null) {
+//
+// `game` carrega a PARTIDA em si (id, lances, motivo do fim, posição final,
+// início). Todos os campos são opcionais no backend: uma versão deste serviço
+// que não os mande continua registrando resultado e rating normalmente — é o
+// que mantém node-api e Django podendo subir em ordens diferentes.
+async function reportGameResult(
+  whiteId,
+  blackId,
+  result,
+  timeControlSecs = null,
+  game = {}
+) {
   if (!INTERNAL_SECRET) {
     console.warn("[GameResult] INTERNAL_API_SECRET não configurado, resultado não reportado.");
     return null;
@@ -28,6 +39,11 @@ async function reportGameResult(whiteId, blackId, result, timeControlSecs = null
         black_id: blackId,
         result,
         time_control: timeControlSecs,
+        external_id: game.externalId ?? null,
+        moves: game.moves ?? [],
+        termination: game.termination ?? null,
+        final_fen: game.finalFen ?? null,
+        started_at: game.startedAt ?? null,
       }),
     });
 
@@ -38,6 +54,12 @@ async function reportGameResult(whiteId, blackId, result, timeControlSecs = null
     }
 
     const data = await res.json();
+    if (data.duplicate) {
+      console.log(
+        `[GameResult] partida ${game.externalId} já registrada — nada alterado`
+      );
+      return data;
+    }
     console.log(
       `[GameResult] rating atualizado (${data.modality ?? "?"}) — ` +
         `brancas: ${data.white.rating} (${data.white.delta >= 0 ? "+" : ""}${data.white.delta}) ` +

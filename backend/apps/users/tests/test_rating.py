@@ -367,8 +367,9 @@ class AiGameResultViewTests(APITestCase):
         self.assertEqual(history.mode, GameHistory.MODE_AI)
         self.assertFalse(history.rated)
         self.assertEqual(history.rating_before, history.rating_after)
-        # Partida vs IA não informa cor no payload — fica nula, e nula é
-        # simplesmente ignorada por qualquer contagem de cor.
+        # Payload sem `player_color` (app anterior ao registro de partidas):
+        # a cor fica nula, e nula é simplesmente ignorada por qualquer
+        # contagem de cor. Ver test_game_record.py para o caso com a cor.
         self.assertIsNone(history.color)
 
     def test_payload_without_time_control_defaults_to_blitz(self):

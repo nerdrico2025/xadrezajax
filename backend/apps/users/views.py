@@ -9,6 +9,7 @@ from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Q
+from django.utils.dateparse import parse_datetime
 from django_redis import get_redis_connection
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -27,7 +28,13 @@ from .glicko2 import (
     Rating as GlickoRating,
     rate as glicko2_rate,
 )
-from .models import ModalityRating, get_or_create_profile
+from .models import (
+    Game,
+    ModalityRating,
+    get_or_create_profile,
+    normalize_moves,
+    normalize_termination,
+)
 from .serializers import (
     ChessTokenObtainPairSerializer,
     ProfileSerializer,
@@ -447,6 +454,83 @@ def _sync_rating_mirror(profile, modality_rating):
         profile.rating = round(modality_rating.rating)
 
 
+def _display_name(profile):
+    """Nome a ser gravado como SNAPSHOT no `Game` (nunca lido da FK depois)."""
+    return getattr(profile, "username", None) or profile.user.full_name
+
+
+def _parse_started_at(raw):
+    """Início da partida vindo do payload (ISO-8601), ou None.
+
+    Nunca levanta: data torta vira None e a partida é registrada mesmo assim
+    (`ended_at` sempre existe). Naive vira aware no fuso do projeto — o
+    node-api manda UTC com `Z`, mas um cliente futuro pode esquecer.
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        parsed = parse_datetime(raw)
+    except ValueError:
+        return None
+    if parsed is None:
+        return None
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed, timezone.get_default_timezone())
+    return parsed
+
+
+def _time_control_seconds(data):
+    """Base do relógio em segundos, ou None (sem relógio / valor inválido).
+
+    A MODALIDADE já é derivada disto em `_modality_from_request`; aqui o valor
+    é guardado cru no `Game`, que é o registro da partida.
+    """
+    value = data.get("time_control")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _unchanged_rating_block(user_id, modality_rating):
+    """Bloco de rating para uma resposta que NÃO alterou nada (resultado
+    duplicado): delta 0 e `rating_before` == rating atual."""
+    current = round(modality_rating.rating)
+    return {
+        "id": user_id,
+        "rating": current,
+        "rating_before": current,
+        "delta": 0,
+        "deviation": round(modality_rating.deviation),
+        "provisional": modality_rating.is_provisional,
+    }
+
+
+def _game_payload_fields(data):
+    """Campos do `Game` que vêm do payload — TODOS opcionais.
+
+    Aditivo por construção: node-api/app antigos, que não mandam nada disto,
+    continuam registrando a partida (sem os lances). Nada aqui pode recusar um
+    resultado — inclusive o teto de lances, que TRUNCA em vez de rejeitar.
+
+    `initial_fen` de propósito NÃO vem do payload: toda partida do produto
+    começa na posição inicial (o default do model), e aceitar uma FEN
+    arbitrária do cliente só abriria espaço para registro inconsistente.
+    """
+    moves, ply_count, truncated = normalize_moves(data.get("moves"))
+    final_fen = data.get("final_fen")
+    return {
+        "moves": moves,
+        "ply_count": ply_count,
+        "moves_truncated": truncated,
+        "final_fen": final_fen[:100] if isinstance(final_fen, str) else "",
+        "termination": normalize_termination(data.get("termination")),
+        "started_at": _parse_started_at(data.get("started_at")),
+    }
+
+
 class GameResultView(APIView):
     """
     POST /api/v1/auth/game/result/
@@ -466,6 +550,11 @@ class GameResultView(APIView):
     relógio decidir se a partida contava — mesma classe de problema do furo
     de spoofing fechado em node-api/src/socket/index.js (cliente decidindo
     coisa que é do servidor).
+
+    IDEMPOTENTE por `external_id` (o id da partida no node-api), quando ele
+    vem no payload: o mesmo fim de partida reportado duas vezes registra a
+    partida, o histórico e o Glicko-2 UMA vez só. Ver o bloco de idempotência
+    no corpo para os cenários concorrentes que motivam isso.
     """
 
     authentication_classes = []
@@ -485,6 +574,11 @@ class GameResultView(APIView):
         # result: "white" | "black" | "draw"
         result = request.data.get("result")
         modality = _modality_from_request(request.data)
+        # Id da partida no node-api. Opcional: node-api antigo não manda, e aí
+        # não há idempotência possível — o comportamento é o de sempre.
+        external_id = request.data.get("external_id") or None
+        if external_id is not None:
+            external_id = str(external_id)[:64]
 
         if (
             not white_id
@@ -511,6 +605,54 @@ class GameResultView(APIView):
                 )
             white_rating = _locked_modality_rating(white_profile, modality)
             black_rating = _locked_modality_rating(black_profile, modality)
+
+            # ── Idempotência ────────────────────────────────────────────────
+            # A PARTIDA é registrada ANTES de qualquer mutação, e o unique de
+            # `external_id` é o que garante que ela seja registrada UMA vez.
+            # Dois finais concorrentes da mesma partida (desistência no mesmo
+            # instante do timer de abandono, xeque-mate junto com aceite de
+            # empate, duplo toque em "Desistir") chegam aqui com o mesmo
+            # external_id: o primeiro cria, o segundo encontra e sai sem
+            # mexer em rating, contador nem histórico.
+            #
+            # A checagem tem de vir DEPOIS do lock dos perfis: é o lock que
+            # serializa as duas requisições concorrentes até aqui.
+            game_defaults = {
+                "mode": Game.MODE_ONLINE,
+                "modality": modality,
+                "white_player": white_profile.user,
+                "black_player": black_profile.user,
+                "white_name": _display_name(white_profile),
+                "black_name": _display_name(black_profile),
+                "result": result,
+                "time_control": _time_control_seconds(request.data),
+                **_game_payload_fields(request.data),
+            }
+            if external_id:
+                game, created = Game.objects.get_or_create(
+                    external_id=external_id, defaults=game_defaults
+                )
+                if not created:
+                    # `duplicate` avisa o node-api para NÃO reemitir o
+                    # `game_rated` — o delta verdadeiro já foi transmitido
+                    # pela primeira chamada, e um segundo evento com delta 0
+                    # sobrescreveria o número certo na tela dos jogadores.
+                    return Response(
+                        {
+                            "duplicate": True,
+                            "modality": modality,
+                            "rated": True,
+                            "white": _unchanged_rating_block(
+                                white_profile.user_id, white_rating
+                            ),
+                            "black": _unchanged_rating_block(
+                                black_profile.user_id, black_rating
+                            ),
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+            else:
+                game = Game.objects.create(**game_defaults)
 
             w_before = round(white_rating.rating)
             b_before = round(black_rating.rating)
@@ -569,8 +711,12 @@ class GameResultView(APIView):
             # no payload (white_id/black_id) e era descartada. Registrar aqui
             # é o passo barato que permite, numa PR futura, balancear a cor no
             # pareamento a partir do histórico de cada jogador.
+            # As DUAS linhas apontam para a MESMA partida: é o que permite
+            # abrir o mesmo tabuleiro a partir do histórico de qualquer um dos
+            # dois jogadores.
             GameHistory.objects.create(
                 user=white_profile.user,
+                game=game,
                 opponent_name=w_name,
                 result=w_result,
                 mode=GameHistory.MODE_ONLINE,
@@ -584,6 +730,7 @@ class GameResultView(APIView):
             )
             GameHistory.objects.create(
                 user=black_profile.user,
+                game=game,
                 opponent_name=b_name,
                 result=b_result,
                 mode=GameHistory.MODE_ONLINE,
@@ -628,6 +775,11 @@ class AiGameResultView(APIView):
     POST /api/v1/auth/game/ai-result/
     Registra resultado de partida contra IA para o usuário autenticado.
     Atualiza stats, recalcula ELO e salva no histórico.
+
+    Sem idempotência por `external_id`, ao contrário do GameResultView: neste
+    fluxo a partida acontece DENTRO do app (não existe partida no node-api,
+    logo não existe id de servidor para deduplicar). O app reporta uma vez, no
+    fim da partida.
     """
 
     permission_classes = [IsAuthenticated]
@@ -636,6 +788,14 @@ class AiGameResultView(APIView):
         result = request.data.get("result")
         difficulty = request.data.get("difficulty", "medium")
         modality = _modality_from_request(request.data)
+        # Cor jogada pelo humano. Opcional: app antigo não manda — e sem ela
+        # não dá para montar o `Game` (o resultado dele é do TABULEIRO:
+        # brancas/pretas/empate, não "ganhei/perdi"). Nesse caso a partida
+        # entra só como extrato, com `GameHistory.game` null, exatamente como
+        # todo o histórico anterior a esta feature.
+        player_color = request.data.get("player_color")
+        if player_color not in (Game.COLOR_WHITE, Game.COLOR_BLACK):
+            player_color = None
         # TODA partida vs IA é congelada para efeito de rating — nunca altera
         # o Glicko-2, tenha relógio ou não. `no_clock` fica só para o gating
         # do plano Grátis (que continua contando as partidas COM relógio,
@@ -649,7 +809,12 @@ class AiGameResultView(APIView):
             )
         if difficulty not in AI_RATING:
             return Response(
-                {"detail": "difficulty deve ser 'easy', 'medium' ou 'hard'."},
+                {
+                    "detail": (
+                        "difficulty deve ser um de: "
+                        f"{', '.join(repr(level) for level in AI_RATING)}."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if modality is None:
@@ -718,9 +883,54 @@ class AiGameResultView(APIView):
                 "hard": "IA Difícil",
                 "master": "IA Mestre",
             }
-            game = GameHistory.objects.create(
+            ai_label = difficulty_label[difficulty]
+
+            game = None
+            if player_color is not None:
+                ai_color = (
+                    Game.COLOR_BLACK
+                    if player_color == Game.COLOR_WHITE
+                    else Game.COLOR_WHITE
+                )
+                human_won = result == "win"
+                # Resultado do tabuleiro a partir da perspectiva do humano —
+                # é para isto que `player_color` é indispensável.
+                if result == "draw":
+                    board_result = Game.RESULT_DRAW
+                elif (player_color == Game.COLOR_WHITE) == human_won:
+                    board_result = Game.RESULT_WHITE
+                else:
+                    board_result = Game.RESULT_BLACK
+
+                human_name = _display_name(profile)
+                game = Game.objects.create(
+                    mode=Game.MODE_AI,
+                    modality=modality,
+                    # Só um lado tem User: o outro é a IA, que fica com a FK
+                    # null e apenas o nome de snapshot.
+                    white_player=(
+                        request.user if player_color == Game.COLOR_WHITE else None
+                    ),
+                    black_player=(
+                        request.user if player_color == Game.COLOR_BLACK else None
+                    ),
+                    white_name=(
+                        human_name if player_color == Game.COLOR_WHITE else ai_label
+                    ),
+                    black_name=(
+                        human_name if player_color == Game.COLOR_BLACK else ai_label
+                    ),
+                    ai_difficulty=difficulty,
+                    ai_color=ai_color,
+                    result=board_result,
+                    time_control=_time_control_seconds(request.data),
+                    **_game_payload_fields(request.data),
+                )
+
+            history = GameHistory.objects.create(
                 user=request.user,
-                opponent_name=difficulty_label[difficulty],
+                game=game,
+                opponent_name=ai_label,
                 result=result,
                 mode=GameHistory.MODE_AI,
                 modality=modality,
@@ -729,14 +939,15 @@ class AiGameResultView(APIView):
                 # Constante, igual e oposta ao GameResultView: partida vs IA
                 # NUNCA vale rating, tenha relógio ou não.
                 rated=False,
+                color=player_color,
             )
 
             # Modo Campanha (épico): só vitória progride, em qualquer
             # controle de tempo (não filtra por no_clock — regra diferente
-            # da de rating). Atrelado ao game.id — idempotente por
-            # construção (ver record_campaign_win).
+            # da de rating). Atrelado ao id do EXTRATO (GameHistory) —
+            # idempotente por construção (ver record_campaign_win).
             if result == "win":
-                record_campaign_win(profile, difficulty, game.id)
+                record_campaign_win(profile, difficulty, history.id)
 
         return Response(
             {

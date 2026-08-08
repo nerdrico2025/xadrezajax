@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 from django.utils import timezone
@@ -168,6 +170,214 @@ class ModalityRating(models.Model):
         )
 
 
+# Os 5 níveis da IA (wizard vs IA e Modo Campanha). Lista única, no módulo,
+# porque `Game.ai_difficulty` e `CampaignProgress.level` são o MESMO
+# vocabulário — e `Game` é declarado antes de `CampaignProgress`.
+AI_LEVEL_CHOICES = [
+    ("beginner", "Iniciante"),
+    ("easy", "Fácil"),
+    ("medium", "Médio"),
+    ("hard", "Difícil"),
+    ("master", "Mestre"),
+]
+
+
+class Game(models.Model):
+    """
+    A PARTIDA em si — o tabuleiro, não o extrato.
+
+    `GameHistory` é o extrato de UM jogador (resultado, rating antes/depois):
+    uma partida online gera DUAS linhas de GameHistory, uma para cada lado.
+    `Game` é a partida propriamente dita, uma linha só, com os lances — é o que
+    permite rever/analisar o jogo depois. As duas linhas de GameHistory
+    apontam para o mesmo `Game` (ver `GameHistory.game`).
+
+    Não substitui GameHistory: o extrato continua sendo a fonte de estatística
+    e de rating (e continua existindo sozinho para as partidas antigas, que
+    não têm lances gravados — `GameHistory.game` fica null nelas).
+    """
+
+    # Teto de lances gravados. Uma partida de xadrez real não passa disso
+    # (a regra dos 75 lances encerra bem antes); o teto existe contra payload
+    # abusivo/corrompido, e a partida NUNCA é rejeitada por causa dele — os
+    # primeiros MAX_PLIES lances são guardados e `moves_truncated` marca o
+    # corte. Guardamos o PREFIXO (não o sufixo) porque o replay só faz sentido
+    # a partir de `initial_fen`.
+    MAX_PLIES = 1000
+
+    START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+    MODE_AI = "ai"
+    MODE_ONLINE = "online"
+    MODE_CHOICES = [
+        (MODE_AI, "vs IA"),
+        (MODE_ONLINE, "Online"),
+    ]
+
+    # Resultado do TABULEIRO (quem venceu de brancas/pretas), não a
+    # perspectiva de um jogador — "win"/"loss" só existem em GameHistory,
+    # onde há um `user` para quem a vitória pertence.
+    RESULT_WHITE = "white"
+    RESULT_BLACK = "black"
+    RESULT_DRAW = "draw"
+    RESULT_CHOICES = [
+        (RESULT_WHITE, "Brancas"),
+        (RESULT_BLACK, "Pretas"),
+        (RESULT_DRAW, "Empate"),
+    ]
+
+    # Vocabulário único de fim de partida, compartilhado com o node-api
+    # (socket/index.js) e com o app (GameOverModal.GameEndReason). O app
+    # também diz "threefold" onde o node diz "repetition"; a normalização de
+    # entrada mora em `normalize_termination`, para o banco ter um termo só.
+    TERMINATION_CHOICES = [
+        ("checkmate", "Xeque-mate"),
+        ("stalemate", "Afogamento"),
+        ("repetition", "Repetição"),
+        ("insufficient", "Material insuficiente"),
+        ("draw", "Empate"),
+        ("agreement", "Acordo"),
+        ("resign", "Desistência"),
+        ("abandon", "Abandono"),
+        ("timeout", "Tempo esgotado"),
+    ]
+
+    COLOR_WHITE = "w"
+    COLOR_BLACK = "b"
+    COLOR_CHOICES = [(COLOR_WHITE, "Brancas"), (COLOR_BLACK, "Pretas")]
+
+    # Identificador público, para URL/compartilhamento de partida. UUID
+    # SEPARADO da PK (que segue BigAutoField): a PK sequencial continua barata
+    # para FK/índice, e o id exposto não vaza volume de partidas do produto.
+    public_id = models.UUIDField(
+        default=uuid.uuid4, unique=True, editable=False, verbose_name="ID público"
+    )
+    # Id da partida no node-api (chave `game:{id}` do Redis). É a CHAVE DE
+    # IDEMPOTÊNCIA do registro online: dois finais de partida concorrentes
+    # (ex.: desistência no mesmo instante em que o timer de abandono dispara)
+    # chegam com o mesmo external_id, e o segundo vira no-op em vez de
+    # duplicar histórico e aplicar Glicko-2 duas vezes.
+    # Null (não ""), para várias partidas sem external_id conviverem sob o
+    # unique — partida vs IA não tem id de servidor.
+    external_id = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        unique=True,
+        verbose_name="ID no node-api",
+    )
+    mode = models.CharField(max_length=6, choices=MODE_CHOICES)
+    modality = models.CharField(
+        max_length=6,
+        choices=ModalityRating.MODALITY_CHOICES,
+        default=ModalityRating.MODALITY_BLITZ,
+    )
+
+    # SET_NULL, não CASCADE: uma partida é de DOIS jogadores. Se um exclui a
+    # conta, a partida tem de continuar na biblioteca do outro — por isso os
+    # nomes abaixo são gravados como snapshot no momento do registro, e não
+    # lidos da FK na hora de exibir.
+    white_player = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="games_as_white",
+    )
+    black_player = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="games_as_black",
+    )
+    white_name = models.CharField(max_length=150, blank=True, default="")
+    black_name = models.CharField(max_length=150, blank=True, default="")
+
+    # Só em partida vs IA. `ai_color` é a cor que a IA jogou (o humano jogou a
+    # outra) — sem ela não dá para saber de que lado o adversário estava.
+    ai_difficulty = models.CharField(
+        max_length=8,
+        choices=AI_LEVEL_CHOICES,
+        null=True,
+        blank=True,
+        verbose_name="Nível da IA",
+    )
+    ai_color = models.CharField(
+        max_length=1, choices=COLOR_CHOICES, null=True, blank=True
+    )
+
+    # Lances em SAN, na ordem jogada ("e4", "e5", "Nf3", ...). SAN e não UCI
+    # porque é o que o app e o node-api já produzem (chess.js `move().san`) e
+    # o que um PGN precisa.
+    moves = models.JSONField(default=list, blank=True, verbose_name="Lances (SAN)")
+    # Lances REALMENTE jogados — pode ser maior que len(moves) quando houve
+    # truncamento. É o número honesto do tamanho da partida.
+    ply_count = models.IntegerField(default=0, verbose_name="Lances jogados")
+    moves_truncated = models.BooleanField(
+        default=False, verbose_name="Lances truncados"
+    )
+
+    initial_fen = models.CharField(max_length=100, blank=True, default=START_FEN)
+    final_fen = models.CharField(max_length=100, blank=True, default="")
+    result = models.CharField(max_length=5, choices=RESULT_CHOICES)
+    termination = models.CharField(
+        max_length=20, choices=TERMINATION_CHOICES, blank=True, default=""
+    )
+    # Base do relógio em segundos; null = sem relógio (só vs IA).
+    time_control = models.IntegerField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Partida"
+        verbose_name_plural = "Partidas"
+        ordering = ["-ended_at"]
+        indexes = [
+            models.Index(fields=["white_player", "-ended_at"]),
+            models.Index(fields=["black_player", "-ended_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.white_name or '?'} × {self.black_name or '?'} ({self.result})"
+
+
+def normalize_moves(raw):
+    """Sanitiza a lista de lances recebida do cliente/node-api.
+
+    Devolve `(moves, ply_count, truncated)`. Nunca levanta: um payload torto
+    vira lista vazia, porque perder os lances é ruim mas perder a PARTIDA
+    (rating, histórico, estatística) por causa deles seria pior.
+
+    `ply_count` é o total recebido, mesmo quando `moves` foi truncado em
+    `Game.MAX_PLIES` — ver o comentário do teto no model.
+    """
+    if not isinstance(raw, list):
+        return [], 0, False
+    # SAN mais longo do xadrez tem ~7 caracteres ("Qa1xb2#", "exd8=Q+"); 12 dá
+    # folga sem deixar entrar texto arbitrário no banco.
+    sans = [m[:12] for m in raw if isinstance(m, str) and m]
+    total = len(sans)
+    return sans[: Game.MAX_PLIES], total, total > Game.MAX_PLIES
+
+
+_TERMINATION_ALIASES = {"threefold": "repetition"}
+_TERMINATION_VALUES = {value for value, _label in Game.TERMINATION_CHOICES}
+
+
+def normalize_termination(raw):
+    """Traduz o motivo de fim recebido para o vocabulário do `Game`.
+
+    Valor desconhecido vira "" (campo em branco) em vez de ser gravado cru:
+    um termo livre no banco vira uma segunda gramática que ninguém consegue
+    consultar depois.
+    """
+    if not isinstance(raw, str):
+        return ""
+    value = _TERMINATION_ALIASES.get(raw, raw)
+    return value if value in _TERMINATION_VALUES else ""
+
+
 class GameHistory(models.Model):
     RESULT_WIN = "win"
     RESULT_LOSS = "loss"
@@ -187,6 +397,22 @@ class GameHistory(models.Model):
 
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="game_history"
+    )
+    # A partida (tabuleiro + lances) que originou este extrato. Null para
+    # TODO o histórico anterior a esta migration — não há como recuperar os
+    # lances de partidas já jogadas, então não existe migração de dados: as
+    # linhas antigas ficam null e a tela de histórico simplesmente não oferece
+    # "rever a partida" nelas.
+    #
+    # SET_NULL (e não CASCADE): apagar a partida nunca pode apagar o extrato
+    # de quem jogou — o rating e a estatística do jogador dependem dele.
+    game = models.ForeignKey(
+        "Game",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="history_entries",
+        verbose_name="Partida",
     )
     opponent_name = models.CharField(max_length=150, blank=True, default="")
     result = models.CharField(max_length=4, choices=RESULT_CHOICES)
@@ -217,12 +443,14 @@ class GameHistory(models.Model):
     COLOR_CHOICES = [(COLOR_WHITE, "Brancas"), (COLOR_BLACK, "Pretas")]
     # Cor que ESTE usuário jogou nesta partida. Nullable de propósito: o
     # histórico anterior a esta migration não tem como saber a cor (ela só
-    # existia no hash `game:` do Redis, com TTL de 2h, já expirado), e
-    # partidas vs IA não informam cor no payload. Null = desconhecida.
+    # existia no hash `game:` do Redis, com TTL de 2h, já expirado).
+    # Null = desconhecida.
     #
-    # Só REGISTRO nesta PR. O consumo (balanceamento de cor no pareamento da
-    # busca rápida) é PR futura — mas sem começar a gravar agora, essa PR
-    # nasceria sem dado histórico nenhum de onde partir.
+    # Partidas vs IA passaram a informar a cor junto com os lances (o app
+    # manda `player_color`); apps antigos continuam sem mandar. ATENÇÃO ao
+    # consumo previsto — balancear cor no pareamento da busca rápida — que
+    # precisa filtrar `mode="online"`: a cor jogada contra a IA é escolha do
+    # próprio usuário no wizard e não diz nada sobre o pareamento.
     color = models.CharField(
         max_length=1,
         choices=COLOR_CHOICES,
@@ -262,13 +490,9 @@ class CampaignProgress(models.Model):
     LEVEL_MEDIUM = "medium"
     LEVEL_HARD = "hard"
     LEVEL_MASTER = "master"
-    LEVEL_CHOICES = [
-        (LEVEL_BEGINNER, "Iniciante"),
-        (LEVEL_EASY, "Fácil"),
-        (LEVEL_MEDIUM, "Médio"),
-        (LEVEL_HARD, "Difícil"),
-        (LEVEL_MASTER, "Mestre"),
-    ]
+    # Mesmo vocabulário de `Game.ai_difficulty` — uma lista só (ver
+    # AI_LEVEL_CHOICES no topo do módulo).
+    LEVEL_CHOICES = AI_LEVEL_CHOICES
     # Ordem sequencial dos tiers (espec fechada) — usada para achar o
     # "próximo nível" a desbloquear. Mestre não tem próximo.
     LEVEL_ORDER = [LEVEL_BEGINNER, LEVEL_EASY, LEVEL_MEDIUM, LEVEL_HARD, LEVEL_MASTER]

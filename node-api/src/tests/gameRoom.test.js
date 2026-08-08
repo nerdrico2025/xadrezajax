@@ -12,6 +12,14 @@ jest.mock("../services/redis.service", () => {
     del: async (key) => {
       store.delete(key);
     },
+    // Lances da partida (`game:{id}:moves`) — lista, não hash.
+    rpush: async (key, value) => {
+      const list = store.get(key) || [];
+      list.push(value);
+      store.set(key, list);
+      return list.length;
+    },
+    lrange: async (key) => [...(store.get(key) || [])],
   };
   return { getRedis: () => redis, __store: store };
 });
@@ -24,6 +32,7 @@ jest.mock("../socket/matchmaking", () => ({
 const {
   createGame,
   getGame,
+  getMoves,
   applyMove,
   resignGame,
   offerDraw,
@@ -226,5 +235,51 @@ describe("applyMove", () => {
     expect(await applyMove(gameId, "2", "e7", "e5")).toEqual({
       error: "Não é sua vez",
     });
+  });
+});
+
+// ── Registro dos lances (game:{id}:moves) ────────────────────────────
+//
+// É a matéria-prima do registro da partida no Django. A regra dura: só entra
+// na lista o que o chess.js aceitou — a lista é a partida REAL.
+
+describe("getMoves", () => {
+  test("acumula os lances validados, em SAN e na ordem jogada", async () => {
+    const gameId = await newGame();
+    await applyMove(gameId, "1", "e2", "e4");
+    await applyMove(gameId, "2", "e7", "e5");
+    await applyMove(gameId, "1", "g1", "f3");
+
+    expect(await getMoves(gameId)).toEqual(["e4", "e5", "Nf3"]);
+  });
+
+  test("lance recusado NÃO entra na lista", async () => {
+    const gameId = await newGame();
+    await applyMove(gameId, "1", "e2", "e4");
+
+    await applyMove(gameId, "2", "e7", "e9"); // ilegal
+    await applyMove(gameId, "1", "d2", "d4"); // fora de turno
+    await applyMove(gameId, "2", "e2", "e4"); // casa de origem vazia
+
+    expect(await getMoves(gameId)).toEqual(["e4"]);
+  });
+
+  test("partida sem lance nenhum devolve lista vazia, não erro", async () => {
+    expect(await getMoves("NAOEXISTE")).toEqual([]);
+  });
+
+  test("promoção entra com o SAN da peça escolhida", async () => {
+    const gameId = await newGame();
+    // Sequência curta até uma promoção: brancas comem até a oitava fileira.
+    const moves = [
+      ["1", "e2", "e4"], ["2", "d7", "d5"],
+      ["1", "e4", "d5"], ["2", "c7", "c6"],
+      ["1", "d5", "c6"], ["2", "b8", "a6"],
+      ["1", "c6", "b7"], ["2", "a6", "b4"],
+    ];
+    for (const [user, from, to] of moves) await applyMove(gameId, user, from, to);
+    await applyMove(gameId, "1", "b7", "a8", "q");
+
+    expect(await getMoves(gameId)).toContain("bxa8=Q");
   });
 });
