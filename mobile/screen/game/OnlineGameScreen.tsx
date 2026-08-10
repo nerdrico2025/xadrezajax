@@ -58,6 +58,8 @@ interface Props {
   /** Identificador da partida no servidor, para a análise pós-jogo. Chega
    *  junto do rating; null em backend/node-api anteriores à Fase 2. */
   gamePublicId?: string | null;
+  /** Leva à tela de assinatura, para o convite da análise pós-jogo. */
+  onUpgrade?: () => void;
   onMakeMove: (from: string, to: string, promotion?: string) => void;
   onResign: () => void;
   onOfferDraw?: () => void;
@@ -99,6 +101,7 @@ export default function OnlineGameScreen({
   drawOfferDeclined = false,
   ratingOutcome = null,
   gamePublicId = null,
+  onUpgrade,
   onMakeMove,
   onResign,
   onOfferDraw,
@@ -573,6 +576,7 @@ export default function OnlineGameScreen({
         onLeave={onLeave}
         gamePublicId={gamePublicId}
         playerColor={game.myColor}
+        onUpgrade={onUpgrade}
       />
 
       {/* Sair no meio da partida: mesma consequência do "Desistir", e por isso

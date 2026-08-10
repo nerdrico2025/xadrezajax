@@ -18,10 +18,28 @@ const { analyzeGame, UnanalyzableGameError } = require("./analysis.service");
 const BACKEND_URL = process.env.BACKEND_URL || "http://backend:8000";
 const INTERNAL_SECRET = process.env.INTERNAL_API_SECRET || "";
 
+/**
+ * Lê uma flag booleana de ambiente com o MESMO contrato do Django.
+ *
+ * Existe por causa de um bug real: aqui a comparação era com `"true"` e no
+ * `core/settings.py` com `"True"`. A mesma variável, setada com o mesmo valor
+ * nos dois serviços do Easypanel, ligava um lado e deixava o outro desligado —
+ * sem erro, sem log, sem 500. O sintoma era a análise nunca sair de `pendente`
+ * (ou nunca ser enfileirada), que não se parece nada com "erro de digitação
+ * numa env var".
+ *
+ * Estreito de propósito: "1"/"yes"/"on" ficam de fora nos dois lados. Ver
+ * `env_bool` em backend/core/env.py — os dois conjuntos têm de continuar
+ * iguais.
+ */
+function parseBooleanFlag(raw) {
+  return String(raw ?? "").trim().toLowerCase() === "true";
+}
+
 /** Espelha a flag do Django. Desligada por padrão: sem ela, este processo
  *  ficaria batendo num endpoint que nunca tem trabalho. Ligar as duas pontas é
  *  decisão consciente, tomada olhando o `engine.queued` do /health. */
-const ANALYSIS_ENABLED = process.env.POST_GAME_ANALYSIS_ENABLED === "true";
+const ANALYSIS_ENABLED = parseBooleanFlag(process.env.POST_GAME_ANALYSIS_ENABLED);
 
 /** Intervalo entre perguntas ao Django quando não há trabalho. 15s é
  *  irrelevante para o usuário (a tela já mostra "analisando…") e mantém o
@@ -207,6 +225,7 @@ module.exports = {
   processOne,
   claimWork,
   reportResult,
+  parseBooleanFlag,
   ANALYSIS_ENABLED,
   POLL_INTERVAL_MS,
 };

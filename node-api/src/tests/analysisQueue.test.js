@@ -218,3 +218,42 @@ describe("liga/desliga do worker", () => {
     queue.stopAnalysisWorker();
   });
 });
+
+// O Django lê ESTA MESMA variável (POST_GAME_ANALYSIS_ENABLED). Enquanto
+// aqui a comparação era com "true" e lá com "True", setar o mesmo valor nos
+// dois serviços ligava um lado e deixava o outro desligado — sem erro, sem
+// log, sem 500. `env_bool` em backend/core/env.py aceita exatamente isto.
+describe("leitura da flag, igual à do Django", () => {
+  test.each(["true", "True", "TRUE", "TrUe", " true ", "true\n"])(
+    "%j liga",
+    (value) => {
+      expect(queue.parseBooleanFlag(value)).toBe(true);
+    }
+  );
+
+  test.each(["false", "False", "", " ", "0", "1", "yes", "on", "sim"])(
+    "%j não liga",
+    (value) => {
+      expect(queue.parseBooleanFlag(value)).toBe(false);
+    }
+  );
+
+  test("variável ausente não liga", () => {
+    expect(queue.parseBooleanFlag(undefined)).toBe(false);
+    expect(queue.parseBooleanFlag(null)).toBe(false);
+  });
+
+  test("é o que decide ANALYSIS_ENABLED de fato", () => {
+    // Não basta a função estar certa: o módulo tem de usá-la. "TRUE" era
+    // ignorado antes desta correção.
+    jest.resetModules();
+    process.env.POST_GAME_ANALYSIS_ENABLED = "TRUE";
+    expect(require("../services/analysisQueue").ANALYSIS_ENABLED).toBe(true);
+
+    jest.resetModules();
+    process.env.POST_GAME_ANALYSIS_ENABLED = "False";
+    expect(require("../services/analysisQueue").ANALYSIS_ENABLED).toBe(false);
+
+    delete process.env.POST_GAME_ANALYSIS_ENABLED;
+  });
+});

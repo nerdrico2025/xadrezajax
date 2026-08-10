@@ -50,6 +50,8 @@ interface GameScreenProps {
   /** Incremento Fischer em segundos (0 = sem incremento). */
   increment?: number;
   savedGame?: SavedAiGame;
+  /** Leva à tela de assinatura, para o convite da análise pós-jogo. */
+  onUpgrade?: () => void;
 }
 
 // Tempo de resposta humanizado da IA (PR D, item 8). Piso por nível — a
@@ -148,6 +150,7 @@ export default function GameScreen({
   timeControl = null,
   increment = 0,
   savedGame,
+  onUpgrade,
 }: GameScreenProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
@@ -721,6 +724,7 @@ export default function GameScreen({
         diagnosticPgn={diagnosticPgn}
         gamePublicId={gamePublicId}
         playerColor={playerColor}
+        onUpgrade={onUpgrade}
       />
 
       <ConfirmModal

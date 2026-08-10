@@ -5,7 +5,6 @@ import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { AI_LEVEL_BY_ID, type Difficulty } from "@/constants/aiGame";
 import { QA_SHOW_AI_DIAGNOSTIC_PGN } from "@/constants/qaFlags";
-import { useHasPaidPlan } from "@/hooks/useHasPaidPlan";
 import Confetti from "@/components/Confetti";
 import GameAnalysisSection from "./GameAnalysisSection";
 
@@ -125,6 +124,8 @@ interface GameOverModalProps {
   gamePublicId?: string | null;
   /** Cor que ESTE usuário jogou, para o resumo da análise ser do lado certo. */
   playerColor?: "w" | "b";
+  /** Leva à tela de assinatura, para o convite da análise ter para onde ir. */
+  onUpgrade?: () => void;
 }
 
 export default function GameOverModal({
@@ -137,13 +138,10 @@ export default function GameOverModal({
   diagnosticPgn,
   gamePublicId,
   playerColor = "w",
+  onUpgrade,
 }: GameOverModalProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
-  // Gate de plano no CLIENTE: sem plano pago, nem chega a pedir a análise.
-  // O servidor também protege (responde "indisponivel"), mas fazer a chamada
-  // para receber uma negativa é gasto à toa em rede móvel.
-  const hasPaidPlan = useHasPaidPlan();
   // Fechado por padrão: o PGN é diagnóstico, não conteúdo da tela de
   // resultado. Só existe em build de QA (ver showDiagnosticToggle).
   const [showPgn, setShowPgn] = useState(false);
@@ -252,14 +250,20 @@ export default function GameOverModal({
             </View>
           )}
 
-          {/* Análise pós-jogo (Fase 2). Três condições, todas necessárias:
-              a partida foi registrada no servidor (`gamePublicId`), o usuário
-              tem plano pago, e o backend tem o que mostrar. Sem plano, nem
-              chega a pedir — o servidor negaria de qualquer forma. */}
-          {gamePublicId && hasPaidPlan && (
+          {/* Análise pós-jogo (Fase 2). UMA condição aqui: a partida existe no
+              servidor. Sem `gamePublicId` não há endereço a consultar, e a
+              seção não teria o que dizer nem como dizer.
+
+              O plano do usuário NÃO é mais decidido neste ponto. Era: a seção
+              só montava com plano pago confirmado, então uma falha de rede na
+              checagem (que caía para `false`) fazia a análise sumir da tela de
+              quem paga, sem aviso. Agora o gate de plano mora dentro da seção,
+              que tem tela para cada resultado — inclusive convite a assinar. */}
+          {gamePublicId && (
             <GameAnalysisSection
               gamePublicId={gamePublicId}
               playerColor={playerColor}
+              onUpgrade={onUpgrade}
             />
           )}
 
