@@ -3,6 +3,8 @@ import os
 from dotenv import load_dotenv
 from datetime import timedelta
 
+from core.env import env_bool
+
 # ========================
 # BASE DIR
 # ========================
@@ -22,6 +24,10 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise Exception("SECRET_KEY não encontrada no .env")
 
+# NÃO passa por `env_bool` de propósito, ao contrário das flags de feature.
+# `env_bool` é mais permissivo, e para DEBUG "mais permissivo" aponta para o
+# lado errado: hoje um `DEBUG=true` em produção resulta em False (seguro);
+# afrouxar isso faria o mesmo valor LIGAR o debug num servidor público.
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
 ALLOWED_HOSTS = [
@@ -258,7 +264,12 @@ INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 # partidas ao vivo na mesma VPS; ligar é decisão a ser tomada OLHANDO o
 # `engine.queued` do /health do node-api, não no escuro. Com a flag desligada
 # nenhuma GameAnalysis é criada e os endpoints internos ficam ociosos.
-POST_GAME_ANALYSIS_ENABLED = os.getenv("POST_GAME_ANALYSIS_ENABLED", "False") == "True"
+#
+# `env_bool` (não `== "True"`) porque o node-api lê ESTA MESMA variável e
+# comparava com `"true"` minúsculo: setar o mesmo valor nos dois serviços
+# ligava um e deixava o outro desligado, em silêncio. Os dois lados agora
+# aceitam o mesmo conjunto.
+POST_GAME_ANALYSIS_ENABLED = env_bool("POST_GAME_ANALYSIS_ENABLED")
 
 # ========================
 # EMAIL (SendGrid)

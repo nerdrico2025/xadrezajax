@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
+import { usePlanStatus } from "@/hooks/usePlanStatus";
 import {
   getGameAnalysis,
   isAnalysisPending,
@@ -18,6 +19,17 @@ import MoveHistory from "./MoveHistory";
 // O servidor analisa em background e o app PERGUNTA se já ficou pronta — não
 // há push. Uma partida típica leva menos de um minuto, então o usuário ou vê
 // o resultado chegar, ou volta depois pelo histórico e já está lá.
+//
+// REGRA DESTA SEÇÃO: um único caminho renderiza `null`, e ele é
+// intencional (`inexistente` — partida que nunca teria análise). Todo o
+// resto tem tela.
+//
+// A versão anterior tinha QUATRO saídas silenciosas, e o usuário não
+// conseguia distinguir "não há análise para mim" de "o app quebrou":
+//   1. plano não confirmado (inclusive por falha de rede na checagem);
+//   2. antes da primeira resposta do polling;
+//   3. `indisponivel` (sem plano) — hoje é convite a assinar;
+//   4. `inexistente` — o único que continua silencioso, de propósito.
 
 /** De quanto em quanto tempo perguntar de novo. */
 const POLL_MS = 4000;
@@ -50,15 +62,27 @@ interface GameAnalysisSectionProps {
   gamePublicId: string;
   /** Cor que ESTE usuário jogou — define de qual lado o resumo é mostrado. */
   playerColor?: "w" | "b";
+  /** Leva à tela de assinatura. Sem isto o convite vira só texto — a seção
+   *  continua explicando por que não há análise, mas sem botão. */
+  onUpgrade?: () => void;
 }
 
 export default function GameAnalysisSection({
   gamePublicId,
   playerColor = "w",
+  onUpgrade,
 }: GameAnalysisSectionProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const { token } = useAuth();
+  const planStatus = usePlanStatus();
+
+  // Só o plano `free` CONFIRMADO evita a chamada — é a economia que motivou
+  // o gate no cliente (pedir para receber "indisponivel" é gasto à toa em
+  // rede móvel). Com a checagem em `error`, perguntamos ao servidor: ele é a
+  // autoridade sobre o acesso, e sumir com a seção porque a CHECAGEM DE
+  // PLANO falhou é o bug, não a economia.
+  const shouldFetch = planStatus === "paid" || planStatus === "error";
 
   const [analysis, setAnalysis] = useState<GameAnalysis | null>(null);
   const [error, setError] = useState(false);
@@ -95,6 +119,7 @@ export default function GameAnalysisSection({
   }, [token, gamePublicId]);
 
   useEffect(() => {
+    if (!shouldFetch) return;
     aliveRef.current = true;
     pollsRef.current = 0;
     fetchOnce();
@@ -102,7 +127,7 @@ export default function GameAnalysisSection({
       aliveRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [fetchOnce]);
+  }, [fetchOnce, shouldFetch]);
 
   const retry = useCallback(() => {
     pollsRef.current = 0;
@@ -111,25 +136,68 @@ export default function GameAnalysisSection({
     fetchOnce();
   }, [fetchOnce]);
 
-  // Nada a mostrar: partida anterior à feature, ou usuário sem plano pago
-  // (que nem deveria chegar aqui — ver o gate em GameOverModal).
-  if (
-    !analysis ||
-    analysis.status === "inexistente" ||
-    analysis.status === "indisponivel"
-  ) {
-    if (error) {
-      return (
-        <Card colors={colors}>
-          <Row>
-            <Text style={[styles.status, { color: colors.secondary }]}>
-              Não foi possível carregar a análise.
-            </Text>
-            <RetryButton colors={colors} onPress={retry} />
-          </Row>
-        </Card>
-      );
-    }
+  // ── Plano ainda desconhecido ────────────────────────────────────────
+  // Placeholder neutro, não "Analisando a partida…": ainda não sabemos se
+  // haverá análise para este usuário, e anunciar uma que vira convite a
+  // assinar meio segundo depois é pior do que um segundo de espera honesta.
+  if (planStatus === "loading") {
+    return (
+      <Card colors={colors}>
+        <Row>
+          <ActivityIndicator size="small" color={colors.accent} />
+          <Text style={[styles.status, { color: colors.secondary }]}>
+            Carregando…
+          </Text>
+        </Row>
+      </Card>
+    );
+  }
+
+  // ── Plano Grátis, sabido de antemão ─────────────────────────────────
+  // Nem chega a pedir ao servidor: a resposta seria "indisponivel".
+  if (planStatus === "free") {
+    return <UpgradeCard colors={colors} onUpgrade={onUpgrade} />;
+  }
+
+  // ── Falha de rede ───────────────────────────────────────────────────
+  // Antes de qualquer coisa que dependa de `analysis`: se a última consulta
+  // falhou, o certo é oferecer retentar, e não um spinner eterno (o polling
+  // já parou) nem tela vazia.
+  if (error) {
+    return (
+      <Card colors={colors}>
+        <Row>
+          <Text style={[styles.status, { color: colors.secondary }]}>
+            Não foi possível carregar a análise.
+          </Text>
+          <RetryButton colors={colors} onPress={retry} />
+        </Row>
+      </Card>
+    );
+  }
+
+  // ── Antes da primeira resposta ──────────────────────────────────────
+  // O estado que faltava: a seção agora aparece desde a montagem, em vez de
+  // só depois que o servidor responde.
+  if (!analysis) {
+    return <AnalyzingCard colors={colors} />;
+  }
+
+  // Sem plano segundo o SERVIDOR — caminho de quem chegou aqui com a
+  // checagem de plano em erro. A análise pode até existir (basta o
+  // adversário pagar); o conteúdo é que não é liberado.
+  if (analysis.status === "indisponivel") {
+    return <UpgradeCard colors={colors} onUpgrade={onUpgrade} />;
+  }
+
+  // ── O ÚNICO silêncio proposital ─────────────────────────────────────
+  // Partida que nunca entraria na fila (jogada antes da feature, com a
+  // análise desligada, ou sem nenhum jogador pagante). Forçar uma caixa aqui
+  // encheria de ruído a tela de fim de TODA partida antiga, e não há nada a
+  // oferecer nem a corrigir. Distinto de falha real: esta é a única saída
+  // `null` que sobrou, e ela exige uma resposta 200 do servidor dizendo
+  // exatamente isto.
+  if (analysis.status === "inexistente") {
     return null;
   }
 
@@ -144,27 +212,19 @@ export default function GameAnalysisSection({
   }
 
   if (isAnalysisPending(analysis.status)) {
-    return (
-      <Card colors={colors}>
-        <Row>
-          {gaveUp ? (
-            <>
-              <Text style={[styles.status, { color: colors.secondary }]}>
-                A análise está demorando mais que o normal.
-              </Text>
-              <RetryButton colors={colors} onPress={retry} />
-            </>
-          ) : (
-            <>
-              <ActivityIndicator size="small" color={colors.accent} />
-              <Text style={[styles.status, { color: colors.secondary }]}>
-                Analisando a partida…
-              </Text>
-            </>
-          )}
-        </Row>
-      </Card>
-    );
+    if (gaveUp) {
+      return (
+        <Card colors={colors}>
+          <Row>
+            <Text style={[styles.status, { color: colors.secondary }]}>
+              A análise está demorando mais que o normal.
+            </Text>
+            <RetryButton colors={colors} onPress={retry} />
+          </Row>
+        </Card>
+      );
+    }
+    return <AnalyzingCard colors={colors} />;
   }
 
   // ── Pronta ──────────────────────────────────────────────────────────
@@ -269,6 +329,71 @@ function Card({
 
 function Row({ children }: { children: React.ReactNode }) {
   return <View style={styles.row}>{children}</View>;
+}
+
+/** "Analisando a partida…". Existe como componente porque é renderizado em
+ *  DOIS momentos que antes se comportavam diferente: antes da primeira
+ *  resposta (quando a tela ficava vazia) e durante o polling. */
+function AnalyzingCard({
+  colors,
+}: {
+  colors: (typeof Colors)[keyof typeof Colors];
+}) {
+  return (
+    <Card colors={colors}>
+      <Row>
+        <ActivityIndicator size="small" color={colors.accent} />
+        <Text style={[styles.status, { color: colors.secondary }]}>
+          Analisando a partida…
+        </Text>
+      </Row>
+    </Card>
+  );
+}
+
+/**
+ * Convite a assinar, no lugar do silêncio que havia para quem não paga.
+ *
+ * Diz o que a análise MOSTRA, não só que ela é paga: quem acabou de perder
+ * uma partida tem interesse genuíno em saber onde errou, e é o momento em que
+ * a promessa é concreta. Copy no mesmo registro do bloqueio do Treino
+ * (PuzzleScreen), para o produto falar de um jeito só.
+ */
+function UpgradeCard({
+  colors,
+  onUpgrade,
+}: {
+  colors: (typeof Colors)[keyof typeof Colors];
+  onUpgrade?: () => void;
+}) {
+  return (
+    <Card colors={colors}>
+      <View style={styles.headerRow}>
+        <Text style={[styles.title, { color: colors.text }]}>
+          Análise da partida
+        </Text>
+        <Ionicons name="lock-closed" size={16} color={colors.secondary} />
+      </View>
+      <Text style={[styles.status, { color: colors.secondary }]}>
+        Veja sua precisão, os erros e o lance que decidiu a partida — lance a
+        lance. É exclusivo do Premium.
+      </Text>
+      {onUpgrade ? (
+        <Pressable
+          onPress={onUpgrade}
+          style={styles.toggle}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Assinar o Premium para ver a análise da partida"
+        >
+          <Ionicons name="star" size={16} color={colors.accent} />
+          <Text style={[styles.toggleText, { color: colors.accent }]}>
+            Assinar Premium
+          </Text>
+        </Pressable>
+      ) : null}
+    </Card>
+  );
 }
 
 function RetryButton({

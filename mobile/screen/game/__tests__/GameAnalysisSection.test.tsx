@@ -12,6 +12,14 @@ jest.mock("@/services/analysis", () => {
   return { ...actual, getGameAnalysis: jest.fn() };
 });
 
+// O plano do usuário decide entre pedir a análise, convidar a assinar ou
+// esperar. Pago por padrão — é o que a maioria dos testes deste arquivo
+// assume; os estados do plano têm bloco próprio no fim.
+jest.mock("@/hooks/usePlanStatus", () => ({
+  usePlanStatus: () => mockPlanStatus,
+}));
+let mockPlanStatus: "loading" | "paid" | "free" | "error" = "paid";
+
 const { getGameAnalysis } = jest.requireMock("@/services/analysis");
 
 const PUBLIC_ID = "0f3a1b2c-0000-0000-0000-000000000001";
@@ -90,6 +98,7 @@ function pressText(root: ReactTestInstance, text: string) {
 beforeEach(() => {
   jest.useFakeTimers();
   getGameAnalysis.mockReset();
+  mockPlanStatus = "paid";
 });
 
 afterEach(() => {
@@ -241,19 +250,23 @@ describe("análise pronta", () => {
   });
 });
 
-describe("estados em que não há o que mostrar", () => {
-  it("usuário sem plano pago: nada é renderizado", async () => {
-    // O servidor responde assim mesmo com a análise pronta, quando quem pede
-    // não paga. A tela não pode mostrar caixa vazia nem erro.
+describe("estados em que não há análise a mostrar", () => {
+  it("servidor diz indisponivel: convida a assinar em vez de sumir", async () => {
+    // Caminho de quem chegou aqui com a checagem de plano em erro. A análise
+    // pode até estar pronta (basta o adversário pagar) — o que falta é acesso.
+    mockPlanStatus = "error";
     getGameAnalysis.mockResolvedValue({ status: "indisponivel" });
 
     const tree = render();
     await settle();
 
-    expect(tree.toJSON()).toBeNull();
+    expect(tree.toJSON()).not.toBeNull();
+    expect(hasTextContaining(tree.root, "exclusivo do Premium")).toBe(true);
   });
 
-  it("partida sem análise: nada é renderizado", async () => {
+  it("partida inelegível: silêncio, e é o ÚNICO caso que renderiza null", async () => {
+    // Proposital: partida anterior à feature (ou sem jogador pagante) nunca
+    // teria análise. Uma caixa aqui seria ruído no fim de TODA partida antiga.
     getGameAnalysis.mockResolvedValue({ status: "inexistente" });
 
     const tree = render();
@@ -288,6 +301,143 @@ describe("estados em que não há o que mostrar", () => {
     pressText(tree.root, "Tentar novamente");
     await settle();
 
+    expect(hasTextContaining(tree.root, "Análise da partida")).toBe(true);
+  });
+});
+
+// A regressão que estes testes seguram: antes, QUATRO situações renderizavam
+// null e o usuário não distinguia "não há análise para mim" de "o app
+// quebrou". Sobrou uma, e ela é proposital (`inexistente`, acima).
+
+describe("nenhum estado é silencioso", () => {
+  it("mostra que está analisando ANTES da primeira resposta", async () => {
+    // O buraco original: a seção só nascia depois que o servidor respondia.
+    // Uma promise que nunca resolve é exatamente a janela em questão.
+    getGameAnalysis.mockReturnValue(new Promise(() => {}));
+
+    const tree = render();
+    await settle();
+
+    expect(tree.toJSON()).not.toBeNull();
+    expect(hasTextContaining(tree.root, "Analisando a partida")).toBe(true);
+  });
+
+  it("mostra placeholder enquanto o plano não é conhecido", async () => {
+    mockPlanStatus = "loading";
+
+    const tree = render();
+    await settle();
+
+    expect(hasTextContaining(tree.root, "Carregando")).toBe(true);
+    // Não anuncia análise antes de saber se haverá uma: se o usuário for
+    // Grátis, isso viraria convite a assinar meio segundo depois.
+    expect(hasTextContaining(tree.root, "Analisando a partida")).toBe(false);
+    expect(getGameAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("plano Grátis: convida a assinar sem gastar a chamada", async () => {
+    mockPlanStatus = "free";
+
+    const tree = render();
+    await settle();
+
+    expect(hasTextContaining(tree.root, "exclusivo do Premium")).toBe(true);
+    // A economia que motivou o gate no cliente continua valendo: a resposta
+    // do servidor seria "indisponivel" de qualquer forma.
+    expect(getGameAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("o convite leva à tela de assinatura", async () => {
+    mockPlanStatus = "free";
+    const onUpgrade = jest.fn();
+
+    const tree = render({ onUpgrade });
+    await settle();
+    pressText(tree.root, "Assinar Premium");
+
+    expect(onUpgrade).toHaveBeenCalledTimes(1);
+  });
+
+  it("sem onUpgrade o convite continua visível, só sem botão", async () => {
+    mockPlanStatus = "free";
+
+    const tree = render();
+    await settle();
+
+    expect(hasTextContaining(tree.root, "exclusivo do Premium")).toBe(true);
+    expect(hasTextContaining(tree.root, "Assinar Premium")).toBe(false);
+  });
+});
+
+describe("falha na CHECAGEM de plano não é 'não paga'", () => {
+  it("pergunta ao servidor mesmo sem saber o plano", async () => {
+    // O bug: `useHasPaidPlan` caía para false em erro de rede, e a seção
+    // sumia da tela de quem paga. O servidor é a autoridade — pergunte a ele.
+    mockPlanStatus = "error";
+    getGameAnalysis.mockResolvedValue(READY);
+
+    const tree = render();
+    await settle();
+
+    expect(getGameAnalysis).toHaveBeenCalledTimes(1);
+    expect(hasTextContaining(tree.root, "Análise da partida")).toBe(true);
+    expect(hasTextContaining(tree.root, "77.2")).toBe(true);
+  });
+
+  it("com a análise ainda pendente, mostra que está analisando", async () => {
+    mockPlanStatus = "error";
+    getGameAnalysis.mockResolvedValue({ status: "pendente" });
+
+    const tree = render();
+    await settle();
+
+    expect(hasTextContaining(tree.root, "Analisando a partida")).toBe(true);
+  });
+
+  it("passa a pedir a análise quando o plano pago chega depois", async () => {
+    // A ordem real de montagem: o plano começa "loading" e vira "paid".
+    mockPlanStatus = "loading";
+    getGameAnalysis.mockResolvedValue(READY);
+
+    const tree = render();
+    await settle();
+    expect(getGameAnalysis).not.toHaveBeenCalled();
+
+    mockPlanStatus = "paid";
+    await act(async () => {
+      tree.update(<GameAnalysisSection gamePublicId={PUBLIC_ID} />);
+    });
+    await settle();
+
+    expect(getGameAnalysis).toHaveBeenCalledTimes(1);
+    expect(hasTextContaining(tree.root, "Análise da partida")).toBe(true);
+  });
+});
+
+describe("falha de rede na análise nunca vira tela vazia nem spinner eterno", () => {
+  it("erro numa consulta seguinte troca o spinner por retentar", async () => {
+    // Antes, o `error` de um poll posterior era engolido: `analysis` já
+    // existia, então a tela caía no ramo "pendente" e girava para sempre —
+    // sem novo agendamento, sem `gaveUp`, sem saída.
+    getGameAnalysis
+      .mockResolvedValueOnce({ status: "analisando" })
+      .mockRejectedValueOnce(new Error("Network request failed"));
+
+    const tree = render();
+    await settle();
+    expect(hasTextContaining(tree.root, "Analisando a partida")).toBe(true);
+
+    await act(async () => {
+      jest.advanceTimersByTime(4000);
+    });
+    await settle();
+
+    expect(hasTextContaining(tree.root, "Analisando a partida")).toBe(false);
+    expect(hasTextContaining(tree.root, "Não foi possível carregar")).toBe(true);
+
+    getGameAnalysis.mockResolvedValue(READY);
+    pressText(tree.root, "Tentar novamente");
+    await settle();
     expect(hasTextContaining(tree.root, "Análise da partida")).toBe(true);
   });
 });

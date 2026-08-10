@@ -357,6 +357,7 @@ export default function Home() {
             drawOfferDeclined={drawOfferDeclined}
             ratingOutcome={ratingOutcome}
             gamePublicId={gamePublicId}
+            onUpgrade={() => setActiveScreen("subscription")}
             onMakeMove={makeMove}
             onResign={resign}
             onOfferDraw={offerDraw}
@@ -387,6 +388,7 @@ export default function Home() {
               timeControl={timeControl}
               increment={increment}
               savedGame={savedGame ?? undefined}
+              onUpgrade={() => setActiveScreen("subscription")}
               onLeave={() => setActiveScreen("home")}
             />
           </View>
