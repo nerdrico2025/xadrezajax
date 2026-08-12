@@ -15,13 +15,33 @@ jest.mock("@/services/profile", () => ({
   getGameHistory: (...args: unknown[]) => mockGetHistory(...args),
 }));
 
+// A tela de detalhe tem suíte própria; aqui só interessa SE ela é montada e
+// com qual partida.
+jest.mock("@/screen/game/MatchDetailScreen", () => {
+  const { Text } = require("react-native");
+  return {
+    __esModule: true,
+    default: (props: {
+      gamePublicId: string;
+      onBack: () => void;
+      onUpgrade?: () => void;
+    }) => (
+      <Text accessibilityLabel="voltar-do-detalhe" onPress={props.onBack}>
+        {`DETALHE:${props.gamePublicId}:${props.onUpgrade ? "com-upgrade" : "sem-upgrade"}`}
+      </Text>
+    ),
+  };
+});
+
 const RANKED = {
-  id: 1, opponent_name: "Humano", result: "win", mode: "online",
+  id: 1, game_public_id: "abc-123", opponent_name: "Humano", result: "win", mode: "online",
   modality: "blitz", rated: true, rating_before: 1500, rating_after: 1512,
   rating_delta: 12, played_at: "2026-07-10T12:00:00Z",
 };
+// Sem `game_public_id`: é o histórico anterior ao modelo Game, de que não
+// restaram lances.
 const AI = {
-  id: 2, opponent_name: "IA Médio", result: "loss", mode: "ai",
+  id: 2, game_public_id: null, opponent_name: "IA Médio", result: "loss", mode: "ai",
   modality: "blitz", rated: false, rating_before: 1512, rating_after: 1512,
   rating_delta: 0, played_at: "2026-07-11T12:00:00Z",
 };
@@ -81,5 +101,65 @@ describe("histórico de partidas", () => {
     const tree = await render();
     await pressFilter(tree.root, "vs IA");
     expect(mockGetHistory).toHaveBeenCalledWith("test-token", 20, 0, "ai");
+  });
+});
+
+// O item da lista é o ÚNICO caminho até o detalhe da partida.
+describe("abrir o detalhe da partida", () => {
+  function itemDe(root: ReactTestInstance, oponente: string) {
+    return root.findAll(
+      (n) =>
+        n.props?.accessibilityLabel === `Rever a partida contra ${oponente}` &&
+        typeof n.props?.onPress === "function"
+    );
+  }
+
+  it("tocar numa partida com lances abre o detalhe dela", async () => {
+    const tree = await render();
+
+    const item = itemDe(tree.root, "Humano");
+    expect(item).toHaveLength(1);
+
+    await act(async () => item[0].props.onPress());
+
+    expect(hasText(tree.root, "DETALHE:abc-123:sem-upgrade")).toBe(true);
+  });
+
+  it("partida sem lances gravados não é tocável", async () => {
+    // Histórico anterior ao modelo Game: não há o que rever, e um toque que
+    // não faz nada é pior do que um item que não convida ao toque.
+    const tree = await render();
+
+    expect(itemDe(tree.root, "IA Médio")).toHaveLength(0);
+  });
+
+  it("repassa o caminho para a tela de planos", async () => {
+    // Sem o repasse, o bloqueio por plano dentro do detalhe vira só texto.
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameHistoryScreen onBack={jest.fn()} onUpgrade={jest.fn()} />
+      );
+    });
+
+    await act(async () => itemDe(tree.root, "Humano")[0].props.onPress());
+
+    expect(hasText(tree.root, "DETALHE:abc-123:com-upgrade")).toBe(true);
+  });
+
+  it("voltar do detalhe devolve a lista", async () => {
+    const tree = await render();
+
+    await act(async () => itemDe(tree.root, "Humano")[0].props.onPress());
+    expect(hasText(tree.root, "DETALHE:abc-123:sem-upgrade")).toBe(true);
+
+    const voltar = tree.root.findAll(
+      (n) => n.props?.accessibilityLabel === "voltar-do-detalhe"
+    )[0];
+    await act(async () => voltar.props.onPress());
+
+    // A lista voltou: o item é tocável de novo e o detalhe sumiu.
+    expect(itemDe(tree.root, "Humano")).toHaveLength(1);
+    expect(hasText(tree.root, "DETALHE:abc-123:sem-upgrade")).toBe(false);
   });
 });

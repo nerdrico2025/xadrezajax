@@ -1,10 +1,15 @@
 import { API_URL } from "./api";
 import { authFetch } from "./session";
 
-// Análise pós-jogo por Stockfish (Fase 2). A partida é analisada no servidor,
-// em background — o app pergunta se já ficou pronta.
+// LEITURA PÓS-JOGO: a partida (`games/<id>/`) e a análise dela
+// (`games/<id>/analysis/`).
 //
-// Ver docs/execution/PLANO_FASE2_ANALISE_POS_JOGO.md.
+// As duas moram aqui porque são rotas irmãs do mesmo recurso e são lidas
+// JUNTAS pelas duas telas que mostram uma partida encerrada — o modal de fim
+// de partida e o detalhe do histórico.
+//
+// A análise é feita por Stockfish no servidor, em background — o app pergunta
+// se já ficou pronta. Ver docs/execution/PLANO_FASE2_ANALISE_POS_JOGO.md.
 
 /** Como cada lance foi classificado. */
 export type MoveClassification =
@@ -72,6 +77,59 @@ export interface GameAnalysis {
 /** Estados em que ainda faz sentido perguntar de novo. */
 export function isAnalysisPending(status: AnalysisStatus): boolean {
   return status === "pendente" || status === "analisando";
+}
+
+/** A partida em si: lances em ordem, resultado, jogadores. */
+export interface GameDetail {
+  public_id: string;
+  mode: "ai" | "online";
+  modality: string;
+  white_name: string;
+  black_name: string;
+  /** Cor que ESTE usuário jogou — vem do servidor, que é quem sabe. */
+  player_color: "w" | "b";
+  ai_difficulty: string | null;
+  ai_color: "w" | "b" | null;
+  moves: string[];
+  /** Tamanho REAL da partida; maior que `moves.length` quando truncada. */
+  ply_count: number;
+  moves_truncated: boolean;
+  initial_fen: string;
+  final_fen: string;
+  result: "white" | "black" | "draw";
+  termination: string;
+  time_control: number | null;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+/**
+ * Erro de leitura da partida que o chamador precisa DISTINGUIR, e não só
+ * mostrar. `forbidden` (403) é o bloqueio por plano — a tela de detalhe
+ * desenha o convite a assinar; qualquer outra falha é falha de verdade.
+ */
+export class GameDetailError extends Error {
+  constructor(readonly kind: "forbidden" | "notFound" | "failed") {
+    super(kind);
+    this.name = "GameDetailError";
+  }
+}
+
+export async function getGameDetail(
+  token: string,
+  publicId: string
+): Promise<GameDetail> {
+  const res = await authFetch(
+    `${API_URL}/api/v1/auth/games/${publicId}/`,
+    token,
+    { headers: { "Content-Type": "application/json" } }
+  );
+  // 403 = sem plano. É o único caminho que a tela trata como conteúdo (o
+  // paywall) em vez de erro, então precisa chegar lá distinguível.
+  if (res.status === 403) throw new GameDetailError("forbidden");
+  if (res.status === 404) throw new GameDetailError("notFound");
+  if (!res.ok) throw new GameDetailError("failed");
+  return res.json();
 }
 
 export async function getGameAnalysis(

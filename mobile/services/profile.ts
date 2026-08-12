@@ -98,6 +98,14 @@ export type HistoryFilter = "all" | "ranked" | "ai";
 
 export interface GameHistoryEntry {
   id: number;
+  /**
+   * Endereço da PARTIDA (tabuleiro + lances), para abrir o detalhe.
+   *
+   * Null no histórico anterior ao modelo `Game`: são partidas de que não
+   * restaram lances. A lista usa isso para não oferecer "rever" nelas — não é
+   * o mesmo que estar bloqueado por plano.
+   */
+  game_public_id: string | null;
   opponent_name: string;
   result: "win" | "loss" | "draw";
   mode: "ai" | "online";

@@ -10,6 +10,7 @@ from .views import (
     FriendListView,
     FriendRequestActionView,
     GameAnalysisView,
+    GameDetailView,
     GameHistoryView,
     GameResultView,
     GoogleLoginView,
@@ -72,6 +73,12 @@ urlpatterns = [
         "games/<uuid:public_id>/analysis/",
         GameAnalysisView.as_view(),
         name="game-analysis",
+    ),
+    # A partida em si, irmã da rota de análise acima.
+    path(
+        "games/<uuid:public_id>/",
+        GameDetailView.as_view(),
+        name="game-detail",
     ),
     path("campaign/", CampaignProgressView.as_view(), name="campaign-progress"),
     path("game/history/", GameHistoryView.as_view(), name="game-history"),
