@@ -426,39 +426,56 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 8,
   },
+  // "Não foi possível carregar a análise." + "Tentar novamente" na mesma
+  // linha estouram o cartão em tela estreita; aqui também o certo é descer.
   row: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: 10,
   },
+  // "Análise da partida" + "100.0% de precisão" não cabem lado a lado num
+  // cartão estreito, e texto em `flexDirection: row` não encolhe sozinho:
+  // transbordava pela borda direita. Com `flexWrap`, a precisão desce para a
+  // linha de baixo em vez de vazar; `flexShrink` deixa o título quebrar antes
+  // disso, para o caso de faltar pouco.
   headerRow: {
     flexDirection: "row",
     alignItems: "baseline",
     justifyContent: "space-between",
+    flexWrap: "wrap",
     gap: 8,
   },
   title: {
     fontSize: 15,
     fontWeight: "600",
+    flexShrink: 1,
   },
   accuracy: {
     fontSize: 14,
     fontWeight: "700",
+    flexShrink: 1,
   },
   counts: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10,
   },
+  // `maxWidth` para o rótulo mais longo ("1 erros graves") quebrar dentro do
+  // cartão em vez de esticar a linha para fora dele.
   count: {
     fontSize: 12,
+    flexShrink: 1,
+    maxWidth: "100%",
   },
   turning: {
     fontSize: 12,
+    flexShrink: 1,
   },
   note: {
     fontSize: 11,
     fontStyle: "italic",
+    flexShrink: 1,
   },
   status: {
     fontSize: 13,

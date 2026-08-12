@@ -281,6 +281,31 @@ export default function Home() {
     setActiveTab("home");
   }, [clearGame]);
 
+  const handleUpgrade = useCallback(() => {
+    setActiveMenu(null);
+    setActiveScreen("subscription");
+  }, []);
+
+  /**
+   * "Assinar Premium" no modal de fim de partida ONLINE.
+   *
+   * Precisa existir separado: no render abaixo, `showOnlineGame` vem ANTES da
+   * cadeia de `activeScreen` — enquanto houver partida online em memória, é
+   * OnlineGameScreen que ocupa a tela, aconteça o que acontecer com
+   * `activeScreen`. Era esse o bug: o botão chamava `setActiveScreen`, o
+   * estado mudava, e nada acontecia na tela — o modal seguia aberto sobre a
+   * partida, e o botão parecia sem ação.
+   *
+   * `clearGame()` é o que libera a árvore. A partida já acabou (o modal só
+   * existe depois do fim), então não há nada a perder — é o mesmo caminho do
+   * "Voltar" ao lado.
+   */
+  const handleUpgradeFromOnlineGame = useCallback(() => {
+    clearGame();
+    setActiveTab("home");
+    handleUpgrade();
+  }, [clearGame, handleUpgrade]);
+
   // `setup` = cor e tempo que o anfitrião escolheu na tela de convite. O
   // servidor valida os dois antes de gravar a sala.
   const handleInviteFriend = useCallback(
@@ -331,7 +356,7 @@ export default function Home() {
       return profileMenu({
         onProfile:      () => { setActiveMenu(null); setActiveScreen("profile"); },
         onLeaderboard:  () => { setActiveMenu(null); setActiveScreen("leaderboard"); },
-        onSubscription: () => { setActiveMenu(null); setActiveScreen("subscription"); },
+        onSubscription: () => { handleUpgrade(); },
         onSettings:     () => { setActiveMenu(null); setActiveScreen("settings"); },
       });
     return null;
@@ -357,7 +382,7 @@ export default function Home() {
             drawOfferDeclined={drawOfferDeclined}
             ratingOutcome={ratingOutcome}
             gamePublicId={gamePublicId}
-            onUpgrade={() => setActiveScreen("subscription")}
+            onUpgrade={handleUpgradeFromOnlineGame}
             onMakeMove={makeMove}
             onResign={resign}
             onOfferDraw={offerDraw}
@@ -388,7 +413,7 @@ export default function Home() {
               timeControl={timeControl}
               increment={increment}
               savedGame={savedGame ?? undefined}
-              onUpgrade={() => setActiveScreen("subscription")}
+              onUpgrade={handleUpgrade}
               onLeave={() => setActiveScreen("home")}
             />
           </View>
@@ -399,7 +424,7 @@ export default function Home() {
               setActiveScreen("home");
               setActiveTab("home");
             }}
-            onUpgrade={() => setActiveScreen("subscription")}
+            onUpgrade={handleUpgrade}
           />
         ) : activeScreen === "puzzle_training" ? (
           <PuzzleScreen
@@ -408,7 +433,7 @@ export default function Home() {
               setActiveScreen("home");
               setActiveTab("home");
             }}
-            onUpgrade={() => setActiveScreen("subscription")}
+            onUpgrade={handleUpgrade}
           />
         ) : activeScreen === "private_room" ? (
           <MatchmakingScreen

@@ -160,7 +160,7 @@ describe("GameOverModal — rótulo pelo modo REAL da partida", () => {
     expect(texto).not.toContain("atualizando rating");
   });
 
-  it("derrota vs IA culpa a IA; derrota online culpa o oponente", () => {
+  it("derrota vs IA culpa a IA; derrota online fala do jogador", () => {
     const perdaIA = render({ mode: "ai", result: { outcome: "loss", reason: "resign" } });
     expect(hasText(perdaIA.root, "A IA venceu!")).toBe(true);
 
@@ -168,7 +168,7 @@ describe("GameOverModal — rótulo pelo modo REAL da partida", () => {
       mode: "online",
       result: { outcome: "loss", reason: "resign" },
     });
-    expect(hasText(perdaOnline.root, "Seu oponente venceu!")).toBe(true);
+    expect(hasText(perdaOnline.root, "Você perdeu")).toBe(true);
     // O bug antigo: partida humana anunciando a IA como vencedora.
     expect(allText(perdaOnline.root)).not.toContain("IA");
   });
@@ -325,10 +325,57 @@ describe("GameOverModal — confete na vitória", () => {
   });
 });
 
+// QA reportou conteúdo saindo da área visível do modal em tela pequena: o
+// cartão não rolava (o excesso sumia pelas duas pontas, porque o overlay
+// centraliza) e o confete vazava pela borda direita.
+describe("GameOverModal — o conteúdo cabe no modal", () => {
+  function flatStyle(style: unknown) {
+    return Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
+  }
+
+  /** A ScrollView é o único nó com `contentContainerStyle` — o nome do
+   *  componente não serve para achá-la (o host renderiza como RCTScrollView). */
+  function scrollView(root: ReactTestInstance) {
+    return root.findAll((n) => n.props?.contentContainerStyle !== undefined)[0];
+  }
+
+  it("o cartão fica dentro de uma ScrollView — conteúdo longo é alcançável", () => {
+    const tree = render({ gamePublicId: "abc-123" });
+    const scroll = scrollView(tree.root);
+    expect(scroll).toBeTruthy();
+    // Os botões "Novo jogo"/"Voltar" são o fim do cartão: se estiverem fora
+    // da ScrollView, é neles que o corte aparece.
+    expect(
+      scroll.findAll((n) => n.props?.children === "Novo jogo").length
+    ).toBeGreaterThan(0);
+  });
+
+  it("a ScrollView não estica: o cartão curto continua centralizado", () => {
+    // `flexGrow: 0` é o que segura isso. Com o padrão, a ScrollView tomaria a
+    // altura toda do overlay e o cartão colaria no topo.
+    const tree = render();
+    expect(flatStyle(scrollView(tree.root).props.style).flexGrow).toBe(0);
+  });
+
+  it("o confete mede a tela inteira: o overlay não tem margem lateral", () => {
+    // As partículas sorteiam o `left` pela largura da JANELA, mas se posicionam
+    // pela caixa de conteúdo do pai. Com padding no overlay as duas medidas
+    // divergiam e as partículas da direita vazavam. A margem do cartão mora no
+    // contentContainerStyle da ScrollView.
+    const tree = render({ result: { outcome: "win", reason: "checkmate" } });
+    const overlay = componentByName(tree.root, "Confetti")[0]
+      .parent as ReactTestInstance;
+    const style = flatStyle(overlay.props.style);
+
+    expect(style.paddingHorizontal ?? 0).toBe(0);
+    expect(style.padding ?? 0).toBe(0);
+  });
+});
+
 describe("GameOverModal — título e motivo centralizados", () => {
   // O cartão centraliza o BLOCO de texto, não as linhas dentro dele: títulos
-  // que quebram em duas linhas ("Seu oponente venceu!") apareciam alinhados
-  // à esquerda. Cobre TODAS as variações para nenhuma regredir.
+  // que quebram em duas linhas apareciam alinhados à esquerda. Cobre TODAS as
+  // variações para nenhuma regredir.
   const VARIACOES: {
     mode: "ai" | "online";
     outcome: "win" | "loss" | "draw";
@@ -338,7 +385,7 @@ describe("GameOverModal — título e motivo centralizados", () => {
     { mode: "ai", outcome: "loss", titulo: "A IA venceu!" },
     { mode: "ai", outcome: "draw", titulo: "Empate!" },
     { mode: "online", outcome: "win", titulo: "Você venceu!" },
-    { mode: "online", outcome: "loss", titulo: "Seu oponente venceu!" },
+    { mode: "online", outcome: "loss", titulo: "Você perdeu" },
     { mode: "online", outcome: "draw", titulo: "Empate!" },
   ];
 
