@@ -76,14 +76,17 @@ const OUTCOME_CONFIG: Record<
     color: null,
     title: { ai: "Você venceu!", online: "Você venceu!" },
   },
-  // Derrota online fala do JOGADOR, não do adversário ("Você perdeu" em vez
-  // de "Seu oponente venceu!"): é mais curto — cabe em uma linha nas telas
-  // estreitas, onde o texto antigo quebrava — e a tela é sobre a partida de
-  // quem está lendo.
+  // Derrota fala do JOGADOR, não de quem ganhou ("Você perdeu" em vez de
+  // "Seu oponente venceu!" / "A IA venceu!"): é mais curto — cabe em uma
+  // linha nas telas estreitas, onde os textos antigos quebravam — e a tela é
+  // sobre a partida de quem está lendo.
+  //
+  // Os dois modos dizem o mesmo de propósito. A derrota é a mesma para quem
+  // perdeu, e o modo já aparece logo abaixo, na nota de rating.
   loss: {
     icon: "sad-outline",
     color: "#E53935",
-    title: { ai: "A IA venceu!", online: "Você perdeu" },
+    title: { ai: "Você perdeu", online: "Você perdeu" },
   },
   draw: {
     icon: "remove-circle-outline",

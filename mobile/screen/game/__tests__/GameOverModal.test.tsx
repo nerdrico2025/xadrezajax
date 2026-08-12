@@ -142,7 +142,7 @@ describe("GameOverModal — Modo Campanha (feedback de desbloqueio)", () => {
       result: { outcome: "loss", reason: "checkmate" },
       campaignUnlock: null,
     });
-    expect(hasText(tree.root, "A IA venceu!")).toBe(true);
+    expect(hasText(tree.root, "Você perdeu")).toBe(true);
     expect(hasText(tree.root, "dominado!")).toBe(false);
   });
 });
@@ -160,9 +160,12 @@ describe("GameOverModal — rótulo pelo modo REAL da partida", () => {
     expect(texto).not.toContain("atualizando rating");
   });
 
-  it("derrota vs IA culpa a IA; derrota online fala do jogador", () => {
+  it("derrota fala do jogador nos DOIS modos", () => {
+    // O título é o mesmo de propósito: a derrota é a mesma para quem perdeu,
+    // e o modo já aparece logo abaixo, na nota de rating (que é o que este
+    // describe cobre).
     const perdaIA = render({ mode: "ai", result: { outcome: "loss", reason: "resign" } });
-    expect(hasText(perdaIA.root, "A IA venceu!")).toBe(true);
+    expect(hasText(perdaIA.root, "Você perdeu")).toBe(true);
 
     const perdaOnline = render({
       mode: "online",
@@ -382,7 +385,7 @@ describe("GameOverModal — título e motivo centralizados", () => {
     titulo: string;
   }[] = [
     { mode: "ai", outcome: "win", titulo: "Você venceu!" },
-    { mode: "ai", outcome: "loss", titulo: "A IA venceu!" },
+    { mode: "ai", outcome: "loss", titulo: "Você perdeu" },
     { mode: "ai", outcome: "draw", titulo: "Empate!" },
     { mode: "online", outcome: "win", titulo: "Você venceu!" },
     { mode: "online", outcome: "loss", titulo: "Você perdeu" },
