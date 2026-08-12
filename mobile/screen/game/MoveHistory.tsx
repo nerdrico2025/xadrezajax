@@ -104,6 +104,10 @@ export default function MoveHistory({
       data={pairs}
       keyExtractor={(item) => String(item.number)}
       contentContainerStyle={styles.list}
+      // Na análise pós-jogo esta lista fica dentro da ScrollView do
+      // GameOverModal. No Android, sem isto o gesto vai todo para a de fora e
+      // a lista de lances não rola.
+      nestedScrollEnabled
       renderItem={({ item, index }) => {
         const isLast = index === pairs.length - 1;
         // Durante a partida, o último lance é o destaque. Na análise não há
