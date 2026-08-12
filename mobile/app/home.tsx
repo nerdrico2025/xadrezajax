@@ -448,7 +448,9 @@ export default function Home() {
             onBack={handleLeavePrivateRoom}
           />
         ) : activeScreen === "profile" ? (
-          <ProfileScreen />
+          // `onUpgrade` desce até o detalhe de partida (Perfil → Histórico →
+          // Partida), onde o bloqueio por plano precisa de destino.
+          <ProfileScreen onUpgrade={handleUpgrade} />
         ) : activeScreen === "settings" ? (
           <SettingsScreen onBack={() => setActiveScreen("home")} />
         ) : activeScreen === "leaderboard" ? (

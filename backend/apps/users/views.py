@@ -1274,6 +1274,92 @@ class InternalAnalysisResultView(APIView):
         return Response({"status": analysis.status}, status=status.HTTP_200_OK)
 
 
+class GameDetailView(APIView):
+    """
+    GET /api/v1/auth/games/<public_id>/
+    A PARTIDA em si — lances em ordem, resultado, jogadores e horários. É o
+    que a tela de detalhe do histórico lê para reconstruir o jogo.
+
+    Os MESMOS DOIS PORTÕES de GameAnalysisView, e pela mesma razão — só o
+    segundo responde diferente:
+
+      1. PARTICIPAÇÃO — quem não jogou recebe 404. Os lances são a partida
+         inteira; não é dado público, e quem não jogou não precisa nem saber
+         que ela existe.
+      2. PLANO — `has_paid_access` do SOLICITANTE, checado DEPOIS da
+         participação, para o 403 nunca virar um oráculo de "esta partida
+         existe" para quem não jogou.
+
+    Por que 403 aqui e `{"status": "indisponivel"}` com 200 lá: a análise é
+    um recurso que a tela consulta em POLLING e cujo estado tem várias
+    faces legítimas (pendente, pronta, inexistente) — "sem plano" é mais uma
+    delas, e o app decide o que desenhar a partir do campo. A partida não tem
+    estados: ou vem inteira, ou não vem. Um código HTTP é a resposta certa
+    para um recurso que não é uma máquina de estados.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, public_id):
+        from apps.payments.access import has_paid_access
+
+        game = Game.objects.filter(public_id=public_id).first()
+        if game is None:
+            return Response(
+                {"detail": "Partida não encontrada."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if request.user.id not in (game.white_player_id, game.black_player_id):
+            return Response(
+                {"detail": "Partida não encontrada."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        profile = get_or_create_profile(request.user)
+        if not has_paid_access(profile):
+            return Response(
+                {"detail": "Rever a partida é exclusivo do plano pago."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # A cor de QUEM PEDIU. A tela precisa saber de que lado ler o resumo
+        # (e a partida é sempre exibida da perspectiva de quem a jogou);
+        # deixar o app deduzir compararia ids de usuário que ele não tem.
+        player_color = (
+            Game.COLOR_WHITE
+            if request.user.id == game.white_player_id
+            else Game.COLOR_BLACK
+        )
+
+        return Response(
+            {
+                "public_id": str(game.public_id),
+                "mode": game.mode,
+                "modality": game.modality,
+                "white_name": game.white_name,
+                "black_name": game.black_name,
+                "player_color": player_color,
+                "ai_difficulty": game.ai_difficulty,
+                "ai_color": game.ai_color,
+                "moves": game.moves,
+                # `ply_count` é o tamanho REAL da partida e pode passar de
+                # len(moves): ver Game.MAX_PLIES. A tela precisa dos dois para
+                # poder dizer "guardamos os primeiros N".
+                "ply_count": game.ply_count,
+                "moves_truncated": game.moves_truncated,
+                "initial_fen": game.initial_fen,
+                "final_fen": game.final_fen,
+                "result": game.result,
+                "termination": game.termination,
+                "time_control": game.time_control,
+                "started_at": game.started_at.isoformat() if game.started_at else None,
+                "ended_at": game.ended_at.isoformat() if game.ended_at else None,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class GameAnalysisView(APIView):
     """
     GET /api/v1/auth/games/<public_id>/analysis/
@@ -1538,7 +1624,9 @@ class GameHistoryView(APIView):
         offset = int(request.query_params.get("offset", 0))
         filt = request.query_params.get("filter", "all")
 
-        qs = GameHistory.objects.filter(user=request.user)
+        # `select_related("game")` porque cada linha lê `game.public_id`
+        # abaixo — sem isso são N queries para uma página de 20.
+        qs = GameHistory.objects.filter(user=request.user).select_related("game")
         if filt == "ranked":
             qs = qs.filter(rated=True)
         elif filt == "ai":
@@ -1547,6 +1635,12 @@ class GameHistoryView(APIView):
         data = [
             {
                 "id": g.id,
+                # Endereço da PARTIDA (tabuleiro + lances), para a tela de
+                # detalhe. Null em todo o histórico anterior à migration que
+                # criou `Game`, e em qualquer linha cujo `Game` tenha sido
+                # apagado: são partidas de que não restaram lances, e a lista
+                # não deve oferecer "rever" nelas.
+                "game_public_id": str(g.game.public_id) if g.game_id else None,
                 "opponent_name": g.opponent_name,
                 "result": g.result,
                 "mode": g.mode,

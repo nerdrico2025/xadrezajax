@@ -13,6 +13,9 @@ import {
   type MoveClassification,
 } from "@/services/analysis";
 import MoveHistory from "./MoveHistory";
+// Mesma caixa de bloqueio da tela de detalhe do histórico — ver
+// AnalysisPaywallCard.
+import UpgradeCard from "./AnalysisPaywallCard";
 
 // Análise pós-jogo na tela de fim de partida.
 //
@@ -347,51 +350,6 @@ function AnalyzingCard({
           Analisando a partida…
         </Text>
       </Row>
-    </Card>
-  );
-}
-
-/**
- * Convite a assinar, no lugar do silêncio que havia para quem não paga.
- *
- * Diz o que a análise MOSTRA, não só que ela é paga: quem acabou de perder
- * uma partida tem interesse genuíno em saber onde errou, e é o momento em que
- * a promessa é concreta. Copy no mesmo registro do bloqueio do Treino
- * (PuzzleScreen), para o produto falar de um jeito só.
- */
-function UpgradeCard({
-  colors,
-  onUpgrade,
-}: {
-  colors: (typeof Colors)[keyof typeof Colors];
-  onUpgrade?: () => void;
-}) {
-  return (
-    <Card colors={colors}>
-      <View style={styles.headerRow}>
-        <Text style={[styles.title, { color: colors.text }]}>
-          Análise da partida
-        </Text>
-        <Ionicons name="lock-closed" size={16} color={colors.secondary} />
-      </View>
-      <Text style={[styles.status, { color: colors.secondary }]}>
-        Veja sua precisão, os erros e o lance que decidiu a partida — lance a
-        lance. É exclusivo do Premium.
-      </Text>
-      {onUpgrade ? (
-        <Pressable
-          onPress={onUpgrade}
-          style={styles.toggle}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Assinar o Premium para ver a análise da partida"
-        >
-          <Ionicons name="star" size={16} color={colors.accent} />
-          <Text style={[styles.toggleText, { color: colors.accent }]}>
-            Assinar Premium
-          </Text>
-        </Pressable>
-      ) : null}
     </Card>
   );
 }

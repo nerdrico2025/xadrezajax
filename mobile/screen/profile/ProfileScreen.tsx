@@ -27,7 +27,13 @@ import GameHistoryScreen from "./GameHistoryScreen";
 import FriendsScreen from "./FriendsScreen";
 import MenuBottomSheet from "@/presentation/components/MenuBottomSheet";
 
-export default function ProfileScreen() {
+interface Props {
+  /** Leva à tela de planos. Existe só para repassar ao detalhe de partida
+   *  (via Histórico), onde o bloqueio por plano precisa de destino. */
+  onUpgrade?: () => void;
+}
+
+export default function ProfileScreen({ onUpgrade }: Props = {}) {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
@@ -93,7 +99,13 @@ export default function ProfileScreen() {
     }
   }, [changeAvatar]);
 
-  if (showHistory) return <GameHistoryScreen onBack={() => setShowHistory(false)} />;
+  if (showHistory)
+    return (
+      <GameHistoryScreen
+        onBack={() => setShowHistory(false)}
+        onUpgrade={onUpgrade}
+      />
+    );
   if (showFriends) return <FriendsScreen onBack={() => setShowFriends(false)} />;
   if (loading) {
     return (

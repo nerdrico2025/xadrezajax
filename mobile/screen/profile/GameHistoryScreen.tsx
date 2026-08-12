@@ -18,9 +18,12 @@ import {
   type GameHistoryEntry,
   type HistoryFilter,
 } from "@/services/profile";
+import MatchDetailScreen from "@/screen/game/MatchDetailScreen";
 
 interface Props {
   onBack: () => void;
+  /** Leva à tela de planos, para o bloqueio do detalhe ter para onde ir. */
+  onUpgrade?: () => void;
 }
 
 const FILTERS: { key: HistoryFilter; label: string }[] = [
@@ -29,12 +32,15 @@ const FILTERS: { key: HistoryFilter; label: string }[] = [
   { key: "ai", label: "vs IA" },
 ];
 
-export default function GameHistoryScreen({ onBack }: Props) {
+export default function GameHistoryScreen({ onBack, onUpgrade }: Props) {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
   const { token } = useAuth();
 
+  // Partida aberta no detalhe. Mesmo padrão de sub-tela do ProfileScreen
+  // (que é quem monta esta): estado local, não rota.
+  const [openGameId, setOpenGameId] = useState<string | null>(null);
   const [history, setHistory] = useState<GameHistoryEntry[]>([]);
   const [filter, setFilter] = useState<HistoryFilter>("all");
   const [loading, setLoading] = useState(true);
@@ -79,9 +85,13 @@ export default function GameHistoryScreen({ onBack }: Props) {
     const deltaColor = item.rating_delta > 0 ? "#4ADE80" : item.rating_delta < 0 ? colors.error : colors.secondary;
     const date = new Date(item.played_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
     const modeLabel = item.mode === "ai" ? "vs IA" : "Online";
+    // Só abre o que tem partida gravada. O histórico anterior ao modelo
+    // `Game` não tem lances a rever — e um toque que não faz nada é pior
+    // que um item que não convida ao toque.
+    const revisavel = !!item.game_public_id;
 
-    return (
-      <View style={[styles.row, { backgroundColor: colors.card, borderColor: colors.divider }]}>
+    const conteudo = (
+      <>
         <View style={[styles.resultDot, { backgroundColor: cfg.color + "22" }]}>
           <Ionicons name={cfg.icon} size={20} color={cfg.color} />
         </View>
@@ -107,9 +117,37 @@ export default function GameHistoryScreen({ onBack }: Props) {
             <Text style={[styles.rating, { color: colors.secondary }]}>—</Text>
           )}
         </View>
-      </View>
+        {revisavel && (
+          <Ionicons name="chevron-forward" size={18} color={colors.secondary} />
+        )}
+      </>
+    );
+
+    const estilo = [styles.row, { backgroundColor: colors.card, borderColor: colors.divider }];
+
+    if (!revisavel) return <View style={estilo}>{conteudo}</View>;
+
+    return (
+      <Pressable
+        style={({ pressed }) => [estilo, pressed && styles.rowPressed]}
+        onPress={() => setOpenGameId(item.game_public_id)}
+        accessibilityRole="button"
+        accessibilityLabel={`Rever a partida contra ${item.opponent_name}`}
+      >
+        {conteudo}
+      </Pressable>
     );
   };
+
+  if (openGameId) {
+    return (
+      <MatchDetailScreen
+        gamePublicId={openGameId}
+        onBack={() => setOpenGameId(null)}
+        onUpgrade={onUpgrade}
+      />
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -220,6 +258,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
   },
+  rowPressed: { opacity: 0.6 },
   resultDot: {
     width: 40,
     height: 40,
