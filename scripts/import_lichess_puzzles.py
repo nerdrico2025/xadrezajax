@@ -27,6 +27,7 @@ solução impossível.
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import re
 import sys
@@ -366,9 +367,9 @@ PUZZLES = [
 def seed_puzzles(apps, schema_editor):
     Puzzle = apps.get_model("puzzles", "Puzzle")
     existing = set(
-        Puzzle.objects.filter(
-            title__in=[p["title"] for p in PUZZLES]
-        ).values_list("title", flat=True)
+        Puzzle.objects.filter(title__in=[p["title"] for p in PUZZLES]).values_list(
+            "title", flat=True
+        )
     )
     novos = [Puzzle(**data) for data in PUZZLES if data["title"] not in existing]
     Puzzle.objects.bulk_create(novos, batch_size=200)
@@ -391,16 +392,27 @@ class Migration(migrations.Migration):
 """
 
 
+def literal(value) -> str:
+    """Literal Python no estilo do black: aspas DUPLAS.
+
+    `repr()` devolve aspas simples, e a CI roda `black --check backend/` — que,
+    ao contrário do flake8, não exclui `migrations/`. Gerar com repr fazia a
+    migration inteira falhar no lint. `ensure_ascii=False` preserva os
+    acentos das descrições em vez de virar `\\uXXXX`.
+    """
+    return json.dumps(value, ensure_ascii=False)
+
+
 def render_row(data: dict) -> str:
     return (
         "    {\n"
-        f"        \"title\": {data['title']!r},\n"
-        f"        \"description\": {data['description']!r},\n"
-        f"        \"fen\": {data['fen']!r},\n"
-        f"        \"solution\": {data['solution']!r},\n"
-        f"        \"difficulty\": {data['difficulty']!r},\n"
-        f"        \"category\": {data['category']!r},\n"
-        f"        \"rating\": {data['rating']!r},\n"
+        f'        "title": {literal(data["title"])},\n'
+        f'        "description": {literal(data["description"])},\n'
+        f'        "fen": {literal(data["fen"])},\n'
+        f'        "solution": {literal(data["solution"])},\n'
+        f'        "difficulty": {literal(data["difficulty"])},\n'
+        f'        "category": {literal(data["category"])},\n'
+        f'        "rating": {data["rating"]:d},\n'
         "    },"
     )
 
