@@ -51,5 +51,9 @@ node-api/coverage/
 # ─────────────────────────────────────────
 postgres_data/
 
+# Datasets de origem para importação (o dump de problemas do Lichess tem ~1 GB).
+# O que versionamos é a migration gerada, nunca o CSV bruto.
+scripts/data/
+
 # macOS
 .DS_Store
