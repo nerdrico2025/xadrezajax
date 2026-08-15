@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from datetime import timedelta
 
-from core.env import env_bool
+from core.env import env_bool, env_price
 
 # ========================
 # BASE DIR
@@ -283,24 +283,48 @@ POST_GAME_ANALYSIS_ENABLED = env_bool("POST_GAME_ANALYSIS_ENABLED")
 # uma não pode arrastar a outra. `env_bool` pelo mesmo motivo da Fase 2.
 LLM_FEEDBACK_ENABLED = env_bool("LLM_FEEDBACK_ENABLED")
 
-# Chave paga da DeepSeek. Vazia = feature inerte, mesmo com a flag ligada
-# (ver `llm_feedback_enabled()`): sem chave a chamada falharia de qualquer
-# jeito, e falhar no portão é melhor do que gastar uma tentativa para
+# Provedor: OpenRouter (roteia para vários modelos atrás de uma API só
+# compatível com a da OpenAI). Chave vazia = feature inerte, mesmo com a flag
+# ligada (ver `llm_feedback_enabled()`): sem chave a chamada falharia de
+# qualquer jeito, e falhar no portão é melhor do que gastar uma tentativa para
 # descobrir isso.
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-DEEPSEEK_API_URL = os.getenv(
-    "DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions"
-)
-# Em variável para trocar de modelo sem deploy.
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-DEEPSEEK_TIMEOUT_S = int(os.getenv("DEEPSEEK_TIMEOUT_S", "45"))
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-# Preço por milhão de tokens, em USD. Fica em settings (e não no código) para
-# ajuste sem deploy — e o valor gravado em `cost_usd` é CONGELADO na linha, de
-# modo que mudar isto não reescreve o histórico já registrado.
-DEEPSEEK_PRICE_PER_MTOK = {
-    "input": float(os.getenv("DEEPSEEK_PRICE_INPUT", "0.27")),
-    "output": float(os.getenv("DEEPSEEK_PRICE_OUTPUT", "1.10")),
+# BASE da API, sem o caminho do endpoint — o cliente acrescenta
+# `/chat/completions`. Guardar a base (e não a URL inteira, como era antes)
+# é o que permite trocar de provedor compatível mexendo só nesta variável.
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+
+# Em variável para trocar de modelo sem deploy — que é justamente o caminho
+# previsto quando o `:free` não der mais conta.
+OPENROUTER_MODEL = os.getenv(
+    "OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"
+)
+
+# Atribuição no OpenRouter: aparecem no painel deles e ajudam no suporte.
+# Opcionais na API; mandamos sempre porque não custam nada e identificam o app.
+OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "https://ajaxclube.com.br")
+OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "AJAX Chess")
+
+# Timeout do transporte. Nome sem marca do provedor porque é do CLIENTE, não
+# da DeepSeek nem do OpenRouter — trocar de provedor não deveria renomear isto
+# de novo.
+LLM_TIMEOUT_S = int(os.getenv("LLM_TIMEOUT_S", "45"))
+
+# Preço por milhão de tokens, em USD. O valor gravado em `cost_usd` é
+# CONGELADO na linha, de modo que mudar isto não reescreve o histórico.
+#
+# O default é 0.0 porque o modelo default é `:free` — e 0.0 é INFORMAÇÃO ("não
+# custou nada"), gravada como 0.00. Só `None` significa "não sei o preço", e aí
+# `cost_usd` fica nulo em vez de fingir um zero que somaria errado no
+# acumulado. Ver `env_price`.
+#
+# AO MIGRAR PARA MODELO PAGO: basta setar LLM_PRICE_INPUT/LLM_PRICE_OUTPUT com
+# o preço do modelo novo (o OpenRouter publica os dois por milhão de tokens).
+# Nada no código muda.
+LLM_PRICE_PER_MTOK = {
+    "input": env_price("LLM_PRICE_INPUT", 0.0),
+    "output": env_price("LLM_PRICE_OUTPUT", 0.0),
 }
 
 # ========================

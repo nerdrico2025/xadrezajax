@@ -28,3 +28,29 @@ def env_bool(name, default=False):
     if raw is None:
         return default
     return raw.strip().lower() in _TRUE_VALUES
+
+
+def env_price(name, default):
+    """Preço por milhão de tokens, onde `None` significa DESCONHECIDO.
+
+    Zero e desconhecido são coisas diferentes, e é por isso que esta função
+    existe em vez de um `float(os.getenv(...) or 0)`:
+
+      - `0` é informação — o modelo é de graça, e o custo registrado é 0.00;
+      - `None` é ausência de informação — não sabemos o preço, e o custo fica
+        nulo em vez de virar um zero que mentiria no relatório de gasto.
+
+    Variável vazia ou com valor impossível de ler vira `None` (desconhecido),
+    e nunca zero: na dúvida, é melhor um campo nulo do que um número errado
+    somando no acumulado.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
