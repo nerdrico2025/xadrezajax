@@ -29,7 +29,9 @@ from .glicko2 import (
     Rating as GlickoRating,
     rate as glicko2_rate,
 )
+from .achievements import check_achievements, serialize_new
 from .models import (
+    AchievementDefinition,
     Game,
     GameAnalysis,
     GameLLMFeedback,
@@ -736,7 +738,7 @@ class GameResultView(APIView):
             # As DUAS linhas apontam para a MESMA partida: é o que permite
             # abrir o mesmo tabuleiro a partir do histórico de qualquer um dos
             # dois jogadores.
-            GameHistory.objects.create(
+            white_history = GameHistory.objects.create(
                 user=white_profile.user,
                 game=game,
                 opponent_name=w_name,
@@ -750,7 +752,7 @@ class GameResultView(APIView):
                 rated=True,
                 color=GameHistory.COLOR_WHITE,
             )
-            GameHistory.objects.create(
+            black_history = GameHistory.objects.create(
                 user=black_profile.user,
                 game=game,
                 opponent_name=b_name,
@@ -768,6 +770,21 @@ class GameResultView(APIView):
             # quem não paga recebe "indisponível" na leitura. No-op com a
             # flag desligada.
             enqueue_analysis(game, [white_profile, black_profile])
+
+            # Conquistas dos DOIS jogadores. Uma chamada por jogador porque a
+            # partida gera um extrato para cada um, e cada um pode desbloquear
+            # coisas diferentes — avaliar só quem fez a requisição (o
+            # node-api) não daria conquista a ninguém.
+            white_novas = check_achievements(
+                white_profile.user,
+                AchievementDefinition.TRIGGER_GAME,
+                {"game": game, "history": white_history},
+            )
+            black_novas = check_achievements(
+                black_profile.user,
+                AchievementDefinition.TRIGGER_GAME,
+                {"game": game, "history": black_history},
+            )
 
         # `rated`/`rating_before`/`delta` na resposta: o node-api repassa isto
         # aos dois jogadores para a tela de resultado mostrar o delta REAL do
@@ -789,6 +806,9 @@ class GameResultView(APIView):
                     "delta": round(white_rating.rating) - w_before,
                     "deviation": round(white_rating.deviation),
                     "provisional": white_rating.is_provisional,
+                    # Conquistas de CADA jogador: o node-api repassa a cada um
+                    # a sua, para o app celebrar na hora do fim de partida.
+                    "conquistas_novas": serialize_new(white_novas),
                 },
                 "black": {
                     "id": black_profile.user_id,
@@ -797,6 +817,7 @@ class GameResultView(APIView):
                     "delta": round(black_rating.rating) - b_before,
                     "deviation": round(black_rating.deviation),
                     "provisional": black_rating.is_provisional,
+                    "conquistas_novas": serialize_new(black_novas),
                 },
             },
             status=status.HTTP_200_OK,
@@ -982,6 +1003,15 @@ class AiGameResultView(APIView):
             if result == "win":
                 record_campaign_win(profile, difficulty, history.id)
 
+            # Conquistas: FORA do `if` de vitória de propósito — "10 partidas
+            # jogadas" conta derrota e empate também. Nunca levanta (ver
+            # check_achievements), então não precisa de try/except aqui.
+            novas_conquistas = check_achievements(
+                request.user,
+                AchievementDefinition.TRIGGER_GAME,
+                {"game": game, "history": history},
+            )
+
             # Fila de análise pós-jogo (Fase 2). `game` é None quando o app
             # não mandou `player_color` — sem partida montada não há o que
             # analisar. No-op com a flag desligada.
@@ -1003,6 +1033,9 @@ class AiGameResultView(APIView):
                 # partida montada (app antigo, sem `player_color`) — e aí não
                 # há análise a buscar.
                 "game_public_id": str(game.public_id) if game is not None else None,
+                # Conquistas desbloqueadas por ESTA partida, para o app
+                # celebrar no fim de jogo sem ter de descobrir sozinho.
+                "conquistas_novas": serialize_new(novas_conquistas),
             },
             status=status.HTTP_200_OK,
         )
@@ -1643,6 +1676,90 @@ def _spawn_llm_feedback(feedback_id):
     threading.Thread(
         target=runner, name=f"llm-feedback-{feedback_id}", daemon=True
     ).start()
+
+
+class AchievementListView(APIView):
+    """
+    GET /api/v1/auth/achievements/
+    Catálogo de conquistas ATIVAS com o estado do usuário autenticado.
+
+    Devolve todas — inclusive as ainda não conquistadas — porque a tela mostra
+    o que há a perseguir, não só o que já foi feito. `progresso` só vem nas
+    regras cumulativas e enquanto a conquista não foi desbloqueada: "7/10
+    partidas" ajuda; "10/10" depois de conquistada é ruído.
+
+    Conquista aposentada (`is_active=False`) que o usuário JÁ ganhou continua
+    aparecendo: tirar de circulação não pode apagar o que alguém conquistou.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .achievements import current_progress
+        from .models import AchievementDefinition, UserAchievement
+
+        unlocked = {
+            ua.achievement_id: ua
+            for ua in UserAchievement.objects.filter(user=request.user).select_related(
+                "achievement"
+            )
+        }
+        definitions = list(AchievementDefinition.objects.filter(is_active=True))
+        # As aposentadas que o usuário tem entram junto, ao fim da lista.
+        inativas_conquistadas = [
+            ua.achievement for ua in unlocked.values() if not ua.achievement.is_active
+        ]
+
+        data = []
+        for definition in definitions + inativas_conquistadas:
+            ua = unlocked.get(definition.id)
+            item = {
+                "code": definition.code,
+                "nome": definition.name,
+                "descricao": definition.description,
+                "icone": definition.icon,
+                "categoria": definition.category,
+                "conquistada": ua is not None,
+                "conquistada_em": ua.unlocked_at.isoformat() if ua else None,
+                # "nova" = conquistada mas ainda não comemorada. É o servidor
+                # que decide, para a comemoração não repetir ao trocar de
+                # aparelho nem sumir ao reinstalar o app.
+                "nova": bool(ua and ua.seen_at is None),
+            }
+            if ua is None:
+                progresso = current_progress(request.user, definition)
+                if progresso is not None:
+                    atual, alvo = progresso
+                    item["progresso"] = {"atual": atual, "alvo": alvo}
+            data.append(item)
+
+        return Response(data)
+
+
+class AchievementSeenView(APIView):
+    """
+    POST /api/v1/auth/achievements/seen/
+    Marca conquistas como já comemoradas. Corpo opcional: {"codes": [...]}.
+    Sem corpo, marca todas as pendentes.
+
+    É o que impede a celebração dupla: o fim de partida comemora a partir do
+    `conquistas_novas` da resposta e chama isto em seguida; o que sobrar
+    aparece na tela de conquistas com `nova: true` até ser visto lá.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from .achievements import mark_seen
+
+        codes = request.data.get("codes") if isinstance(request.data, dict) else None
+        if codes is not None and not isinstance(codes, list):
+            return Response(
+                {"detail": "`codes` deve ser uma lista."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        marcadas = mark_seen(request.user, codes)
+        return Response({"marcadas": marcadas}, status=status.HTTP_200_OK)
 
 
 class CampaignProgressView(APIView):

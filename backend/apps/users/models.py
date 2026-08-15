@@ -920,6 +920,13 @@ class GameHistory(models.Model):
         verbose_name = "Histórico de partida"
         verbose_name_plural = "Histórico de partidas"
         ordering = ["-played_at"]
+        indexes = [
+            # As conquistas cumulativas leem o extrato do usuário em ordem de
+            # data — "3 vitórias seguidas" pega as últimas N linhas. A FK de
+            # `user` já era indexada sozinha pelo Django; o que faltava era a
+            # data no MESMO índice, para a ordenação não custar um sort.
+            models.Index(fields=["user", "-played_at"]),
+        ]
 
     def __str__(self):
         return (
@@ -1096,3 +1103,136 @@ class Friendship(models.Model):
 
     def __str__(self):
         return f"{self.requester.email} → {self.receiver.email} ({self.status})"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONQUISTAS
+#
+# Sistema IRMÃO do Modo Campanha, não uma extensão dele. O Campanha
+# (CampaignProgress/CampaignWinLog) continua exatamente como está: progressão
+# sequencial pelos 5 níveis da IA, com selo por nível. Estas são conquistas de
+# outra natureza — marcos de uso do produto, sem ordem entre si.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AchievementDefinition(models.Model):
+    """
+    O CATÁLOGO de conquistas. Uma linha por conquista disponível.
+
+    POR QUE UMA TABELA, e não constantes em código: o limiar de cada conquista
+    (10 partidas, 50 partidas, 20 plies, 7 dias) mora em `params`. Acrescentar
+    "100 partidas" amanhã é INSERIR UMA LINHA — sem migration e sem deploy. O
+    `WINS_TO_UNLOCK` do Campanha é o contra-exemplo que motivou isto: mudar o
+    número de lá exige subir código.
+
+    Regra prática do desenho: acrescentar um TIPO de regra é código (um
+    avaliador novo em achievements.py); acrescentar uma CONQUISTA de um tipo
+    que já existe é dado.
+    """
+
+    # O gatilho PODA a avaliação: um puzzle resolvido não faz o servidor
+    # reavaliar as regras de partida, e vice-versa.
+    TRIGGER_GAME = "game_finished"
+    TRIGGER_PUZZLE = "puzzle_solved"
+    TRIGGER_CHOICES = [
+        (TRIGGER_GAME, "Fim de partida"),
+        (TRIGGER_PUZZLE, "Problema resolvido"),
+    ]
+
+    # Os 6 tipos do primeiro corte. Cada um tem um avaliador registrado em
+    # `achievements.RULE_EVALUATORS` — um valor aqui sem avaliador lá é
+    # ignorado em silêncio (ver o comentário de `check_achievements`).
+    RULE_WIN_COUNT = "win_count"
+    RULE_RATED_WIN_COUNT = "rated_win_count"
+    RULE_GAMES_PLAYED = "games_played"
+    RULE_WIN_STREAK = "win_streak"
+    RULE_FAST_CHECKMATE = "fast_checkmate"
+    RULE_PUZZLE_STREAK = "puzzle_streak"
+    RULE_CHOICES = [
+        (RULE_WIN_COUNT, "Total de vitórias"),
+        (RULE_RATED_WIN_COUNT, "Vitórias valendo rating"),
+        (RULE_GAMES_PLAYED, "Partidas jogadas"),
+        (RULE_WIN_STREAK, "Vitórias seguidas"),
+        (RULE_FAST_CHECKMATE, "Xeque-mate rápido"),
+        (RULE_PUZZLE_STREAK, "Dias seguidos resolvendo problema"),
+    ]
+
+    # Identidade ESTÁVEL. O app casa ícone e texto por `code`, então ele nunca
+    # muda — `name` e `description` podem ser reescritos à vontade sem quebrar
+    # cliente nenhum.
+    code = models.SlugField(max_length=50, unique=True, verbose_name="Código")
+    name = models.CharField(max_length=80, verbose_name="Nome")
+    description = models.CharField(max_length=200, verbose_name="Descrição")
+    # Nome de ícone do Ionicons, igual ao resto do app.
+    icon = models.CharField(max_length=40, blank=True, default="")
+    category = models.CharField(max_length=20, blank=True, default="")
+
+    trigger = models.CharField(max_length=20, choices=TRIGGER_CHOICES)
+    rule_type = models.CharField(max_length=30, choices=RULE_CHOICES)
+    # O limiar: {"threshold": 10} · {"max_plies": 20}. JSON e não coluna
+    # tipada porque cada regra tem parâmetros diferentes, e uma coluna por
+    # parâmetro viraria uma tabela cheia de nulos.
+    params = models.JSONField(default=dict, blank=True)
+
+    order = models.IntegerField(default=0, verbose_name="Ordem de exibição")
+    # Aposenta sem apagar: apagar a definição apagaria a conquista de quem já
+    # a ganhou (ver o PROTECT em UserAchievement).
+    is_active = models.BooleanField(default=True, verbose_name="Ativa")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order", "id"]
+        verbose_name = "Conquista"
+        verbose_name_plural = "Conquistas"
+
+    def __str__(self):
+        return f"{self.code} — {self.name}"
+
+
+class UserAchievement(models.Model):
+    """
+    Uma conquista JÁ DESBLOQUEADA por um usuário.
+
+    O `unique_together` é a regra de "uma vez só" — no BANCO, não em `if` de
+    view. É também por isso que este sistema NÃO precisa de um log de evento
+    como o `CampaignWinLog`: aquele existe porque `CampaignProgress.wins` é um
+    CONTADOR, e reprocessar a mesma partida o incrementaria duas vezes.
+    Conquista é BOOLEANA — reavaliar o mesmo evento cai num `get_or_create`
+    que é no-op, e a constraint garante isso sem ajuda de ninguém.
+    """
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="achievements"
+    )
+    # PROTECT: apagar uma definição que alguém já conquistou apagaria a
+    # conquista dessa pessoa. Para tirar de circulação, use `is_active=False`.
+    achievement = models.ForeignKey(
+        AchievementDefinition, on_delete=models.PROTECT, related_name="unlocks"
+    )
+    unlocked_at = models.DateTimeField(auto_now_add=True)
+    # Null = ainda não comemorada. É a FONTE DA VERDADE de "já festejei", e o
+    # que impede o fim de partida e a tela de conquistas celebrarem a mesma
+    # coisa duas vezes. Mora no servidor (e não no app) para a comemoração não
+    # se repetir ao trocar de aparelho.
+    seen_at = models.DateTimeField(null=True, blank=True)
+    # Rastro INFORMATIVO da partida que originou a conquista — serve para
+    # contar ao usuário onde ela aconteceu e para diagnóstico. Explicitamente
+    # NÃO é mecanismo de idempotência (quem faz isso é o unique_together), e
+    # por isso pode ser null sem que nada quebre: as conquistas de puzzle não
+    # têm partida de origem.
+    source_history = models.ForeignKey(
+        "GameHistory",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="achievements_unlocked",
+    )
+
+    class Meta:
+        unique_together = ("user", "achievement")
+        ordering = ["-unlocked_at"]
+        verbose_name = "Conquista do usuário"
+        verbose_name_plural = "Conquistas dos usuários"
+
+    def __str__(self):
+        return f"{self.user.email} — {self.achievement.code}"

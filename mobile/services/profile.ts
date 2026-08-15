@@ -1,4 +1,5 @@
 import { API_URL, apiErrorMessage } from "./api";
+import type { NewAchievement } from "./achievements";
 import { authFetch } from "./session";
 import type { Difficulty } from "@/constants/aiGame";
 
@@ -162,6 +163,10 @@ export async function reportAiResult(
   /** Endereço da partida para a análise pós-jogo. Null quando o servidor não
    *  montou a partida (sem `player_color`, ou backend anterior à Fase 1). */
   game_public_id: string | null;
+  /** Conquistas desbloqueadas POR ESTA partida — o servidor devolve prontas
+   *  para o app celebrar na hora, sem ter de descobrir comparando estados.
+   *  Ausente em backend anterior a esta feature. */
+  conquistas_novas?: NewAchievement[];
 }> {
   const res = await authFetch(`${API_URL}/api/v1/auth/game/ai-result/`, token, {
     method: "POST",
