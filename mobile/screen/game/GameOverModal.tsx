@@ -15,6 +15,7 @@ import { AI_LEVEL_BY_ID, type Difficulty } from "@/constants/aiGame";
 import { QA_SHOW_AI_DIAGNOSTIC_PGN } from "@/constants/qaFlags";
 import Confetti from "@/components/Confetti";
 import GameAnalysisSection from "./GameAnalysisSection";
+import GameFeedbackSection from "./GameFeedbackSection";
 
 /** Modo Campanha: preenchido quando a vitória atual cruzou o limiar de 3
  * vitórias no nível jogado — dominatedLevel ganhou o selo; nextLevel é o
@@ -290,6 +291,18 @@ export default function GameOverModal({
                 que tem tela para cada resultado — inclusive convite a assinar. */}
             {gamePublicId && (
               <GameAnalysisSection
+                gamePublicId={gamePublicId}
+                playerColor={playerColor}
+                onUpgrade={onUpgrade}
+              />
+            )}
+
+            {/* Comentário humanizado (Fase 3), logo abaixo da análise e sob a
+                MESMA condição: sem `gamePublicId` não há endereço a consultar.
+                Seção independente — a Fase 2 continua exatamente como estava, e
+                esta some sozinha quando a feature está desligada no servidor. */}
+            {gamePublicId && (
+              <GameFeedbackSection
                 gamePublicId={gamePublicId}
                 playerColor={playerColor}
                 onUpgrade={onUpgrade}
