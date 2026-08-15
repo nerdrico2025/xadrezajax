@@ -1553,6 +1553,23 @@ class GameLLMFeedbackView(APIView):
         if early is not None:
             return early
 
+        # A flag vale para a LEITURA também, não só para o POST. Sem isto, com
+        # a feature desligada o GET respondia `inexistente`, o app desenhava o
+        # botão "Gerar comentário" e o toque no botão fazia a seção SUMIR (o
+        # POST responde `desligado`). Como a flag nasce desligada, esse era o
+        # comportamento padrão em produção — e não o silêncio combinado.
+        #
+        # Já existe um comentário PRONTO? Ele continua sendo entregue mais
+        # abaixo: desligar a geração não pode apagar o que o usuário já pediu,
+        # viu e, no fim das contas, pagou.
+        if not llm_feedback_enabled():
+            existing = getattr(analysis, "llm_feedback", None) if analysis else None
+            if existing is None or existing.status != GameLLMFeedback.STATUS_DONE:
+                return Response(
+                    {"status": self.STATUS_DISABLED}, status=status.HTTP_200_OK
+                )
+            return Response(self._payload(existing), status=status.HTTP_200_OK)
+
         if analysis is None or analysis.status != GameAnalysis.STATUS_DONE:
             # Sem análise Stockfish pronta não há matéria-prima. O app mostra
             # o botão desabilitado em vez de deixar o usuário gastar um toque.

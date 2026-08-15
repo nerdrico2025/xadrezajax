@@ -456,6 +456,33 @@ class EndpointTests(APITestCase):
         self.assertEqual(response.data["status"], "gerando")
         spawn.assert_called_once()
 
+    @override_settings(LLM_FEEDBACK_ENABLED=False)
+    def test_get_com_flag_desligada_diz_desligado_e_nao_inexistente(self):
+        """`inexistente` faria o app desenhar o botão de gerar — e o POST
+        responderia `desligado`, sumindo com a seção no toque. Com a flag
+        nascendo desligada, esse seria o comportamento padrão em produção."""
+        self.client.force_authenticate(self.white)
+        response = self.client.get(self.url)
+        self.assertEqual(response.data["status"], "desligado")
+
+    @override_settings(LLM_FEEDBACK_ENABLED=False)
+    def test_flag_desligada_nao_apaga_comentario_ja_gerado(self):
+        """Desligar a geração não pode sumir com o que já foi entregue."""
+        feedback, _ = claim_llm_feedback(self.analysis, user=self.white)
+        feedback.status = GameLLMFeedback.STATUS_DONE
+        feedback.sections = {
+            "resumo": "r",
+            "abertura": "a",
+            "erro_decisivo": "e",
+            "recomendacao": "c",
+        }
+        feedback.save()
+
+        self.client.force_authenticate(self.black)
+        response = self.client.get(self.url)
+        self.assertEqual(response.data["status"], "pronto")
+        self.assertEqual(response.data["sections"]["resumo"], "r")
+
     @patch("apps.users.views._spawn_llm_feedback")
     def test_segundo_post_nao_dispara_segunda_geracao(self, spawn):
         """Os dois jogadores tocando o botão = UMA chamada ao provedor."""
