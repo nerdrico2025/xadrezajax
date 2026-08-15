@@ -144,3 +144,99 @@ export async function getGameAnalysis(
   if (!res.ok) throw new Error("Falha ao carregar a análise");
   return res.json();
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// COMENTÁRIO HUMANIZADO (Fase 3)
+//
+// Escrito por LLM EM CIMA da análise Stockfish acima — complementa, não
+// substitui. Gerado SOB DEMANDA (o usuário aperta um botão) e UMA vez por
+// partida: o mesmo texto serve aos dois jogadores, e por isso ele é NEUTRO
+// ("as brancas"/"as pretas"). Quem rotula a perspectiva é a tela, com o
+// `player_color` que o servidor já informa.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Estado do comentário.
+ *
+ * `desligado`   = feature-flag off no servidor. A seção some por completo:
+ *                 não há o que oferecer, e um botão que não funciona é pior
+ *                 que nenhum botão.
+ * `bloqueado`   = a análise Stockfish ainda não ficou pronta. Sem ela não há
+ *                 matéria-prima para o comentário.
+ * `indisponivel`= sem plano pago — mesmo significado que na análise.
+ * `inexistente` = nunca foi gerado. É o estado em que o botão aparece.
+ * `erro`        = a geração falhou. Retentável enquanto `can_retry`.
+ */
+export type LLMFeedbackStatus =
+  | "gerando"
+  | "pronto"
+  | "erro"
+  | "inexistente"
+  | "bloqueado"
+  | "desligado"
+  | "indisponivel";
+
+/** As quatro seções do comentário. Sempre as quatro quando `pronto`. */
+export interface LLMFeedbackSections {
+  resumo: string;
+  abertura: string;
+  erro_decisivo: string;
+  recomendacao: string;
+}
+
+export interface GameLLMFeedback {
+  status: LLMFeedbackStatus;
+  /** Só quando `status === "pronto"`. */
+  sections?: LLMFeedbackSections;
+  prompt_version?: number;
+  attempts?: number;
+  max_attempts?: number;
+  /** False quando as tentativas acabaram — aí nem oferecer "tentar de novo". */
+  can_retry?: boolean;
+  /**
+   * Motivo TÉCNICO da falha ("timeout", "json invalido"). Existe para
+   * diagnóstico e NÃO deve ser mostrado ao usuário: ele não pode agir sobre
+   * isso, e a mensagem só assusta. A tela mostra um texto genérico.
+   */
+  failure_reason?: string;
+}
+
+/** Único estado em que ainda faz sentido perguntar de novo. */
+export function isFeedbackPending(status: LLMFeedbackStatus): boolean {
+  return status === "gerando";
+}
+
+const FEEDBACK_PATH = (publicId: string) =>
+  `${API_URL}/api/v1/auth/games/${publicId}/analysis/feedback/`;
+
+export async function getGameLLMFeedback(
+  token: string,
+  publicId: string
+): Promise<GameLLMFeedback> {
+  const res = await authFetch(FEEDBACK_PATH(publicId), token, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error("Falha ao carregar o comentário");
+  return res.json();
+}
+
+/**
+ * Pede a geração. Idempotente no servidor: se já existe, devolve o mesmo
+ * texto sem gerar de novo — então tocar duas vezes não custa duas vezes.
+ *
+ * O 409 (análise ainda não pronta) NÃO é erro de transporte: vem com corpo
+ * `{status: "bloqueado"}` e é um estado que a tela sabe desenhar. Tratá-lo
+ * como falha de rede transformaria uma informação útil num aviso genérico.
+ */
+export async function requestGameLLMFeedback(
+  token: string,
+  publicId: string
+): Promise<GameLLMFeedback> {
+  const res = await authFetch(FEEDBACK_PATH(publicId), token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (res.status === 409) return res.json();
+  if (!res.ok) throw new Error("Falha ao gerar o comentário");
+  return res.json();
+}
