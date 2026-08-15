@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
@@ -622,6 +623,215 @@ def _ai_analyses_today(profile):
         )
         .count()
     )
+
+
+def llm_feedback_enabled():
+    """Feature flag do comentário humanizado (Fase 3).
+
+    Separada da flag da Fase 2 de propósito: a análise Stockfish gasta CPU
+    nossa, esta gasta DINHEIRO por chamada. São decisões de ligar diferentes,
+    tomadas olhando coisas diferentes, e uma não pode arrastar a outra.
+
+    Chave vazia conta como desligada: sem `DEEPSEEK_API_KEY` a chamada falharia
+    de todo jeito, e falhar no portão é mais honesto do que gastar uma
+    tentativa para descobrir isso.
+    """
+    from django.conf import settings
+
+    return bool(
+        getattr(settings, "LLM_FEEDBACK_ENABLED", False)
+        and getattr(settings, "DEEPSEEK_API_KEY", "")
+    )
+
+
+class GameLLMFeedback(models.Model):
+    """
+    Comentário em português sobre a partida, escrito por LLM (Fase 3) em cima
+    da análise que o Stockfish já produziu. COMPLEMENTA a Fase 2; não a
+    substitui, e não altera nada dela.
+
+    POR QUE TABELA SEPARADA, e não colunas em GameAnalysis:
+      1. São ~14 colunas que ficariam nulas na maioria das linhas — o gatilho
+         é SOB DEMANDA (botão), então a maior parte das partidas analisadas
+         nunca vai ter comentário.
+      2. `GameAnalysis` é a FILA de trabalho do node-api, varrida em polling
+         com `select_for_update` (InternalAnalysisNextView). Um segundo ciclo
+         de vida, com outro lease e outra cadência, na tabela quente da fila
+         só produziria contenção de lock por um motivo que não tem nada a ver
+         com Stockfish.
+
+    POR QUE PENDURADO EM GameAnalysis, e não em Game: torna a dependência
+    ESTRUTURAL. O prompt é montado a partir da análise; sem análise não existe
+    linha possível, porque não há a que se ligar. Ancorar em `Game` deixaria a
+    validação "só gere se houver análise" por conta da view, que é justamente
+    onde ela pode ser esquecida.
+
+    O OneToOne é a garantia de "no máximo 1 por partida" NO BANCO (UNIQUE em
+    analysis_id) — dois toques simultâneos não criam duas linhas nem com race.
+    A garantia de "no máximo 1 GERAÇÃO BEM-SUCEDIDA" é outra e mora no
+    `claim()` abaixo.
+    """
+
+    STATUS_GENERATING = "gerando"
+    STATUS_DONE = "pronto"
+    STATUS_FAILED = "erro"
+    STATUS_CHOICES = [
+        (STATUS_GENERATING, "Gerando"),
+        (STATUS_DONE, "Pronto"),
+        (STATUS_FAILED, "Erro"),
+    ]
+
+    # Versão do prompt E do formato de saída. Mudou o texto do system prompt,
+    # o digest ou as seções esperadas → incrementa, e os comentários antigos
+    # continuam identificáveis como "escritos com outro contrato".
+    #
+    # Incrementar NÃO regenera nada: regeneração retroativa está fora de
+    # escopo por decisão (custo). O campo existe para que a decisão de
+    # regenerar, se um dia vier, seja possível.
+    PROMPT_VERSION = 1
+
+    # Tentativas antes de desistir. Existe para que uma partida que quebra o
+    # parser toda vez não vire um cano aberto de custo.
+    MAX_ATTEMPTS = 3
+
+    # Prazo do "aluguel" da geração. Menor que o da Fase 2 (que é minutos de
+    # engine): aqui é uma chamada HTTP com timeout de dezenas de segundos, e
+    # o lease só precisa cobrir o pior caso dela mais folga. Vencido = a
+    # thread morreu (deploy, queda) e o trabalho volta a ser reivindicável.
+    LEASE_SECONDS = 180
+
+    # Seções que a resposta do modelo precisa ter. É o contrato validado antes
+    # de qualquer gravação de `pronto` — ver llm_feedback.parse_sections.
+    REQUIRED_SECTIONS = ("resumo", "abertura", "erro_decisivo", "recomendacao")
+    MAX_SECTION_CHARS = 600
+
+    analysis = models.OneToOneField(
+        GameAnalysis,
+        on_delete=models.CASCADE,
+        related_name="llm_feedback",
+        verbose_name="Análise",
+    )
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default=STATUS_GENERATING
+    )
+
+    # ── Conteúdo ─────────────────────────────────────────────────────────
+    # {"resumo": "...", "abertura": "...", "erro_decisivo": "...",
+    #  "recomendacao": "..."} — sempre as 4 chaves quando status=pronto.
+    sections = models.JSONField(default=dict, blank=True)
+    # A resposta crua do provedor, para quando o parse falhar e for preciso
+    # ver o que de fato veio. Sem isto, "schema inválido" é um beco sem saída.
+    raw_response = models.TextField(blank=True, default="")
+
+    # ── Contrato / reprodutibilidade ─────────────────────────────────────
+    prompt_version = models.IntegerField(default=PROMPT_VERSION)
+    model_name = models.CharField(max_length=60, blank=True, default="")
+
+    # ── Custo ────────────────────────────────────────────────────────────
+    # Preenchidos DEFENSIVAMENTE: o provedor pode mudar o formato de `usage`,
+    # e perder a métrica nunca pode perder um comentário já válido.
+    prompt_tokens = models.IntegerField(null=True, blank=True)
+    completion_tokens = models.IntegerField(null=True, blank=True)
+    cached_tokens = models.IntegerField(null=True, blank=True)
+    # Congelado no momento da gravação, a partir do preço vigente. Se o preço
+    # mudar, o histórico continua contando o que foi de fato gasto.
+    cost_usd = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True
+    )
+    latency_ms = models.IntegerField(null=True, blank=True)
+
+    # ── Operação ─────────────────────────────────────────────────────────
+    attempts = models.IntegerField(default=0)
+    leased_until = models.DateTimeField(null=True, blank=True)
+    failure_reason = models.CharField(max_length=200, blank=True, default="")
+    # Quem gastou a geração. SET_NULL: apagar a conta não pode apagar o
+    # comentário, que pertence à partida e é lido pelo adversário também.
+    requested_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="llm_feedbacks_requested",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Comentário da partida"
+        verbose_name_plural = "Comentários das partidas"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Comentário da análise #{self.analysis_id} ({self.status})"
+
+    @property
+    def is_terminal(self):
+        """Estado do qual não se sai mais — nem por toque do usuário."""
+        return self.status == self.STATUS_DONE or (
+            self.status == self.STATUS_FAILED and self.attempts >= self.MAX_ATTEMPTS
+        )
+
+
+def claim_llm_feedback(analysis, user=None, now=None):
+    """Reivindica o direito de gerar o comentário desta análise.
+
+    Devolve `(feedback, claimed)`. `claimed=True` significa "é sua vez de
+    chamar o provedor"; `False` significa que outra requisição já está
+    gerando, que já ficou pronto, ou que as tentativas acabaram.
+
+    TODA a regra de "1 geração por partida" está AQUI, num UPDATE condicional
+    — e não espalhada em `if`s de view — porque é uma corrida real: os dois
+    jogadores podem tocar o botão no mesmo instante, e o banco é o único lugar
+    onde isso se resolve sem lock explícito.
+
+    O que é reivindicável:
+      - linha recém-criada (`gerando`, sem lease) — o `created` do get_or_create;
+      - `erro` com tentativas sobrando — decisão C: falha do provedor NÃO
+        consome a cota do usuário;
+      - `gerando` com lease VENCIDO — a thread morreu no meio (deploy, queda).
+
+    O que nunca é reivindicável:
+      - `pronto`. Não aparece no filtro, e essa ausência É a regra "sem
+        re-geração" (decisão 4). Uma segunda chamada devolve o mesmo texto.
+    """
+    from django.db.models import F, Q
+
+    now = now or timezone.now()
+    lease_until = now + timedelta(seconds=GameLLMFeedback.LEASE_SECONDS)
+
+    feedback, created = GameLLMFeedback.objects.get_or_create(
+        analysis=analysis,
+        defaults={
+            "status": GameLLMFeedback.STATUS_GENERATING,
+            "attempts": 1,
+            "leased_until": lease_until,
+            "requested_by": user,
+            "prompt_version": GameLLMFeedback.PROMPT_VERSION,
+        },
+    )
+    if created:
+        # A própria criação da linha é a reivindicação: o UNIQUE do OneToOne
+        # garante que só uma requisição concorrente chega aqui.
+        return feedback, True
+
+    claimed = (
+        GameLLMFeedback.objects.filter(pk=feedback.pk)
+        .filter(attempts__lt=GameLLMFeedback.MAX_ATTEMPTS)
+        .filter(
+            Q(status=GameLLMFeedback.STATUS_FAILED)
+            | Q(status=GameLLMFeedback.STATUS_GENERATING, leased_until__lt=now)
+        )
+        .update(
+            status=GameLLMFeedback.STATUS_GENERATING,
+            leased_until=lease_until,
+            attempts=F("attempts") + 1,
+            requested_by=user,
+            failure_reason="",
+        )
+    )
+    feedback.refresh_from_db()
+    return feedback, bool(claimed)
 
 
 class GameHistory(models.Model):

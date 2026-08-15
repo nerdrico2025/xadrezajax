@@ -14,6 +14,7 @@ from .views import (
     GameHistoryView,
     GameResultView,
     GoogleLoginView,
+    GameLLMFeedbackView,
     InternalAnalysisNextView,
     InternalAnalysisResultView,
     InternalColorBalanceView,
@@ -73,6 +74,13 @@ urlpatterns = [
         "games/<uuid:public_id>/analysis/",
         GameAnalysisView.as_view(),
         name="game-analysis",
+    ),
+    # Comentário humanizado (Fase 3), sob demanda. Rota FILHA da análise
+    # porque é derivada dela: sem análise pronta não há o que comentar.
+    path(
+        "games/<uuid:public_id>/analysis/feedback/",
+        GameLLMFeedbackView.as_view(),
+        name="game-llm-feedback",
     ),
     # A partida em si, irmã da rota de análise acima.
     path(

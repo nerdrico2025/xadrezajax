@@ -185,6 +185,10 @@ REST_FRAMEWORK = {
         "anon": "20/minute",
         "password_reset_req": "3/hour",
         "password_reset_verify": "15/hour",
+        # Geração de comentário por LLM: cada uma custa dinheiro de verdade.
+        # O teto por PARTIDA é o MAX_ATTEMPTS do model; este aqui é o outro
+        # eixo — um usuário disparando geração em muitas partidas seguidas.
+        "llm_feedback": "10/hour",
     },
 }
 
@@ -270,6 +274,34 @@ INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 # ligava um e deixava o outro desligado, em silêncio. Os dois lados agora
 # aceitam o mesmo conjunto.
 POST_GAME_ANALYSIS_ENABLED = env_bool("POST_GAME_ANALYSIS_ENABLED")
+
+# ========================
+# COMENTÁRIO HUMANIZADO / LLM (Fase 3)
+# ========================
+# Flag PRÓPRIA, separada da Fase 2 de propósito: a análise Stockfish gasta CPU
+# nossa, esta gasta DINHEIRO por chamada. São decisões de ligar diferentes, e
+# uma não pode arrastar a outra. `env_bool` pelo mesmo motivo da Fase 2.
+LLM_FEEDBACK_ENABLED = env_bool("LLM_FEEDBACK_ENABLED")
+
+# Chave paga da DeepSeek. Vazia = feature inerte, mesmo com a flag ligada
+# (ver `llm_feedback_enabled()`): sem chave a chamada falharia de qualquer
+# jeito, e falhar no portão é melhor do que gastar uma tentativa para
+# descobrir isso.
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_API_URL = os.getenv(
+    "DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions"
+)
+# Em variável para trocar de modelo sem deploy.
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_TIMEOUT_S = int(os.getenv("DEEPSEEK_TIMEOUT_S", "45"))
+
+# Preço por milhão de tokens, em USD. Fica em settings (e não no código) para
+# ajuste sem deploy — e o valor gravado em `cost_usd` é CONGELADO na linha, de
+# modo que mudar isto não reescreve o histórico já registrado.
+DEEPSEEK_PRICE_PER_MTOK = {
+    "input": float(os.getenv("DEEPSEEK_PRICE_INPUT", "0.27")),
+    "output": float(os.getenv("DEEPSEEK_PRICE_OUTPUT", "1.10")),
+}
 
 # ========================
 # EMAIL (SendGrid)

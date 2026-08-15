@@ -32,9 +32,12 @@ from .glicko2 import (
 from .models import (
     Game,
     GameAnalysis,
+    GameLLMFeedback,
     ModalityRating,
+    claim_llm_feedback,
     enqueue_analysis,
     get_or_create_profile,
+    llm_feedback_enabled,
     normalize_analysis_moves,
     normalize_moves,
     normalize_termination,
@@ -1450,6 +1453,196 @@ class GameAnalysisView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class GameLLMFeedbackView(APIView):
+    """
+    GET  /api/v1/auth/games/<public_id>/analysis/feedback/  → estado + conteúdo
+    POST /api/v1/auth/games/<public_id>/analysis/feedback/  → gera (sob demanda)
+
+    Comentário humanizado da partida (Fase 3), em cima da análise que o
+    Stockfish já produziu. COMPLEMENTA a Fase 2 e não altera nada dela.
+
+    OS MESMOS DOIS PORTÕES de GameAnalysisView, na mesma ordem e pela mesma
+    razão: participação primeiro (404, quem não jogou não fica sabendo que a
+    partida existe), plano depois (403, para o 403 não virar oráculo de
+    existência). Aqui a reverificação de plano deixa de ser só higiene e vira
+    controle de GASTO: cada geração custa dinheiro de verdade.
+
+    O texto é NEUTRO ("as brancas"/"as pretas") porque é UM comentário para os
+    DOIS jogadores — 1 geração por partida (decisão de custo). Quem rotula a
+    perspectiva ("você jogou de brancas") é o app, que já sabe a cor pelo
+    `player_color` do GameDetailView.
+
+    O POST é idempotente: se já está pronto, devolve o mesmo texto sem chamar
+    o provedor de novo.
+    """
+
+    permission_classes = [IsAuthenticated]
+    throttle_scope = "llm_feedback"
+
+    STATUS_UNAVAILABLE = "indisponivel"
+    STATUS_NONE = "inexistente"
+    STATUS_BLOCKED = "bloqueado"
+    STATUS_DISABLED = "desligado"
+
+    def _resolve(self, request, public_id):
+        """Portões comuns ao GET e ao POST.
+
+        Devolve `(game, analysis, resposta_de_erro)` — com resposta preenchida,
+        o handler devolve ela e não segue.
+        """
+        from apps.payments.access import has_paid_access
+
+        game = Game.objects.filter(public_id=public_id).first()
+        if game is None:
+            return (
+                None,
+                None,
+                Response(
+                    {"detail": "Partida não encontrada."},
+                    status=status.HTTP_404_NOT_FOUND,
+                ),
+            )
+
+        if request.user.id not in (game.white_player_id, game.black_player_id):
+            return (
+                None,
+                None,
+                Response(
+                    {"detail": "Partida não encontrada."},
+                    status=status.HTTP_404_NOT_FOUND,
+                ),
+            )
+
+        profile = get_or_create_profile(request.user)
+        if not has_paid_access(profile):
+            return (
+                game,
+                None,
+                Response(
+                    {"status": self.STATUS_UNAVAILABLE}, status=status.HTTP_200_OK
+                ),
+            )
+
+        analysis = getattr(game, "analysis", None)
+        return game, analysis, None
+
+    def _payload(self, feedback):
+        """Estado do comentário para o app. `sections` só quando pronto."""
+        if feedback.status == GameLLMFeedback.STATUS_DONE:
+            return {
+                "status": feedback.status,
+                "sections": feedback.sections,
+                "prompt_version": feedback.prompt_version,
+            }
+        body = {
+            "status": feedback.status,
+            "attempts": feedback.attempts,
+            "max_attempts": GameLLMFeedback.MAX_ATTEMPTS,
+            # O app não precisa inventar cadência de polling: só há motivo
+            # para perguntar de novo enquanto está gerando.
+            "can_retry": not feedback.is_terminal,
+        }
+        if feedback.status == GameLLMFeedback.STATUS_FAILED:
+            body["failure_reason"] = feedback.failure_reason
+        return body
+
+    def get(self, request, public_id):
+        game, analysis, early = self._resolve(request, public_id)
+        if early is not None:
+            return early
+
+        # A flag vale para a LEITURA também, não só para o POST. Sem isto, com
+        # a feature desligada o GET respondia `inexistente`, o app desenhava o
+        # botão "Gerar comentário" e o toque no botão fazia a seção SUMIR (o
+        # POST responde `desligado`). Como a flag nasce desligada, esse era o
+        # comportamento padrão em produção — e não o silêncio combinado.
+        #
+        # Já existe um comentário PRONTO? Ele continua sendo entregue mais
+        # abaixo: desligar a geração não pode apagar o que o usuário já pediu,
+        # viu e, no fim das contas, pagou.
+        if not llm_feedback_enabled():
+            existing = getattr(analysis, "llm_feedback", None) if analysis else None
+            if existing is None or existing.status != GameLLMFeedback.STATUS_DONE:
+                return Response(
+                    {"status": self.STATUS_DISABLED}, status=status.HTTP_200_OK
+                )
+            return Response(self._payload(existing), status=status.HTTP_200_OK)
+
+        if analysis is None or analysis.status != GameAnalysis.STATUS_DONE:
+            # Sem análise Stockfish pronta não há matéria-prima. O app mostra
+            # o botão desabilitado em vez de deixar o usuário gastar um toque.
+            return Response({"status": self.STATUS_BLOCKED}, status=status.HTTP_200_OK)
+
+        feedback = getattr(analysis, "llm_feedback", None)
+        if feedback is None:
+            return Response({"status": self.STATUS_NONE}, status=status.HTTP_200_OK)
+
+        return Response(self._payload(feedback), status=status.HTTP_200_OK)
+
+    def post(self, request, public_id):
+        game, analysis, early = self._resolve(request, public_id)
+        if early is not None:
+            return early
+
+        if not llm_feedback_enabled():
+            return Response({"status": self.STATUS_DISABLED}, status=status.HTTP_200_OK)
+
+        if analysis is None or analysis.status != GameAnalysis.STATUS_DONE:
+            return Response(
+                {
+                    "status": self.STATUS_BLOCKED,
+                    "detail": "A análise da partida ainda não ficou pronta.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        existing = getattr(analysis, "llm_feedback", None)
+        if existing is not None and existing.status == GameLLMFeedback.STATUS_DONE:
+            # Idempotente: já foi gerado, devolve o MESMO texto. Não chama o
+            # provedor e não gasta nada.
+            return Response(self._payload(existing), status=status.HTTP_200_OK)
+
+        feedback, claimed = claim_llm_feedback(analysis, user=request.user)
+        if not claimed:
+            # Outra requisição está gerando agora, ou as tentativas acabaram.
+            # Nos dois casos o estado atual já diz tudo ao app.
+            return Response(self._payload(feedback), status=status.HTTP_200_OK)
+
+        _spawn_llm_feedback(feedback.pk)
+        return Response(self._payload(feedback), status=status.HTTP_202_ACCEPTED)
+
+
+def _spawn_llm_feedback(feedback_id):
+    """Dispara a geração fora do ciclo da requisição.
+
+    Thread, e não chamada síncrona, por uma razão de infra: o Django roda em
+    gunicorn SÍNCRONO com 4 workers, então uma chamada de 10-15s seguraria um
+    quarto da capacidade do backend inteiro — login e partidas incluídos.
+
+    Thread, e não Celery, porque não há Celery no projeto. A rede de segurança
+    para a thread morrer no meio (deploy, queda) é o `leased_until`: lease
+    vencido volta a ser reivindicável, exatamente como na fila da Fase 2. A
+    recuperação é o próprio usuário tocando de novo — sem daemon, sem cron.
+    """
+    from .llm_feedback import generate_feedback
+
+    def runner():
+        # `close_old_connections` dos dois lados: a thread não herda o ciclo
+        # de conexão da requisição, e deixar conexão pendurada no pool é o
+        # jeito clássico de uma thread de background derrubar o Postgres.
+        from django.db import close_old_connections
+
+        close_old_connections()
+        try:
+            generate_feedback(feedback_id)
+        finally:
+            close_old_connections()
+
+    threading.Thread(
+        target=runner, name=f"llm-feedback-{feedback_id}", daemon=True
+    ).start()
 
 
 class CampaignProgressView(APIView):
