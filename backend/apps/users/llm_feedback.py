@@ -273,17 +273,35 @@ def _extract_usage(payload):
 
 
 def _estimate_cost(usage):
-    """Custo em USD a partir da tabela de preços vigente, ou None.
+    """Custo em USD, congelado no momento da gravação.
 
-    Congelado na linha no momento da gravação: se o preço mudar depois, o
-    histórico continua contando o que foi de fato gasto.
+    TRÊS desfechos, e a diferença entre eles importa para o relatório de gasto:
+
+      - `Decimal("0.000000")` — rodou de graça (modelo `:free`). É INFORMAÇÃO:
+        sabemos o consumo e sabemos que o preço é zero.
+      - `Decimal(> 0)` — custou isso.
+      - `None` — NÃO SABEMOS: ou o provedor não devolveu `usage` legível, ou o
+        preço do modelo não está configurado.
+
+    A versão anterior confundia os dois extremos, e de um jeito que só
+    apareceria ao migrar de provedor: preço zero devolvia `None` (o modelo de
+    graça parecia "custo desconhecido") e `usage` ilegível devolvia zero (o
+    desconhecido parecia "não custou nada", somando errado no acumulado).
     """
+    # Sem consumo legível não há o que calcular — nem mesmo zero.
+    if not usage or ("prompt_tokens" not in usage and "completion_tokens" not in usage):
+        return None
+
+    prices = getattr(settings, "LLM_PRICE_PER_MTOK", {}) or {}
+    entrada_raw = prices.get("input")
+    saida_raw = prices.get("output")
+    # Preço desconhecido é diferente de preço zero — ver `env_price`.
+    if entrada_raw is None or saida_raw is None:
+        return None
+
     try:
-        prices = getattr(settings, "DEEPSEEK_PRICE_PER_MTOK", {}) or {}
-        entrada = Decimal(str(prices.get("input", 0)))
-        saida = Decimal(str(prices.get("output", 0)))
-        if not entrada and not saida:
-            return None
+        entrada = Decimal(str(entrada_raw))
+        saida = Decimal(str(saida_raw))
         prompt_tokens = Decimal(usage.get("prompt_tokens") or 0)
         completion_tokens = Decimal(usage.get("completion_tokens") or 0)
         milhao = Decimal(1_000_000)
@@ -296,29 +314,46 @@ def _estimate_cost(usage):
         return None
 
 
-def call_deepseek(digest):
+def completions_url():
+    """URL do endpoint, montada a partir da BASE configurada.
+
+    A base vem de `OPENROUTER_BASE_URL` e o caminho é acrescentado aqui — é o
+    que deixa a troca de provedor compatível com a OpenAI ser uma mudança de
+    variável de ambiente, sem tocar em código.
+    """
+    base = (getattr(settings, "OPENROUTER_BASE_URL", "") or "").rstrip("/")
+    return f"{base}/chat/completions"
+
+
+def call_llm(digest):
     """Chama o provedor. Devolve `(texto, payload, erro)`.
 
     Erro é uma string CURTA e estável (cabe em `failure_reason`, e é o que os
     testes verificam) — nunca a exceção crua, que pode carregar a chave de API
     na mensagem.
     """
-    api_key = getattr(settings, "DEEPSEEK_API_KEY", "")
+    api_key = getattr(settings, "OPENROUTER_API_KEY", "")
     if not api_key:
         return None, None, "sem chave de api"
 
     body = {
-        "model": getattr(settings, "DEEPSEEK_MODEL", "deepseek-chat"),
+        "model": getattr(settings, "OPENROUTER_MODEL", ""),
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
                     "Comente esta partida em português do Brasil, seguindo as "
-                    "regras do sistema.\n\n" + digest
+                    "regras do sistema. Responda apenas com o objeto JSON.\n\n" + digest
                 ),
             },
         ],
+        # Pedido em DOIS lugares de propósito: aqui, pelo parâmetro, e no texto
+        # do system prompt. O suporte a `response_format` no OpenRouter depende
+        # do modelo e do provedor que atender a chamada — os Llama nem sempre
+        # honram o parâmetro. Com o pedido também no prompt (e o `parse_sections`
+        # descascando cerca de código), o caminho continua funcionando quando o
+        # parâmetro é ignorado, em vez de virar `schema_invalido` em série.
         "response_format": {"type": "json_object"},
         # Baixa de propósito: isto é análise, não criatividade. Variação alta
         # aqui vira invenção de lance que não foi jogado.
@@ -328,13 +363,18 @@ def call_deepseek(digest):
 
     try:
         response = requests.post(
-            getattr(settings, "DEEPSEEK_API_URL", ""),
+            completions_url(),
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                # Atribuição no OpenRouter: identificam o app no painel deles
+                # e no suporte. Opcionais na API, e inofensivos em qualquer
+                # outro provedor compatível.
+                "HTTP-Referer": getattr(settings, "OPENROUTER_SITE_URL", ""),
+                "X-Title": getattr(settings, "OPENROUTER_APP_NAME", ""),
             },
             json=body,
-            timeout=getattr(settings, "DEEPSEEK_TIMEOUT_S", 45),
+            timeout=getattr(settings, "LLM_TIMEOUT_S", 45),
         )
     except requests.Timeout:
         return None, None, "timeout"
@@ -376,7 +416,7 @@ def generate_feedback(feedback_id):
     started = time.monotonic()
     try:
         digest = build_digest(feedback.analysis)
-        texto, payload, erro = call_deepseek(digest)
+        texto, payload, erro = call_llm(digest)
         if erro:
             return _fail(feedback, erro, started)
 

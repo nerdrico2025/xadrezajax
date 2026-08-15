@@ -11,7 +11,7 @@ O que esta camada precisa garantir, e que nenhum teste da Fase 2 cobre:
     reivindicado de novo (decisão 4);
   - os DOIS PORTÕES (participação → plano), iguais aos da leitura da Fase 2.
 
-O provedor nunca é chamado de verdade: `call_deepseek` é substituído por um
+O provedor nunca é chamado de verdade: `call_llm` é substituído por um
 duplo. Um teste que dependesse da DeepSeek seria lento, caro e instável — e
 não testaria nada nosso.
 """
@@ -47,7 +47,7 @@ RESPOSTA_VALIDA = (
 )
 
 PAYLOAD_OK = {
-    "model": "deepseek-chat",
+    "model": "meta-llama/llama-3.3-70b-instruct:free",
     "choices": [{"message": {"content": RESPOSTA_VALIDA}}],
     "usage": {
         "prompt_tokens": 900,
@@ -256,10 +256,96 @@ class CustoDefensivoTests(APITestCase):
         self.assertEqual(usage["prompt_tokens"], 10)
         self.assertNotIn("completion_tokens", usage)
 
-    @override_settings(DEEPSEEK_PRICE_PER_MTOK={"input": 0.27, "output": 1.10})
+    @override_settings(LLM_PRICE_PER_MTOK={"input": 0.27, "output": 1.10})
     def test_custo_calculado_a_partir_do_preco_vigente(self):
         custo = llm._estimate_cost({"prompt_tokens": 1_000_000, "completion_tokens": 0})
         self.assertEqual(custo, Decimal("0.270000"))
+
+    @override_settings(LLM_PRICE_PER_MTOK={"input": 0.0, "output": 0.0})
+    def test_modelo_de_graca_grava_zero_e_nao_nulo(self):
+        """0.00 é INFORMAÇÃO ("rodou de graça"), não ausência dela.
+
+        É o caso do modelo `:free`, que é o default. Devolver None aqui faria
+        o modelo gratuito parecer "custo desconhecido" no relatório de gasto.
+        """
+        custo = llm._estimate_cost({"prompt_tokens": 1_000, "completion_tokens": 500})
+        self.assertEqual(custo, Decimal("0.000000"))
+        self.assertIsNotNone(custo)
+
+    @override_settings(LLM_PRICE_PER_MTOK={"input": 0.27, "output": 1.10})
+    def test_usage_ilegivel_grava_nulo_e_nao_zero(self):
+        """O oposto do teste acima: sem consumo legível não dá para afirmar
+        que custou zero — isso somaria errado no acumulado."""
+        self.assertIsNone(llm._estimate_cost({}))
+        self.assertIsNone(llm._estimate_cost(None))
+
+    @override_settings(LLM_PRICE_PER_MTOK={"input": None, "output": None})
+    def test_preco_desconhecido_grava_nulo(self):
+        """Preço não configurado ≠ preço zero."""
+        custo = llm._estimate_cost({"prompt_tokens": 1_000, "completion_tokens": 500})
+        self.assertIsNone(custo)
+
+
+@override_settings(
+    OPENROUTER_API_KEY="chave-de-teste",
+    OPENROUTER_BASE_URL="https://exemplo.test/api/v1",
+    OPENROUTER_MODEL="modelo/de-teste",
+    OPENROUTER_SITE_URL="https://ajaxclube.com.br",
+    OPENROUTER_APP_NAME="AJAX Chess",
+    LLM_TIMEOUT_S=7,
+)
+class TransporteTests(APITestCase):
+    """URL, modelo e timeout vêm das ENVS — nada de valor cravado no código.
+
+    Este bloco é o que impede a próxima troca de provedor de virar caça ao
+    literal esquecido no meio do cliente.
+    """
+
+    def _chamar(self):
+        with patch.object(llm.requests, "post") as post:
+            post.return_value.status_code = 200
+            post.return_value.json.return_value = PAYLOAD_OK
+            llm.call_llm("digest de teste")
+        return post.call_args
+
+    def test_url_e_montada_a_partir_da_base_configurada(self):
+        args, _kwargs = self._chamar()
+        self.assertEqual(args[0], "https://exemplo.test/api/v1/chat/completions")
+
+    def test_base_com_barra_no_fim_nao_duplica_a_barra(self):
+        with override_settings(OPENROUTER_BASE_URL="https://exemplo.test/api/v1/"):
+            args, _kwargs = self._chamar()
+        self.assertEqual(args[0], "https://exemplo.test/api/v1/chat/completions")
+
+    def test_modelo_vem_da_env(self):
+        _args, kwargs = self._chamar()
+        self.assertEqual(kwargs["json"]["model"], "modelo/de-teste")
+
+    def test_timeout_vem_da_env(self):
+        _args, kwargs = self._chamar()
+        self.assertEqual(kwargs["timeout"], 7)
+
+    def test_manda_os_headers_de_atribuicao_do_openrouter(self):
+        _args, kwargs = self._chamar()
+        headers = kwargs["headers"]
+        self.assertEqual(headers["Authorization"], "Bearer chave-de-teste")
+        self.assertEqual(headers["HTTP-Referer"], "https://ajaxclube.com.br")
+        self.assertEqual(headers["X-Title"], "AJAX Chess")
+
+    def test_pede_json_pelo_parametro_e_tambem_no_prompt(self):
+        """O `response_format` nem sempre é honrado pelos modelos Llama via
+        OpenRouter; o pedido no texto é o que segura o caso."""
+        _args, kwargs = self._chamar()
+        self.assertEqual(kwargs["json"]["response_format"], {"type": "json_object"})
+        system = kwargs["json"]["messages"][0]["content"]
+        self.assertIn("JSON", system)
+
+    @override_settings(OPENROUTER_API_KEY="")
+    def test_sem_chave_nem_chega_a_chamar(self):
+        with patch.object(llm.requests, "post") as post:
+            _texto, _payload, erro = llm.call_llm("digest")
+        self.assertEqual(erro, "sem chave de api")
+        post.assert_not_called()
 
 
 class ReivindicacaoTests(APITestCase):
@@ -336,10 +422,10 @@ class GerarFeedbackTests(APITestCase):
         _game, self.analysis = make_analysis(self.white, self.black)
         self.feedback, _ = claim_llm_feedback(self.analysis, user=self.white)
 
-    @override_settings(DEEPSEEK_PRICE_PER_MTOK={"input": 0.27, "output": 1.10})
+    @override_settings(LLM_PRICE_PER_MTOK={"input": 0.27, "output": 1.10})
     def test_sucesso_grava_secoes_e_custo(self):
         with patch.object(
-            llm, "call_deepseek", return_value=(RESPOSTA_VALIDA, PAYLOAD_OK, None)
+            llm, "call_llm", return_value=(RESPOSTA_VALIDA, PAYLOAD_OK, None)
         ):
             llm.generate_feedback(self.feedback.pk)
 
@@ -354,7 +440,7 @@ class GerarFeedbackTests(APITestCase):
         self.assertIsNotNone(self.feedback.completed_at)
 
     def test_erro_do_provedor_grava_erro_e_segue_reivindicavel(self):
-        with patch.object(llm, "call_deepseek", return_value=(None, None, "timeout")):
+        with patch.object(llm, "call_llm", return_value=(None, None, "timeout")):
             llm.generate_feedback(self.feedback.pk)
 
         self.feedback.refresh_from_db()
@@ -365,7 +451,7 @@ class GerarFeedbackTests(APITestCase):
         self.assertTrue(claimed)
 
     def test_json_torto_guarda_o_cru_para_diagnostico(self):
-        with patch.object(llm, "call_deepseek", return_value=("não é json", {}, None)):
+        with patch.object(llm, "call_llm", return_value=("não é json", {}, None)):
             llm.generate_feedback(self.feedback.pk)
 
         self.feedback.refresh_from_db()
@@ -374,7 +460,7 @@ class GerarFeedbackTests(APITestCase):
         self.assertEqual(self.feedback.raw_response, "não é json")
 
     def test_excecao_inesperada_nao_escapa_da_thread(self):
-        with patch.object(llm, "call_deepseek", side_effect=RuntimeError("boom")):
+        with patch.object(llm, "call_llm", side_effect=RuntimeError("boom")):
             llm.generate_feedback(self.feedback.pk)
 
         self.feedback.refresh_from_db()
@@ -384,7 +470,7 @@ class GerarFeedbackTests(APITestCase):
     def test_custo_quebrado_nao_derruba_feedback_valido(self):
         """A métrica é secundária; o comentário já pago é que importa."""
         with patch.object(
-            llm, "call_deepseek", return_value=(RESPOSTA_VALIDA, PAYLOAD_OK, None)
+            llm, "call_llm", return_value=(RESPOSTA_VALIDA, PAYLOAD_OK, None)
         ):
             with patch.object(llm, "_estimate_cost", side_effect=ValueError):
                 llm.generate_feedback(self.feedback.pk)
@@ -399,7 +485,7 @@ class GerarFeedbackTests(APITestCase):
         self.assertIsNone(self.feedback.leased_until)
 
 
-@override_settings(LLM_FEEDBACK_ENABLED=True, DEEPSEEK_API_KEY="chave-de-teste")
+@override_settings(LLM_FEEDBACK_ENABLED=True, OPENROUTER_API_KEY="chave-de-teste")
 class EndpointTests(APITestCase):
     """Os dois portões e o contrato HTTP."""
 
@@ -518,7 +604,7 @@ class EndpointTests(APITestCase):
         self.assertEqual(response.data["status"], "desligado")
         spawn.assert_not_called()
 
-    @override_settings(DEEPSEEK_API_KEY="")
+    @override_settings(OPENROUTER_API_KEY="")
     @patch("apps.users.views._spawn_llm_feedback")
     def test_sem_chave_nao_gera_mesmo_com_flag_ligada(self, spawn):
         self.client.force_authenticate(self.white)

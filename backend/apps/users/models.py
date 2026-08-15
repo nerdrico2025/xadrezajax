@@ -632,15 +632,15 @@ def llm_feedback_enabled():
     nossa, esta gasta DINHEIRO por chamada. São decisões de ligar diferentes,
     tomadas olhando coisas diferentes, e uma não pode arrastar a outra.
 
-    Chave vazia conta como desligada: sem `DEEPSEEK_API_KEY` a chamada falharia
-    de todo jeito, e falhar no portão é mais honesto do que gastar uma
-    tentativa para descobrir isso.
+    Chave vazia conta como desligada: sem `OPENROUTER_API_KEY` a chamada
+    falharia de todo jeito, e falhar no portão é mais honesto do que gastar
+    uma tentativa para descobrir isso.
     """
     from django.conf import settings
 
     return bool(
         getattr(settings, "LLM_FEEDBACK_ENABLED", False)
-        and getattr(settings, "DEEPSEEK_API_KEY", "")
+        and getattr(settings, "OPENROUTER_API_KEY", "")
     )
 
 
