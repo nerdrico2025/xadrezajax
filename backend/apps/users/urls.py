@@ -14,6 +14,8 @@ from .views import (
     GameHistoryView,
     GameResultView,
     GoogleLoginView,
+    AchievementListView,
+    AchievementSeenView,
     GameLLMFeedbackView,
     InternalAnalysisNextView,
     InternalAnalysisResultView,
@@ -77,6 +79,18 @@ urlpatterns = [
     ),
     # Comentário humanizado (Fase 3), sob demanda. Rota FILHA da análise
     # porque é derivada dela: sem análise pronta não há o que comentar.
+    # Conquistas — sistema IRMÃO do Modo Campanha (`campaign/`), não uma
+    # extensão dele: rotas separadas, modelos separados.
+    path(
+        "achievements/",
+        AchievementListView.as_view(),
+        name="achievement-list",
+    ),
+    path(
+        "achievements/seen/",
+        AchievementSeenView.as_view(),
+        name="achievement-seen",
+    ),
     path(
         "games/<uuid:public_id>/analysis/feedback/",
         GameLLMFeedbackView.as_view(),

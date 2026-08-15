@@ -501,6 +501,16 @@ class PuzzleProgressView(APIView):
             progress.solved_at = timezone.now()
 
         progress.save()
+
+        # Conquistas de problema. Só quando resolveu — o streak conta dias com
+        # resolução, e tentativa errada não muda nada nele. Import local para
+        # não criar ciclo entre os apps `puzzles` e `users` no carregamento.
+        if solved:
+            from apps.users.achievements import check_achievements
+            from apps.users.models import AchievementDefinition
+
+            check_achievements(request.user, AchievementDefinition.TRIGGER_PUZZLE)
+
         return Response(self._state(progress, puzzle, is_daily, today))
 
     def _state(self, progress, puzzle, is_daily, today):

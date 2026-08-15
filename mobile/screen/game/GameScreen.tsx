@@ -20,6 +20,10 @@ import { getBestMove } from "@/services/game";
 import { parseUciMove } from "@/utils/chessSpecialMoves";
 import { reportAiResult } from "@/services/profile";
 import { getCampaignProgress } from "@/services/campaign";
+import {
+  markAchievementsSeen,
+  type NewAchievement,
+} from "@/services/achievements";
 import { logEvent } from "@/services/analytics";
 import { saveGame, clearSavedGame, type SavedAiGame } from "@/utils/savedGame";
 import { useChessSound } from "@/hooks/useChessSound";
@@ -185,6 +189,7 @@ export default function GameScreen({
   }, []);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
   const [campaignUnlock, setCampaignUnlock] = useState<CampaignUnlockInfo | null>(null);
+  const [newAchievements, setNewAchievements] = useState<NewAchievement[]>([]);
   // Identificador da partida no servidor, devolvido pelo registro do
   // resultado. É o que a tela de análise usa para pedir o relatório.
   const [gamePublicId, setGamePublicId] = useState<string | null>(null);
@@ -277,6 +282,19 @@ export default function GameScreen({
           // servidor não montou a partida (backend anterior à Fase 1) — e aí
           // o modal simplesmente não oferece análise.
           setGamePublicId(response?.game_public_id ?? null);
+
+          // Conquistas desta partida, prontas do servidor. Marcamos como
+          // vistas na hora: a comemoração acontece AQUI, e o Perfil não deve
+          // repetir a festa. Falhar em marcar não impede a comemoração — o
+          // pior caso é a conquista aparecer como nova no Perfil também.
+          const novas = response?.conquistas_novas ?? [];
+          if (novas.length > 0) {
+            setNewAchievements(novas);
+            markAchievementsSeen(
+              authToken,
+              novas.map((a) => a.code)
+            ).catch(() => {});
+          }
 
           // Modo Campanha: só vitória progride. Busca o estado pós-partida
           // para detectar se ESTA vitória cruzou o limiar de desbloqueio —
@@ -721,6 +739,7 @@ export default function GameScreen({
         onNewGame={handleNewGame}
         onLeave={() => onLeave?.()}
         campaignUnlock={campaignUnlock}
+        newAchievements={newAchievements}
         diagnosticPgn={diagnosticPgn}
         gamePublicId={gamePublicId}
         playerColor={playerColor}

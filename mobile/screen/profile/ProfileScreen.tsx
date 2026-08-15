@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +17,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { useProfile } from "@/hooks/useProfile";
 import { useCampaignProgress } from "@/hooks/useCampaignProgress";
+import {
+  getAchievements,
+  markAchievementsSeen,
+  type Achievement,
+} from "@/services/achievements";
 import { useAuth } from "@/context/AuthContext";
 import { Colors } from "@/constants/theme";
 import { avatarUrl, type StatsBlock } from "@/services/profile";
@@ -269,6 +274,11 @@ export default function ProfileScreen({ onUpgrade }: Props = {}) {
         colors={colors}
       />
 
+      {/* Conquistas — bloco IRMÃO dos selos acima, não uma extensão deles.
+          Dois blocos lado a lado deixam claro que são sistemas distintos: o
+          de cima é a progressão pelos níveis da IA; este são marcos de uso. */}
+      <AchievementsBlock colors={colors} />
+
       {/* Bio */}
       <View style={styles.bioSection}>
         <Text style={[styles.sectionLabel, { color: colors.secondary }]}>Bio</Text>
@@ -368,6 +378,105 @@ function StatsBlockView({
     </View>
   );
 }
+
+function AchievementsBlock({ colors }: { colors: Record<string, string> }) {
+  const { token } = useAuth();
+  const [items, setItems] = useState<Achievement[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!token) return;
+    setFailed(false);
+    try {
+      const data = await getAchievements(token);
+      setItems(data);
+      // Chegou aqui = o usuário ESTÁ vendo as conquistas. Marcar como vistas
+      // é o que impede a mesma conquista de ser comemorada de novo depois.
+      // O fim de partida já marca as dele; isto cobre o que veio por outro
+      // caminho (puzzle) ou com o app fechado.
+      if (data.some((a) => a.nova)) {
+        markAchievementsSeen(token).catch(() => {});
+      }
+    } catch {
+      setFailed(true);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (failed) {
+    return (
+      <View style={styles.statsBlock}>
+        <Text style={[styles.blockTitle, { color: colors.accent }]}>Conquistas</Text>
+        <Pressable onPress={load} accessibilityRole="button">
+          <Text style={[styles.campaignBadgesRetry, { color: colors.accentOnLight }]}>
+            Não foi possível carregar. Tentar novamente
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // Antes da primeira resposta não há o que desenhar, e um esqueleto aqui só
+  // piscaria — o bloco é secundário na tela.
+  if (!items || items.length === 0) return null;
+
+  return (
+    <View style={styles.statsBlock}>
+      <Text style={[styles.blockTitle, { color: colors.accent }]}>Conquistas</Text>
+      <View style={styles.campaignBadgesRow}>
+        {items.map((a) => {
+          const conquered = a.conquistada;
+          const progresso = a.progresso;
+          return (
+            <Pressable
+              key={a.code}
+              onPress={() =>
+                Alert.alert(
+                  a.nome,
+                  conquered
+                    ? `Conquistada!\n\n${a.descricao}`
+                    : progresso
+                      ? `${a.descricao}\n\n${progresso.atual}/${progresso.alvo}`
+                      : a.descricao
+                )
+              }
+              style={[
+                styles.campaignBadge,
+                {
+                  backgroundColor: conquered ? colors.accentMuted : "transparent",
+                  borderColor: conquered ? colors.accent : colors.divider,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`Conquista ${a.nome}, ${
+                conquered ? "conquistada" : "não conquistada"
+              }`}
+            >
+              <Ionicons
+                name={(a.icone || "trophy-outline") as any}
+                size={22}
+                color={conquered ? colors.accentOnLight : colors.secondary}
+              />
+              <Text
+                style={[
+                  styles.campaignBadgeLabel,
+                  { color: conquered ? colors.accentOnLight : colors.secondary },
+                ]}
+                numberOfLines={2}
+              >
+                {a.nome}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 
 function CampaignBadgesRow({
   progress,

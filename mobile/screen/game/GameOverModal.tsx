@@ -16,6 +16,7 @@ import { QA_SHOW_AI_DIAGNOSTIC_PGN } from "@/constants/qaFlags";
 import Confetti from "@/components/Confetti";
 import GameAnalysisSection from "./GameAnalysisSection";
 import GameFeedbackSection from "./GameFeedbackSection";
+import type { NewAchievement } from "@/services/achievements";
 
 /** Modo Campanha: preenchido quando a vitória atual cruzou o limiar de 3
  * vitórias no nível jogado — dominatedLevel ganhou o selo; nextLevel é o
@@ -142,6 +143,16 @@ interface GameOverModalProps {
   playerColor?: "w" | "b";
   /** Leva à tela de assinatura, para o convite da análise ter para onde ir. */
   onUpgrade?: () => void;
+  /**
+   * Conquistas desbloqueadas POR ESTA partida (sistema irmão do Campanha).
+   *
+   * PRIORIDADE DELIBERADA: quando um desbloqueio de campanha cai na mesma
+   * tela, ele é a comemoração principal e estas entram como uma LINHA
+   * DISCRETA abaixo — a vitória que dá o selo do nível é justamente a que
+   * pode dar "3 vitórias seguidas", e duas faixas grandes empilhadas viram
+   * ruído. Não há segundo confete: o Confetti é um só, ligado à vitória.
+   */
+  newAchievements?: NewAchievement[];
 }
 
 export default function GameOverModal({
@@ -155,6 +166,7 @@ export default function GameOverModal({
   gamePublicId,
   playerColor = "w",
   onUpgrade,
+  newAchievements,
 }: GameOverModalProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
@@ -280,6 +292,29 @@ export default function GameOverModal({
               </View>
             )}
 
+            {/* Conquistas desta partida. Sempre ABAIXO da faixa da campanha e
+                sempre discretas (linha, não faixa): quando as duas coincidem,
+                a campanha é a comemoração principal. Sem confete próprio. */}
+            {newAchievements && newAchievements.length > 0 && (
+              <View style={styles.achievementList}>
+                {newAchievements.map((a) => (
+                  <View key={a.code} style={styles.achievementRow}>
+                    <Ionicons
+                      name={(a.icone || "trophy-outline") as any}
+                      size={16}
+                      color={colors.accentOnLight}
+                    />
+                    <Text
+                      style={[styles.achievementText, { color: colors.accentOnLight }]}
+                      numberOfLines={2}
+                    >
+                      Conquista: {a.nome}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
             {/* Análise pós-jogo (Fase 2). UMA condição aqui: a partida existe no
                 servidor. Sem `gamePublicId` não há endereço a consultar, e a
                 seção não teria o que dizer nem como dizer.
@@ -402,6 +437,10 @@ export default function GameOverModal({
 }
 
 const styles = StyleSheet.create({
+  // Linha, não cartão: a comemoração grande desta tela é a da campanha.
+  achievementList: { width: "100%", gap: 4, marginTop: 2 },
+  achievementRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  achievementText: { fontSize: 12, fontWeight: "600", flexShrink: 1 },
   // ⚠️ TEMPORÁRIO — remover junto com o bloco de diagnóstico.
   diagnosticToggle: {
     flexDirection: "row",
