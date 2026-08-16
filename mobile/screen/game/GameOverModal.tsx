@@ -258,6 +258,9 @@ export default function GameOverModal({
               <View
                 style={[
                   styles.campaignBanner,
+                  // O -16 do estilo compensa a linha de rating, que só existe
+                  // no modo ranqueado. Vs IA ele encostaria a faixa no título.
+                  mode === "ai" && styles.campaignBannerAi,
                   { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
                 ]}
               >
@@ -353,11 +356,12 @@ export default function GameOverModal({
               />
             )}
 
-            {/* Comentário humanizado (Fase 3), logo abaixo da análise e sob a
-                MESMA condição: sem `gamePublicId` não há endereço a consultar.
-                Seção independente — a Fase 2 continua exatamente como estava, e
-                esta some sozinha quando a feature está desligada no servidor. */}
-            {gamePublicId && (
+            {/* Comentário humanizado (Fase 3), sob a MESMA condição da análise
+                acima — inclusive o modo. Vs IA ele também sai: o comentário é
+                DERIVADO da análise, e sem ela no modal sobraria só o convite a
+                assinar (o paywall da seção), que é exatamente o ruído que este
+                enxugamento veio tirar. */}
+            {mode !== "ai" && gamePublicId && (
               <GameFeedbackSection
                 gamePublicId={gamePublicId}
                 playerColor={playerColor}
@@ -405,7 +409,7 @@ export default function GameOverModal({
 }
 
 const styles = StyleSheet.create({
-  achievementList: { width: "100%", gap: 8, marginTop: 4 },
+  achievementList: { width: "100%", gap: 8, marginTop: 4, marginBottom: 16 },
   // Cartão, não linha: com o modal enxuto (vs IA), a conquista passa a ser
   // um dos poucos elementos da tela e ganha peso à altura.
   achievementCard: {
@@ -521,6 +525,7 @@ const styles = StyleSheet.create({
     marginTop: -16,
     marginBottom: 20,
   },
+  campaignBannerAi: { marginTop: 4 },
   campaignBannerText: { flex: 1 },
   campaignBannerTitle: { fontSize: 14, fontWeight: "800" },
   campaignBannerSub: { fontSize: 12, marginTop: 2 },
