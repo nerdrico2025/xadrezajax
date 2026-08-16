@@ -85,6 +85,7 @@ async function render(
         onStart={props.onStart ?? jest.fn()}
         onBack={props.onBack ?? jest.fn()}
         initial={props.initial ?? null}
+        lockedLevel={(props as any).lockedLevel ?? null}
       />
     );
   });
@@ -368,5 +369,56 @@ describe("AiGameSetupScreen — destravamento de QA (teste da calibragem em devi
     const tree = await render();
     // Progresso real continua sendo exibido como veio do backend.
     expect(hasText(tree.root, "1/3 vitórias")).toBe(true);
+  });
+});
+
+
+describe("AiGameSetupScreen — nível travado pelo Mapa da Campanha", () => {
+  it("pula a escolha de nível e abre direto no controle de tempo", async () => {
+    const tree = await render({ lockedLevel: "hard" } as any);
+
+    // O passo de dificuldade não aparece: quem escolheu foi o mapa.
+    expect(hasText(tree.root, "1. Dificuldade")).toBe(false);
+    // Abre já no passo de tempo.
+    expect(hasText(tree.root, "2. Cor e tempo")).toBe(true);
+    expect(hasText(tree.root, "Relâmpago")).toBe(true);
+  });
+
+  it("mostra o nível como texto fixo, não editável", async () => {
+    const tree = await render({ lockedLevel: "hard" } as any);
+    expect(hasText(tree.root, "Nível Difícil · ~1700")).toBe(true);
+    // Nenhum card de nível clicável — a escolha não é reaberta aqui.
+    const cards = tree.root.findAll(
+      (n) =>
+        typeof n.props?.accessibilityLabel === "string" &&
+        n.props.accessibilityLabel.includes("Iniciante") &&
+        typeof n.props?.onPress === "function"
+    );
+    expect(cards).toHaveLength(0);
+  });
+
+  it("inicia a partida no nível travado", async () => {
+    const onStart = jest.fn();
+    const tree = await render({ lockedLevel: "master", onStart } as any);
+
+    await pressLabel(tree.root, "Iniciar partida");
+
+    expect(onStart).toHaveBeenCalledWith(
+      expect.objectContaining({ difficulty: "master" })
+    );
+  });
+
+  it("o voltar sai da tela (não há passo 1 para onde voltar)", async () => {
+    const onBack = jest.fn();
+    const tree = await render({ lockedLevel: "easy", onBack } as any);
+
+    await pressLabel(tree.root, "Voltar");
+
+    expect(onBack).toHaveBeenCalled();
+  });
+
+  it("sem nível travado, o wizard continua começando na escolha de nível", async () => {
+    const tree = await render();
+    expect(hasText(tree.root, "1. Dificuldade")).toBe(true);
   });
 });

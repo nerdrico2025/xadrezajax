@@ -123,17 +123,21 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
         Modos de jogo
       </Text>
 
-      {/* Card: vs IA — CTA primária da Home (Dourado AJAX, texto preto — R1) */}
+      {/* Card: Modo Campanha — CTA primária da Home (Dourado AJAX, texto preto
+          — R1). Leva ao MAPA da campanha, não mais direto ao wizard: escolher
+          o nível é o que o mapa faz, e com contexto de progresso. */}
       <Pressable
         style={[styles.card, styles.cardElevated, { backgroundColor: colors.accent }]}
         onPress={onPlayAI}
         android_ripple={{ color: "rgba(13,13,13,0.12)" }}
       >
         <View style={styles.cardLeft}>
-          <Text style={[styles.cardPieceWhite, { color: colors.accentText }]}>♖</Text>
+          {/* Ícone de trilha no lugar da torre: o destino agora é um mapa de
+              progressão, não uma lista de dificuldades. */}
+          <Ionicons name="map" size={26} color={colors.accentText} style={styles.cardIcon} />
           <View>
-            <Text style={[styles.cardTitleWhite, { color: colors.accentText }]}>Jogar vs IA</Text>
-            <Text style={[styles.cardSubWhite, { color: colors.accentText, opacity: 0.7 }]}>Escolha a dificuldade</Text>
+            <Text style={[styles.cardTitleWhite, { color: colors.accentText }]}>Modo Campanha</Text>
+            <Text style={[styles.cardSubWhite, { color: colors.accentText, opacity: 0.7 }]}>Avance pelos 5 níveis</Text>
           </View>
         </View>
         <Ionicons name="chevron-forward" size={20} color="rgba(13,13,13,0.6)" />

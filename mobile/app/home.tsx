@@ -31,6 +31,7 @@ import { humanTimeLabel } from "@/constants/onlineGame";
 import HomeScreen from "@/screen/home/HomeScreen";
 import GameScreen from "@/screen/game/GameScreen";
 import AiGameSetupScreen from "@/screen/game/AiGameSetupScreen";
+import CampaignMapScreen from "@/screen/game/CampaignMapScreen";
 import PuzzleScreen from "@/screen/puzzles/PuzzleScreen";
 import OnlineGameScreen from "@/screen/game/OnlineGameScreen";
 import ProfileScreen from "@/screen/profile/ProfileScreen";
@@ -42,7 +43,7 @@ import MenuBottomSheet from "@/presentation/components/MenuBottomSheet";
 import { gameMenu, profileMenu } from "@/presentation/config/menuConfigs";
 
 type ActiveMenu = "game" | "profile" | null;
-type ActiveScreen = "home" | "ai_setup" | "play" | "puzzles" | "puzzle_training" | "private_room" | "profile" | "settings" | "leaderboard" | "subscription";
+type ActiveScreen = "home" | "campaign_map" | "ai_setup" | "play" | "puzzles" | "puzzle_training" | "private_room" | "profile" | "settings" | "leaderboard" | "subscription";
 
 export default function Home() {
   const { theme } = useTheme();
@@ -52,6 +53,9 @@ export default function Home() {
 
   const [activeTab, setActiveTab] = useState<BottomTab>("home");
   const [activeScreen, setActiveScreen] = useState<ActiveScreen>("home");
+  // Nível escolhido no Mapa da Campanha. Presente = o wizard abre travado
+  // nele e pula a escolha de dificuldade; null = entrada direta pelo wizard.
+  const [lockedLevel, setLockedLevel] = useState<Difficulty | null>(null);
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
   const [quickSearching, setQuickSearching] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
@@ -234,10 +238,21 @@ export default function Home() {
     if (saved) {
       setPendingSavedGame(saved);
       setShowContinueModal(true);
-    } else {
-      await openAiSetup();
+      return;
     }
-  }, [openAiSetup]);
+    // O ponto de entrada agora é o MAPA, não o wizard: escolher o nível é
+    // justamente o que o mapa faz, e melhor do que uma lista.
+    setLockedLevel(null);
+    setActiveScreen("campaign_map");
+  }, []);
+
+  /** Toque num nó do mapa: abre o wizard já travado naquele nível. */
+  const handlePlayCampaignLevel = useCallback(async (level: Difficulty) => {
+    const prefs = await loadAiSetupPrefs();
+    setAiSetupInitial(prefs);
+    setLockedLevel(level);
+    setActiveScreen("ai_setup");
+  }, []);
 
   const handleCancelQuickSearch = useCallback(() => {
     leaveQueue();
@@ -398,11 +413,22 @@ export default function Home() {
             onPlayPuzzles={() => { setActiveScreen("puzzles"); }}
             onTraining={() => { setActiveScreen("puzzle_training"); }}
           />
+        ) : activeScreen === "campaign_map" ? (
+          <CampaignMapScreen
+            onPlayLevel={handlePlayCampaignLevel}
+            onBack={() => { setActiveScreen("home"); setActiveTab("home"); }}
+          />
         ) : activeScreen === "ai_setup" ? (
           <AiGameSetupScreen
             initial={aiSetupInitial}
+            lockedLevel={lockedLevel}
             onStart={handleStartConfiguredGame}
-            onBack={() => { setActiveScreen("home"); setActiveTab("home"); }}
+            onBack={() => {
+              // Veio do mapa? volta para o mapa. Entrada direta volta à Home.
+              if (lockedLevel) { setActiveScreen("campaign_map"); return; }
+              setActiveScreen("home");
+              setActiveTab("home");
+            }}
           />
         ) : activeScreen === "play" ? (
           <View style={styles.gameContainer}>

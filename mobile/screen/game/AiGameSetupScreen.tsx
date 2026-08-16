@@ -48,6 +48,15 @@ interface Props {
   initial?: AiSetupPrefs | null;
   onStart: (config: StartConfig) => void;
   onBack: () => void;
+  /**
+   * Nível TRAVADO, vindo do Mapa da Campanha.
+   *
+   * Quando presente, o passo de escolha de dificuldade é PULADO: o mapa já é
+   * a tela de escolher nível, e repetir a escolha aqui seria perguntar duas
+   * vezes a mesma coisa. O nível aparece como texto fixo no topo, não
+   * editável — quem quiser trocar volta ao mapa.
+   */
+  lockedLevel?: Difficulty | null;
 }
 
 const COLOR_OPTIONS: { id: ColorChoice; label: string; sub: string; icon: string }[] = [
@@ -76,14 +85,20 @@ const AI_TIME_CONTROLS_BY_CATEGORY = AI_TIME_CONTROLS.reduce(
 const STEP_TITLES = ["Dificuldade", "Cor e tempo"];
 const LAST_STEP = 2;
 
-export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
+export default function AiGameSetupScreen({
+  initial,
+  onStart,
+  onBack,
+  lockedLevel,
+}: Props) {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
 
-  const [step, setStep] = useState<1 | 2>(1);
+  // Com nível travado o wizard abre direto no controle de tempo.
+  const [step, setStep] = useState<1 | 2>(lockedLevel ? 2 : 1);
   const [difficulty, setDifficulty] = useState<Difficulty>(
-    initial?.difficulty ?? "medium"
+    lockedLevel ?? initial?.difficulty ?? "medium"
   );
   const [color, setColor] = useState<ColorChoice>(initial?.color ?? "w");
   // Config salva de versões anteriores pode apontar para um id que não existe
@@ -109,8 +124,11 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
   useEffect(() => {
     if (!campaign || didResolveInitialDifficulty.current) return;
     didResolveInitialDifficulty.current = true;
+    // Nível travado vem do mapa e é decisão já tomada — a pré-seleção
+    // automática não pode passar por cima dela.
+    if (lockedLevel) return;
     setDifficulty((current) => resolvePreselectedLevel(current, campaign));
-  }, [campaign]);
+  }, [campaign, lockedLevel]);
 
   const level = AI_LEVEL_BY_ID[difficulty];
   const time = AI_TIME_BY_ID[timeId];
@@ -123,14 +141,15 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
   );
 
   const goBack = () => {
-    if (step > 1) setStep((s) => (s - 1) as 1 | 2);
+    // Com nível travado não há passo 1 para voltar: o "anterior" é o mapa.
+    if (step > 1 && !lockedLevel) setStep((s) => (s - 1) as 1 | 2);
     else onBack();
   };
 
   // Enquanto o progresso da campanha não chegou (ou falhou), não dá pra
   // confiar no cadeado exibido — trava o avanço do passo 1 até resolver.
   const campaignBlocking =
-    step === 1 && (campaignLoading || (!!campaignError && !campaign));
+    !lockedLevel && step === 1 && (campaignLoading || (!!campaignError && !campaign));
 
   const handlePrimary = () => {
     if (campaignBlocking) return;
@@ -174,11 +193,29 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
         <Pressable onPress={goBack} hitSlop={12} style={styles.backBtn} accessibilityLabel="Voltar">
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </Pressable>
-        <Text style={[styles.title, { color: colors.text }]}>Jogar contra a IA</Text>
+        <Text style={[styles.title, { color: colors.text }]}>
+          {lockedLevel ? "Configurar partida" : "Jogar contra a IA"}
+        </Text>
         <View style={{ width: 42 }} />
       </View>
 
-      <View style={styles.stepRow}>
+      {/* Nível travado pelo mapa: texto fixo no lugar do passo de escolha. O
+          indicador de 2 passos some junto — sobrou um passo só. */}
+      {lockedLevel ? (
+        <View
+          style={[
+            styles.lockedLevelBar,
+            { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
+          ]}
+        >
+          <Ionicons name={level.icon as any} size={18} color={colors.accentOnLight} />
+          <Text style={[styles.lockedLevelText, { color: colors.accentOnLight }]}>
+            Nível {level.label} · ~{level.elo}
+          </Text>
+        </View>
+      ) : null}
+
+      <View style={[styles.stepRow, lockedLevel && styles.hidden]}>
         {[1, 2].map((s) => (
           <View key={s} style={styles.stepItem}>
             <View
@@ -606,6 +643,19 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   summary: { fontSize: 13, textAlign: "center", fontWeight: "600" },
+  hidden: { display: "none" },
+  lockedLevelBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  lockedLevelText: { fontSize: 14, fontWeight: "700", flexShrink: 1 },
   cta: {
     borderRadius: 14,
     paddingVertical: 16,
