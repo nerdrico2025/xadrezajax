@@ -367,7 +367,10 @@ describe("desistência vs IA (fluxo existente preservado)", () => {
     pressText(tree.root, "Abandonar");
 
     expect(hasText(tree.root, "Você perdeu")).toBe(true);
-    expect(hasText(tree.root, "Abandono")).toBe(true);
+    // O motivo ("Abandono") não aparece mais no modal vs IA, que virou
+    // comemoração — mas continua sendo enviado ao servidor, conferido na
+    // chamada de reportAiResult logo abaixo.
+    expect(hasText(tree.root, "Abandono")).toBe(false);
     expect(reportAiResult).toHaveBeenCalledWith(
       "test-token",
       "loss",
@@ -402,7 +405,7 @@ describe("empate por acordo vs IA (aceito imediatamente)", () => {
     pressText(tree.root, "Empatar");
 
     expect(hasText(tree.root, "Empate!")).toBe(true);
-    expect(hasText(tree.root, "Acordo mútuo")).toBe(true);
+    expect(hasText(tree.root, "Acordo mútuo")).toBe(false);
     expect(reportAiResult).toHaveBeenCalledWith(
       "test-token",
       "draw",
@@ -545,12 +548,9 @@ describe("Modo Campanha — feedback de desbloqueio na vitória vs IA (PR 2)", (
   });
 });
 
-// ⚠️ TEMPORÁRIO — instrumentação de diagnóstico da calibragem da IA.
-// TODO(remover): junto com utils/aiGamePgn.ts.
 // ── Registro definitivo da partida ───────────────────────────────────────
-// Diferente da instrumentação de PGN abaixo (temporária, restrita a
-// Iniciante/Fácil): a captura de lances é PERMANENTE e vale em TODOS os
-// níveis — é o que o servidor guarda como a partida.
+// A captura de lances é PERMANENTE e vale em TODOS os níveis — é o que o
+// servidor guarda como a partida.
 
 describe("captura da partida enviada ao servidor (vs IA)", () => {
   function getBoard(tree: renderer.ReactTestRenderer) {
@@ -598,62 +598,6 @@ describe("captura da partida enviada ao servidor (vs IA)", () => {
     const tree = render("master");
     resign(tree);
     expect(lastRecord().moves).toEqual([]);
-  });
-});
-
-describe("instrumentação de PGN (diagnóstico temporário da calibragem)", () => {
-  function hasTextContaining(root: ReactTestInstance, part: string) {
-    return (
-      root.findAll((n) => {
-        const c = n.props?.children;
-        const str = typeof c === "string" ? c : Array.isArray(c) ? c.join("") : "";
-        return str.includes(part);
-      }).length > 0
-    );
-  }
-
-  /** O PGN que a tela entrega ao modal. Quem decide EXIBIR é o modal, atrás da
-   *  flag de QA (ver GameOverModal.test.tsx) — aqui verificamos só a captura. */
-  function diagnosticPgn(root: ReactTestInstance): string | null | undefined {
-    const modal = root.findAll(
-      (n) =>
-        typeof n.type !== "string" &&
-        (n.type as { name?: string })?.name === "GameOverModal"
-    );
-    expect(modal).toHaveLength(1);
-    return modal[0].props.diagnosticPgn;
-  }
-
-  it("captura o PGN no fim de partida no Iniciante", () => {
-    const tree = render("beginner");
-    resign(tree);
-    const pgn = diagnosticPgn(tree.root);
-    expect(pgn).toContain('[Difficulty "beginner"]');
-    // Partida retomada de um save: a análise precisa saber que está truncada.
-    expect(pgn).toContain("[Incomplete");
-  });
-
-  it("captura o PGN no Fácil", () => {
-    const tree = render("easy");
-    resign(tree);
-    expect(diagnosticPgn(tree.root)).toContain('[Difficulty "easy"]');
-  });
-
-  it("NÃO instrumenta os níveis fora da investigação", () => {
-    // A instrumentação não pode vazar para o resto do produto.
-    for (const level of ["medium", "hard", "master"] as const) {
-      const tree = render(level);
-      resign(tree);
-      expect(diagnosticPgn(tree.root)).toBeNull();
-    }
-  });
-
-  it("o PGN capturado NÃO é renderizado (flag de QA desligada = produção)", () => {
-    const tree = render("beginner");
-    resign(tree);
-    expect(diagnosticPgn(tree.root)).toContain("[Event");
-    expect(hasTextContaining(tree.root, "Diagnóstico da IA")).toBe(false);
-    expect(hasTextContaining(tree.root, "[Difficulty")).toBe(false);
   });
 });
 

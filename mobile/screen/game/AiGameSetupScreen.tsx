@@ -263,8 +263,12 @@ export default function AiGameSetupScreen({ initial, onStart, onBack }: Props) {
                 style={[
                   styles.optionCard,
                   {
-                    borderColor: selected ? colors.accent : colors.divider,
-                    backgroundColor: selected ? colors.accent + "18" : colors.card,
+                    // Nível SELECIONADO em azul petróleo, não em dourado: o
+                    // dourado já está em uso DENTRO deste mesmo cartão (a
+                    // barra de progresso da campanha), e dourado-sobre-dourado
+                    // apagaria a distinção entre "onde estou" e "quanto falta".
+                    borderColor: selected ? colors.primary : colors.divider,
+                    backgroundColor: selected ? colors.primary + "1A" : colors.card,
                     borderWidth: selected ? 2 : 1,
                     opacity: locked ? 0.5 : 1,
                   },
