@@ -18,29 +18,6 @@ jest.mock("../GameAnalysisSection", () => {
   };
 });
 
-// Padrão dos testes: flag de QA DESLIGADA — é o que produção vê.
-jest.mock("@/constants/qaFlags", () => ({
-  get QA_SHOW_AI_DIAGNOSTIC_PGN() {
-    return mockQaPgn;
-  },
-  QA_UNLOCK_ALL_AI_LEVELS: false,
-}));
-let mockQaPgn = false;
-
-const PGN_DE_EXEMPLO = [
-  `[Event "Diagnóstico de calibragem da IA"]`,
-  `[Date "2026.07.24"]`,
-  `[White "Humano"]`,
-  `[Black "IA (beginner)"]`,
-  `[Result "1-0"]`,
-  ``,
-  `1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0`,
-].join("\n");
-
-beforeEach(() => {
-  mockQaPgn = false;
-});
-
 function hasText(root: ReactTestInstance, text: string) {
   return (
     root.findAll((n) => {
@@ -64,7 +41,6 @@ function render(props: Partial<React.ComponentProps<typeof GameOverModal>> = {})
         onNewGame={props.onNewGame ?? jest.fn()}
         onLeave={props.onLeave ?? jest.fn()}
         campaignUnlock={props.campaignUnlock}
-        diagnosticPgn={props.diagnosticPgn}
         gamePublicId={props.gamePublicId}
         onUpgrade={props.onUpgrade}
         playerColor={props.playerColor}
@@ -151,19 +127,26 @@ describe("GameOverModal — Modo Campanha (feedback de desbloqueio)", () => {
 // dizia "IA venceu!" e "Partida contra a IA — seu rating não mudou" também
 // numa partida humana ranqueada.
 describe("GameOverModal — rótulo pelo modo REAL da partida", () => {
-  it("vs IA: diz que não vale rating e não mostra delta", () => {
+  it("vs IA: modal enxuto, sem nota de rating e sem delta", () => {
+    // A linha "não vale rating" saiu: é o estado PERMANENTE do modo vs IA, e
+    // repeti-la a cada partida ocupava espaço sem informar nada novo.
     const tree = render({ mode: "ai" });
     const texto = allText(tree.root);
 
-    expect(texto).toContain("Partida contra a IA — não vale rating.");
+    expect(texto).not.toContain("não vale rating");
     expect(texto).not.toContain("Partida ranqueada");
     expect(texto).not.toContain("atualizando rating");
   });
 
+  it("vs IA: o motivo do fim também saiu do modal", () => {
+    const tree = render({ mode: "ai", result: { outcome: "win", reason: "checkmate" } });
+    expect(allText(tree.root)).not.toContain("Xeque-mate");
+    // O que importa continua lá.
+    expect(hasText(tree.root, "Você venceu!")).toBe(true);
+  });
+
   it("derrota fala do jogador nos DOIS modos", () => {
-    // O título é o mesmo de propósito: a derrota é a mesma para quem perdeu,
-    // e o modo já aparece logo abaixo, na nota de rating (que é o que este
-    // describe cobre).
+    // O título é o mesmo de propósito: a derrota é a mesma para quem perdeu.
     const perdaIA = render({ mode: "ai", result: { outcome: "loss", reason: "resign" } });
     expect(hasText(perdaIA.root, "Você perdeu")).toBe(true);
 
@@ -235,66 +218,6 @@ describe("GameOverModal — delta de rating (vem do servidor, nunca calculado aq
 
 // O bloco de PGN é instrumentação de QA (utils/aiGamePgn.ts) e estava visível em
 // TODOS os builds — tags entre colchetes e lista de lances no modal de vitória.
-describe("GameOverModal — bloco de diagnóstico da IA (só em preview/QA)", () => {
-  it("com a flag desligada, o PGN não aparece nem que a prop venha preenchida", () => {
-    const tree = render({ diagnosticPgn: PGN_DE_EXEMPLO });
-    const texto = allText(tree.root);
-    expect(texto).not.toContain("[Event");
-    expect(texto).not.toContain("1. e4");
-    expect(texto).not.toContain("Diagnóstico da IA");
-  });
-
-  it("com a flag ligada, aparece só um link discreto — o PGN começa FECHADO", () => {
-    mockQaPgn = true;
-    const tree = render({ diagnosticPgn: PGN_DE_EXEMPLO });
-    const texto = allText(tree.root);
-
-    expect(texto).toContain("ver PGN (debug)");
-    // O bloco grande de tags e lances não ocupa mais o modal de vitória.
-    expect(texto).not.toContain("[Event");
-    expect(texto).not.toContain("1. e4");
-  });
-
-  it("tocando no link, o PGN abre selecionável para copiar", () => {
-    mockQaPgn = true;
-    const tree = render({ diagnosticPgn: PGN_DE_EXEMPLO });
-
-    act(() => pressableWithText(tree.root, "ver PGN (debug)")!.props.onPress());
-
-    const texto = allText(tree.root);
-    expect(texto).toContain("[Event");
-    expect(texto).toContain("Diagnóstico da IA · toque e segure para copiar");
-    const pgn = tree.root.findAll(
-      (n) => typeof n.type === "string" && n.props?.selectable === true
-    );
-    expect(pgn).toHaveLength(1);
-  });
-
-  it("o link fecha de volta", () => {
-    mockQaPgn = true;
-    const tree = render({ diagnosticPgn: PGN_DE_EXEMPLO });
-
-    act(() => pressableWithText(tree.root, "ver PGN (debug)")!.props.onPress());
-    act(() =>
-      pressableWithText(tree.root, "ocultar PGN (debug)")!.props.onPress()
-    );
-
-    expect(allText(tree.root)).not.toContain("[Event");
-  });
-
-  it("modal de produção fica enxuto: troféu, motivo, nota de rating e os 2 botões", () => {
-    const tree = render({ diagnosticPgn: PGN_DE_EXEMPLO });
-    expect(hasText(tree.root, "Você venceu!")).toBe(true);
-    expect(hasText(tree.root, "Xeque-mate")).toBe(true);
-    expect(hasText(tree.root, "Partida contra a IA — não vale rating.")).toBe(true);
-    expect(hasText(tree.root, "Novo jogo")).toBe(true);
-    expect(hasText(tree.root, "Voltar")).toBe(true);
-    // Nada entre colchetes em nenhum texto da tela, e nem o link de debug.
-    expect(allText(tree.root)).not.toMatch(/\[[A-Za-z]+ "/);
-    expect(allText(tree.root)).not.toContain("ver PGN");
-  });
-});
-
 describe("GameOverModal — confete na vitória", () => {
   it("vitória mostra o confete", () => {
     const tree = render({ result: { outcome: "win", reason: "checkmate" } });
@@ -399,12 +322,15 @@ describe("GameOverModal — título e motivo centralizados", () => {
   }
 
   it.each(VARIACOES)(
-    "$mode/$outcome: título e motivo centralizados",
+    "$mode/$outcome: título centralizado",
     ({ mode, outcome, titulo }) => {
       const tree = render({ mode, result: { outcome, reason: "checkmate" } });
       expect(hasText(tree.root, titulo)).toBe(true);
       expect(textAlignDe(tree.root, titulo)).toBe("center");
-      expect(textAlignDe(tree.root, "Xeque-mate")).toBe("center");
+      // O motivo só existe no modo ranqueado — vs IA ele foi removido.
+      if (mode === "online") {
+        expect(textAlignDe(tree.root, "Xeque-mate")).toBe("center");
+      }
     }
   );
 });
@@ -421,21 +347,34 @@ describe("GameOverModal — título e motivo centralizados", () => {
 describe("gate da análise pós-jogo", () => {
   const ANALYSIS = "SECAO_DE_ANALISE";
 
-  it("partida registrada: a seção é montada e decide o que mostrar", () => {
+  it("partida RANQUEADA registrada: a seção é montada e decide o que mostrar", () => {
     // Sem exigir plano pago: quem decide o que mostrar agora é a seção.
-    const tree = render({ gamePublicId: "abc-123" });
+    const tree = render({ mode: "online", gamePublicId: "abc-123" });
     expect(hasText(tree.root, ANALYSIS)).toBe(true);
   });
 
+  it("vs IA: a análise NÃO aparece mais no modal", () => {
+    // O modal vs IA virou comemoração. A análise não sumiu do produto — ela
+    // vive em Perfil → Atividade → Histórico → partida (MatchDetailScreen).
+    const tree = render({ mode: "ai", gamePublicId: "abc-123" });
+    expect(hasText(tree.root, ANALYSIS)).toBe(false);
+  });
+
   it("sem partida registrada, não há o que analisar", () => {
-    // Backend anterior à Fase 1, ou partida vs IA sem `player_color`. Sem
-    // endereço no servidor a seção não teria o que consultar.
-    expect(hasText(render({ gamePublicId: null }).root, ANALYSIS)).toBe(false);
-    expect(hasText(render().root, ANALYSIS)).toBe(false);
+    // Backend anterior à Fase 1. Sem endereço no servidor a seção não teria
+    // o que consultar, mesmo no modo ranqueado.
+    expect(
+      hasText(render({ mode: "online", gamePublicId: null }).root, ANALYSIS)
+    ).toBe(false);
+    expect(hasText(render({ mode: "online" }).root, ANALYSIS)).toBe(false);
   });
 
   it("repassa o caminho para a tela de assinatura", () => {
-    const tree = render({ gamePublicId: "abc-123", onUpgrade: jest.fn() });
+    const tree = render({
+      mode: "online",
+      gamePublicId: "abc-123",
+      onUpgrade: jest.fn(),
+    });
     expect(hasText(tree.root, "SECAO_DE_ANALISE_COM_UPGRADE")).toBe(true);
   });
 });

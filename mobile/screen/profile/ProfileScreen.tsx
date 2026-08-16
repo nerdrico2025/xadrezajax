@@ -446,7 +446,7 @@ function AchievementsBlock({ colors }: { colors: Record<string, string> }) {
               style={[
                 styles.campaignBadge,
                 {
-                  backgroundColor: conquered ? colors.accentMuted : "transparent",
+                  backgroundColor: conquered ? colors.accent : "transparent",
                   borderColor: conquered ? colors.accent : colors.divider,
                 },
               ]}
@@ -458,12 +458,12 @@ function AchievementsBlock({ colors }: { colors: Record<string, string> }) {
               <Ionicons
                 name={(a.icone || "trophy-outline") as any}
                 size={22}
-                color={conquered ? colors.accentOnLight : colors.secondary}
+                color={conquered ? colors.accentText : colors.secondary}
               />
               <Text
                 style={[
                   styles.campaignBadgeLabel,
-                  { color: conquered ? colors.accentOnLight : colors.secondary },
+                  { color: conquered ? colors.accentText : colors.secondary },
                 ]}
                 numberOfLines={2}
               >
@@ -540,7 +540,10 @@ function CampaignBadgesRow({
                 style={[
                   styles.campaignBadge,
                   {
-                    backgroundColor: conquered ? colors.accentMuted : "transparent",
+                    // Conquistado = dourado SÓLIDO (não mais só borda + tinta
+                    // fraca): o selo é o prêmio da tela, e precisa ler como
+                    // preenchido à distância.
+                    backgroundColor: conquered ? colors.accent : "transparent",
                     borderColor: conquered ? colors.accent : colors.divider,
                   },
                 ]}
@@ -552,12 +555,15 @@ function CampaignBadgesRow({
                 <Ionicons
                   name={conquered ? "ribbon" : "ribbon-outline"}
                   size={22}
-                  color={conquered ? colors.accentOnLight : colors.secondary}
+                  // Preto sobre dourado: o par de contraste da marca. O
+                  // accentOnLight existe para dourado sobre fundo CLARO, e
+                  // ficaria ilegível agora que o fundo é o próprio dourado.
+                  color={conquered ? colors.accentText : colors.secondary}
                 />
                 <Text
                   style={[
                     styles.campaignBadgeLabel,
-                    { color: conquered ? colors.accentOnLight : colors.secondary },
+                    { color: conquered ? colors.accentText : colors.secondary },
                   ]}
                 >
                   {l.label}

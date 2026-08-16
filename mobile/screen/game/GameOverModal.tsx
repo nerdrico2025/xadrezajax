@@ -1,7 +1,5 @@
-import { useState } from "react";
 import {
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,7 +10,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { AI_LEVEL_BY_ID, type Difficulty } from "@/constants/aiGame";
-import { QA_SHOW_AI_DIAGNOSTIC_PGN } from "@/constants/qaFlags";
 import Confetti from "@/components/Confetti";
 import GameAnalysisSection from "./GameAnalysisSection";
 import GameFeedbackSection from "./GameFeedbackSection";
@@ -124,16 +121,6 @@ interface GameOverModalProps {
   /** Modo Campanha: presente só quando esta vitória dominou um nível. */
   campaignUnlock?: CampaignUnlockInfo | null;
   /**
-   * ⚠️ TEMPORÁRIO — INSTRUMENTAÇÃO DE DIAGNÓSTICO, NÃO É FEATURE DE PRODUTO.
-   * TODO(remover): junto com utils/aiGamePgn.ts, ao fim da análise da
-   * calibragem do Iniciante. Preenchido só em partidas vs IA nos níveis
-   * Iniciante/Fácil; nos demais vem null e nada é renderizado.
-   *
-   * Só é EXIBIDO em build de preview/QA (QA_SHOW_AI_DIAGNOSTIC_PGN), e mesmo
-   * lá fica atrás de um link discreto — nunca como bloco de texto aberto.
-   */
-  diagnosticPgn?: string | null;
-  /**
    * Identificador da partida no servidor, para a análise pós-jogo (Fase 2).
    * Ausente quando a partida não foi registrada (app/servidor antigo) — e aí
    * não há análise a pedir.
@@ -162,7 +149,6 @@ export default function GameOverModal({
   onNewGame,
   onLeave,
   campaignUnlock,
-  diagnosticPgn,
   gamePublicId,
   playerColor = "w",
   onUpgrade,
@@ -170,14 +156,9 @@ export default function GameOverModal({
 }: GameOverModalProps) {
   const { theme } = useTheme();
   const colors = Colors[theme];
-  // Fechado por padrão: o PGN é diagnóstico, não conteúdo da tela de
-  // resultado. Só existe em build de QA (ver showDiagnosticToggle).
-  const [showPgn, setShowPgn] = useState(false);
-
   if (!result) return null;
 
   const config = OUTCOME_CONFIG[result.outcome];
-  const showDiagnosticToggle = QA_SHOW_AI_DIAGNOSTIC_PGN && !!diagnosticPgn;
 
   // Delta em dourado na vitória, vermelho na queda, cinza no zero. Sem
   // laranja em nenhuma variação (regra dura da marca).
@@ -217,19 +198,21 @@ export default function GameOverModal({
               {config.title[mode]}
             </Text>
 
-            <Text style={[styles.reason, { color: colors.secondary }]}>
-              {REASON_LABEL[result.reason]}
-            </Text>
-
-            {/* Rótulo de rating pelo MODO REAL da partida. Antes era o texto de
-                IA fixo, exibido também em partida humana ranqueada. */}
-            {mode === "ai" ? (
-              <Text
-                style={[styles.ratingNote, styles.ratingNoteAi, { color: colors.secondary }]}
-              >
-                Partida contra a IA — não vale rating.
+            {/* Motivo do fim ("Xeque-mate") só na partida ranqueada. Vs IA o
+                modal foi enxugado para troféu + título + o que o jogador
+                GANHOU (campanha e conquistas) — o motivo é informação de
+                registro, não de comemoração. */}
+            {mode !== "ai" && (
+              <Text style={[styles.reason, { color: colors.secondary }]}>
+                {REASON_LABEL[result.reason]}
               </Text>
-            ) : (
+            )}
+
+            {/* Rótulo de rating pelo MODO REAL da partida.
+                Vs IA não há mais linha nenhuma: "não vale rating" é o estado
+                permanente desse modo e repetir isso a cada partida só ocupava
+                espaço sem informar. */}
+            {mode !== "ai" && (
               <View style={styles.ratedRow}>
                 <Text style={[styles.ratingNote, { color: colors.secondary }]}>
                   Partida ranqueada
@@ -275,6 +258,9 @@ export default function GameOverModal({
               <View
                 style={[
                   styles.campaignBanner,
+                  // O -16 do estilo compensa a linha de rating, que só existe
+                  // no modo ranqueado. Vs IA ele encostaria a faixa no título.
+                  mode === "ai" && styles.campaignBannerAi,
                   { backgroundColor: colors.accentMuted, borderColor: colors.accent + "55" },
                 ]}
               >
@@ -292,24 +278,55 @@ export default function GameOverModal({
               </View>
             )}
 
-            {/* Conquistas desta partida. Sempre ABAIXO da faixa da campanha e
-                sempre discretas (linha, não faixa): quando as duas coincidem,
-                a campanha é a comemoração principal. Sem confete próprio. */}
+            {/* Conquistas desta partida — UM CARTÃO por conquista.
+                Continuam ABAIXO da faixa da campanha: quando as duas
+                coincidem, a campanha segue sendo a comemoração principal (é
+                mais rara). O que mudou é o peso visual de cada conquista —
+                de linha de texto para cartão com ícone grande e fundo
+                tintado. Sem confete próprio: o Confetti é um só, da vitória. */}
             {newAchievements && newAchievements.length > 0 && (
               <View style={styles.achievementList}>
                 {newAchievements.map((a) => (
-                  <View key={a.code} style={styles.achievementRow}>
-                    <Ionicons
-                      name={(a.icone || "trophy-outline") as any}
-                      size={16}
-                      color={colors.accentOnLight}
-                    />
-                    <Text
-                      style={[styles.achievementText, { color: colors.accentOnLight }]}
-                      numberOfLines={2}
+                  <View
+                    key={a.code}
+                    style={[
+                      styles.achievementCard,
+                      {
+                        backgroundColor: colors.accentMuted,
+                        borderColor: colors.accent + "55",
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.achievementIconBox,
+                        { backgroundColor: colors.accent },
+                      ]}
                     >
-                      Conquista: {a.nome}
-                    </Text>
+                      <Ionicons
+                        name={(a.icone || "trophy-outline") as any}
+                        size={26}
+                        // Preto sobre dourado: é o par de contraste da marca
+                        // (accentText), o mesmo dos botões primários.
+                        color={colors.accentText}
+                      />
+                    </View>
+                    <View style={styles.achievementCardText}>
+                      <Text
+                        style={[
+                          styles.achievementCardLabel,
+                          { color: colors.accentOnLight },
+                        ]}
+                      >
+                        Conquista desbloqueada
+                      </Text>
+                      <Text
+                        style={[styles.achievementCardName, { color: colors.text }]}
+                        numberOfLines={2}
+                      >
+                        {a.nome}
+                      </Text>
+                    </View>
                   </View>
                 ))}
               </View>
@@ -323,8 +340,15 @@ export default function GameOverModal({
                 só montava com plano pago confirmado, então uma falha de rede na
                 checagem (que caía para `false`) fazia a análise sumir da tela de
                 quem paga, sem aviso. Agora o gate de plano mora dentro da seção,
-                que tem tela para cada resultado — inclusive convite a assinar. */}
-            {gamePublicId && (
+                que tem tela para cada resultado — inclusive convite a assinar.
+
+                MODO: vs IA não mostra mais a análise aqui — o modal de fim de
+                partida vs IA foi enxugado para comemoração. A análise NÃO
+                ficou inacessível: ela continua em Perfil → Atividade →
+                Histórico → partida (MatchDetailScreen, PR #108), que mostra
+                precisão, classificação lance a lance e o tabuleiro. Na
+                partida ranqueada a seção continua exatamente como estava. */}
+            {mode !== "ai" && gamePublicId && (
               <GameAnalysisSection
                 gamePublicId={gamePublicId}
                 playerColor={playerColor}
@@ -332,11 +356,12 @@ export default function GameOverModal({
               />
             )}
 
-            {/* Comentário humanizado (Fase 3), logo abaixo da análise e sob a
-                MESMA condição: sem `gamePublicId` não há endereço a consultar.
-                Seção independente — a Fase 2 continua exatamente como estava, e
-                esta some sozinha quando a feature está desligada no servidor. */}
-            {gamePublicId && (
+            {/* Comentário humanizado (Fase 3), sob a MESMA condição da análise
+                acima — inclusive o modo. Vs IA ele também sai: o comentário é
+                DERIVADO da análise, e sem ela no modal sobraria só o convite a
+                assinar (o paywall da seção), que é exatamente o ruído que este
+                enxugamento veio tirar. */}
+            {mode !== "ai" && gamePublicId && (
               <GameFeedbackSection
                 gamePublicId={gamePublicId}
                 playerColor={playerColor}
@@ -344,59 +369,6 @@ export default function GameOverModal({
               />
             )}
 
-            {/* ⚠️ TEMPORÁRIO: PGN da partida para a análise da calibragem da IA.
-                TODO(remover): junto com utils/aiGamePgn.ts.
-
-                DUAS travas antes de aparecer: build de QA
-                (QA_SHOW_AI_DIAGNOSTIC_PGN) E toque no link. Antes, com a flag
-                ligada, era um bloco de texto grande e sempre aberto — tags
-                [Event]/[Date]/... e a lista de lances ocupando o modal de
-                vitória. Agora é um link pequeno, fechado por padrão.
-
-                Texto selecionável (toque longo → Copiar) de propósito: evita
-                adicionar expo-clipboard só para instrumentação temporária. */}
-            {showDiagnosticToggle && (
-              <>
-                <Pressable
-                  onPress={() => setShowPgn((v) => !v)}
-                  hitSlop={8}
-                  style={styles.diagnosticToggle}
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name={showPgn ? "chevron-down" : "chevron-forward"}
-                    size={12}
-                    color={colors.secondary}
-                  />
-                  <Text style={[styles.diagnosticToggleText, { color: colors.secondary }]}>
-                    {showPgn ? "ocultar PGN (debug)" : "ver PGN (debug)"}
-                  </Text>
-                </Pressable>
-
-                {showPgn && (
-                  <View
-                    style={[
-                      styles.diagnosticBox,
-                      {
-                        borderColor: colors.divider,
-                        backgroundColor: colors.buttonSecondary,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.diagnosticLabel, { color: colors.secondary }]}>
-                      Diagnóstico da IA · toque e segure para copiar
-                    </Text>
-                    <Text
-                      selectable
-                      style={[styles.diagnosticPgn, { color: colors.text }]}
-                      accessibilityLabel="PGN da partida para diagnóstico da calibragem da IA"
-                    >
-                      {diagnosticPgn}
-                    </Text>
-                  </View>
-                )}
-              </>
-            )}
 
             <View style={styles.buttons}>
               <Pressable
@@ -437,42 +409,36 @@ export default function GameOverModal({
 }
 
 const styles = StyleSheet.create({
-  // Linha, não cartão: a comemoração grande desta tela é a da campanha.
-  achievementList: { width: "100%", gap: 4, marginTop: 2 },
-  achievementRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  achievementText: { fontSize: 12, fontWeight: "600", flexShrink: 1 },
-  // ⚠️ TEMPORÁRIO — remover junto com o bloco de diagnóstico.
-  diagnosticToggle: {
+  achievementList: { width: "100%", gap: 8, marginTop: 4, marginBottom: 16 },
+  // Cartão, não linha: com o modal enxuto (vs IA), a conquista passa a ser
+  // um dos poucos elementos da tela e ganha peso à altura.
+  achievementCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
-    alignSelf: "center",
-    paddingVertical: 4,
-    marginBottom: 8,
-  },
-  diagnosticToggleText: {
-    fontSize: 11,
-    textDecorationLine: "underline",
-  },
-  diagnosticBox: {
+    gap: 12,
     width: "100%",
     borderWidth: 1,
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 16,
-    gap: 6,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
-  diagnosticLabel: {
+  // Quadrado dourado SÓLIDO com o ícone em preto — o mesmo par de contraste
+  // dos botões primários, em vez de ícone solto sobre fundo tintado.
+  achievementIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  achievementCardText: { flex: 1, gap: 1 },
+  achievementCardLabel: {
     fontSize: 10,
     fontWeight: "700",
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    letterSpacing: 0.5,
   },
-  diagnosticPgn: {
-    fontSize: 11,
-    lineHeight: 16,
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
-  },
+  achievementCardName: { fontSize: 15, fontWeight: "700", flexShrink: 1 },
 
   // Sem padding: é a moldura do confete, que precisa medir a tela inteira.
   // A margem do cartão está no `scrollContent`.
@@ -559,6 +525,7 @@ const styles = StyleSheet.create({
     marginTop: -16,
     marginBottom: 20,
   },
+  campaignBannerAi: { marginTop: 4 },
   campaignBannerText: { flex: 1 },
   campaignBannerTitle: { fontSize: 14, fontWeight: "800" },
   campaignBannerSub: { fontSize: 12, marginTop: 2 },

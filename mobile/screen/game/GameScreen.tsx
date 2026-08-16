@@ -42,8 +42,6 @@ import CapturedPieces from "./CapturedPieces";
 import ConfirmModal from "@/components/ConfirmModal";
 import ChessClock from "@/components/ChessClock";
 import { AI_LEVELS, type Difficulty, type PlayerColor } from "@/constants/aiGame";
-// ⚠️ TEMPORÁRIO (diagnóstico da calibragem do Iniciante) — ver utils/aiGamePgn.ts
-import { buildAiGamePgn, shouldRecordPgn } from "@/utils/aiGamePgn";
 
 interface GameScreenProps {
   onLeave?: () => void;
@@ -226,7 +224,6 @@ export default function GameScreen({
   // lista, mas continua restrito a Iniciante/Fácil — ele é instrumentação
   // temporária e sai depois; a captura abaixo é permanente.
   const sanHistoryRef = useRef<string[]>([]);
-  const [diagnosticPgn, setDiagnosticPgn] = useState<string | null>(null);
   const { play } = useChessSound();
 
   const aiColor = playerColor === "w" ? "b" : "w";
@@ -251,18 +248,6 @@ export default function GameScreen({
     clock.pause();
     clearSavedGame().catch(() => {});
     setGameResult(result);
-    // ⚠️ TEMPORÁRIO: monta o PGN para a análise pós-morte da calibragem.
-    if (shouldRecordPgn(difficulty)) {
-      setDiagnosticPgn(
-        buildAiGamePgn({
-          moves: sanHistoryRef.current,
-          difficulty,
-          playerColor,
-          result,
-          resumed: !!savedGame,
-        })
-      );
-    }
     setCampaignUnlock(null);
     if (authToken) {
       // Persiste a partida vs IA no histórico/estatísticas (decisão D1: nunca
@@ -466,9 +451,7 @@ export default function GameScreen({
     setAiError(false);
     aiManualRetriesRef.current = 0;
     pendingAiGameRef.current = null;
-    // ⚠️ TEMPORÁRIO: zera o registro de lances do diagnóstico.
     sanHistoryRef.current = [];
-    setDiagnosticPgn(null);
     clock.reset();
     await chessboardRef.current?.resetBoard();
     play("gameStart");
@@ -740,7 +723,6 @@ export default function GameScreen({
         onLeave={() => onLeave?.()}
         campaignUnlock={campaignUnlock}
         newAchievements={newAchievements}
-        diagnosticPgn={diagnosticPgn}
         gamePublicId={gamePublicId}
         playerColor={playerColor}
         onUpgrade={onUpgrade}
