@@ -13,6 +13,9 @@ import { Ionicons } from "@expo/vector-icons";
 import Chessboard from "react-native-chessboard";
 
 import { useTheme } from "@/hooks/useTheme";
+import { useBoardTheme } from "@/context/BoardThemeContext";
+import { toChessboardColors } from "@/constants/boardThemes";
+import { makeRenderPiece } from "@/constants/pieceSet";
 import { Colors } from "@/constants/theme";
 import { useAuth } from "@/context/AuthContext";
 import { logEvent } from "@/services/analytics";
@@ -41,6 +44,8 @@ const STEP_TITLES = [
 
 export default function OnboardingScreen() {
   const { theme } = useTheme();
+  const { theme: boardTheme } = useBoardTheme();
+  const boardColors = toChessboardColors(boardTheme);
   const colors = Colors[theme];
   const { token, updateUser } = useAuth();
   const { width } = useWindowDimensions();
@@ -203,6 +208,13 @@ export default function OnboardingScreen() {
                   boardSize={boardSize}
                   withLetters={false}
                   withNumbers={false}
+                  // Os diagramas do onboarding não seguiam o tema do
+                  // tabuleiro — caíam no default da lib. Agora usam o mesmo
+                  // conjunto de peças e as mesmas cores do resto do app: é a
+                  // PRIMEIRA impressão do tabuleiro, e destoar aqui é pior
+                  // do que em qualquer outra tela.
+                  colors={boardColors}
+                  renderPiece={makeRenderPiece(boardSize)}
                 />
               </View>
               <Text style={[styles.diagramLabel, { color: colors.secondary }]}>

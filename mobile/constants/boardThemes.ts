@@ -19,10 +19,20 @@
 /** Dourado AJAX — cor de marca (RF-VISUAL-01). */
 export const AJAX_GOLD = "#C9A84C";
 
-// Dourado com transparência — assinatura da marca no tabuleiro, igual em todos
-// os temas. Último lance preenche a casa; casa selecionada é um brilho sob a peça.
-const GOLD_LAST_MOVE = "rgba(201, 168, 76, 0.5)";
+// Casa selecionada continua no Dourado AJAX — é brilho SOB a peça, e some
+// assim que o lance sai.
 const GOLD_SELECTED = "rgba(201, 168, 76, 0.45)";
+
+// Último lance e casas de destino: AMARELO sólido preenchendo a casa.
+//
+// Substitui o dourado que havia aqui. As duas marcações usam a MESMA cor de
+// propósito — são a mesma linguagem ("olhe para esta casa") — mas opacidades
+// diferentes, porque aparecem JUNTAS na tela: as casas de destino são a ação
+// disponível agora (mais forte), o último lance é contexto do que já passou
+// (mais fraco). Com o mesmo valor nas duas, o tabuleiro vira um bloco amarelo
+// e o jogador perde a distinção.
+export const MOVE_YELLOW = "#F4EE68";
+const YELLOW_LAST_MOVE = "rgba(244, 238, 104, 0.45)";
 // Xeque: vermelho de alerta, consistente entre temas. Não é laranja (proibido).
 const CHECK_HIGHLIGHT = "#E5484D";
 
@@ -51,17 +61,17 @@ export const BOARD_THEMES: Record<BoardThemeId, BoardTheme> = {
     lightSquare: "#F0EDE6", // Branco Marfim
     darkSquare: "#B8B0A3",
     selectedHighlight: GOLD_SELECTED,
-    lastMoveHighlight: GOLD_LAST_MOVE,
+    lastMoveHighlight: YELLOW_LAST_MOVE,
     checkHighlight: CHECK_HIGHLIGHT,
   },
   // Madeira AJAX — paleta oficial. Padrão para NOVOS usuários.
   madeira: {
     id: "madeira",
     name: "Madeira AJAX",
-    lightSquare: "#E8D9BC",
-    darkSquare: "#5C4A23", // Madeira
+    lightSquare: "#EFD9B2",
+    darkSquare: "#B28761",
     selectedHighlight: GOLD_SELECTED,
-    lastMoveHighlight: GOLD_LAST_MOVE,
+    lastMoveHighlight: YELLOW_LAST_MOVE,
     checkHighlight: CHECK_HIGHLIGHT,
   },
   // Azul Petróleo — paleta oficial v2.0
@@ -71,7 +81,7 @@ export const BOARD_THEMES: Record<BoardThemeId, BoardTheme> = {
     lightSquare: "#E6ECF0",
     darkSquare: "#1B5F7A",
     selectedHighlight: GOLD_SELECTED,
-    lastMoveHighlight: GOLD_LAST_MOVE,
+    lastMoveHighlight: YELLOW_LAST_MOVE,
     checkHighlight: CHECK_HIGHLIGHT,
   },
   // Verde Clássico — tema ATUAL (defaults da lib react-native-chessboard),
@@ -82,7 +92,7 @@ export const BOARD_THEMES: Record<BoardThemeId, BoardTheme> = {
     lightSquare: "#D9FDF8",
     darkSquare: "#62B1A8",
     selectedHighlight: GOLD_SELECTED,
-    lastMoveHighlight: GOLD_LAST_MOVE,
+    lastMoveHighlight: YELLOW_LAST_MOVE,
     checkHighlight: CHECK_HIGHLIGHT,
   },
   // Preto & Marfim — alto contraste, alinhado ao "Preto Tabuleiro" da marca.
@@ -96,7 +106,7 @@ export const BOARD_THEMES: Record<BoardThemeId, BoardTheme> = {
     lightSquare: "#F0EDE6", // Branco Marfim
     darkSquare: "#262626",
     selectedHighlight: GOLD_SELECTED,
-    lastMoveHighlight: GOLD_LAST_MOVE,
+    lastMoveHighlight: YELLOW_LAST_MOVE,
     checkHighlight: CHECK_HIGHLIGHT,
   },
 };

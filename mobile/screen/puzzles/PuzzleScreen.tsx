@@ -18,6 +18,7 @@ import Button from "@/components/Button";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useBoardTheme } from "@/context/BoardThemeContext";
+import { makeRenderPiece } from "@/constants/pieceSet";
 import { PROMOTION_LABELS, toChessboardColors } from "@/constants/boardThemes";
 import { useAuth } from "@/context/AuthContext";
 import { useChessSound } from "@/hooks/useChessSound";
@@ -591,6 +592,7 @@ export default function PuzzleScreen({ onBack, onUpgrade, mode = "daily" }: Prop
                     boardSize={boardSize}
                     onMove={onMove}
                     colors={boardColors}
+                    renderPiece={makeRenderPiece(boardSize)}
                     promotionLabels={PROMOTION_LABELS}
                     gestureEnabled={
                       state === "playing" && !replying && !pendingRetry && !checking

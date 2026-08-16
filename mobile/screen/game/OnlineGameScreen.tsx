@@ -1,7 +1,6 @@
 import {
   View,
   StyleSheet,
-  Image,
   Pressable,
   Text,
   ActivityIndicator,
@@ -10,12 +9,11 @@ import {
 import { useRef, useState, useCallback, useEffect } from "react";
 import Chessboard from "react-native-chessboard";
 import type { ChessboardRef } from "react-native-chessboard";
-// @ts-ignore
-import { PIECES } from "react-native-chessboard/lib/commonjs/constants";
 import { Chess } from "chess.js";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
+import { makeRenderPiece } from "@/constants/pieceSet";
 import { useChessSound } from "@/hooks/useChessSound";
 import { useChessClock } from "@/hooks/useChessClock";
 import { useTheme } from "@/hooks/useTheme";
@@ -531,20 +529,7 @@ export default function OnlineGameScreen({
                 promotionLabels={PROMOTION_LABELS}
                 withLetters={!isFlipped}
                 withNumbers={!isFlipped}
-                renderPiece={
-                  isFlipped
-                    ? (piece) => (
-                        <Image
-                          source={PIECES[piece]}
-                          style={{
-                            width: boardSize / 8,
-                            height: boardSize / 8,
-                            transform: [{ rotate: "180deg" }],
-                          }}
-                        />
-                      )
-                    : undefined
-                }
+                renderPiece={makeRenderPiece(boardSize, isFlipped)}
               />
             </View>
           )}

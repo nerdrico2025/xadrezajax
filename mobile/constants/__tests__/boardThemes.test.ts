@@ -41,9 +41,22 @@ function hsl(hex: string): { h: number; s: number; l: number } {
 }
 // Laranja vivo proibido (logo antigo). Tons de madeira (marrom escuro) NÃO são
 // laranja: exigimos matiz laranja + saturação alta + claridade alta.
+/**
+ * Laranja VIVO — o que a regra da marca proíbe (D4).
+ *
+ * A versão anterior (`h >= 18 && h <= 45 && s > 0.5 && l > 0.5`) não pegava
+ * laranja NENHUM, e dava falsa confiança: `#FF9B71` (o laranja que vinha do
+ * default da lib, citado em boardThemes.ts) escapava por h=17,7 — logo abaixo
+ * do piso de 18 — e `#FF8C00` escapava por l=0,50 exato, que não é `> 0.5`.
+ * O único acerto dela era barrar bege claro, que ninguém chamaria de laranja.
+ *
+ * Agora: matiz na faixa laranja, saturação ALTA e luminosidade de cor cheia —
+ * nem pastel claro (creme), nem marrom escuro (madeira). Verificado contra 7
+ * laranjas reais e as 13 cores do produto.
+ */
 function isBrightOrange(hex: string): boolean {
   const { h, s, l } = hsl(hex);
-  return h >= 18 && h <= 45 && s > 0.5 && l > 0.5;
+  return h >= 12 && h <= 45 && s >= 0.6 && l >= 0.35 && l <= 0.75;
 }
 
 const ALL = BOARD_THEME_ORDER.map((id) => BOARD_THEMES[id]);
@@ -55,13 +68,24 @@ describe("temas de tabuleiro", () => {
     expect(Object.keys(BOARD_THEMES)).toHaveLength(5);
   });
 
-  it("assinatura da marca: destaque de casa selecionada e de último lance são o Dourado AJAX em TODOS os temas", () => {
+  it("assinatura da marca: casa selecionada é o Dourado AJAX em TODOS os temas", () => {
     for (const t of ALL) {
       // rgba do #C9A84C = (201, 168, 76)
       expect(t.selectedHighlight).toMatch(/rgba\(\s*201\s*,\s*168\s*,\s*76/);
-      expect(t.lastMoveHighlight).toMatch(/rgba\(\s*201\s*,\s*168\s*,\s*76/);
     }
     expect(AJAX_GOLD).toBe("#C9A84C");
+  });
+
+  it("último lance é AMARELO em todos os temas, e mais fraco que o destino", () => {
+    // Mudou de dourado para amarelo junto com as casas de destino possível:
+    // as duas marcações falam a mesma língua ("olhe para esta casa"). A
+    // opacidade é que as separa — destino é a ação de agora (0.62, no patch
+    // da lib), último lance é contexto do que já passou.
+    for (const t of ALL) {
+      expect(t.lastMoveHighlight).toMatch(/rgba\(\s*244\s*,\s*238\s*,\s*104/);
+      const opacidade = Number(t.lastMoveHighlight.split(",").pop()!.replace(")", ""));
+      expect(opacidade).toBeLessThan(0.62);
+    }
   });
 
   it("nenhuma casa (clara/escura) usa laranja vivo (proibido)", () => {

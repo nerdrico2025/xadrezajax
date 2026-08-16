@@ -3,19 +3,17 @@ import {
   StyleSheet,
   Alert,
   Pressable,
-  Image,
   Text,
   type LayoutChangeEvent,
 } from "react-native";
 import { useRef, useState, useEffect, useCallback } from "react";
 import Chessboard from "react-native-chessboard";
 import type { ChessboardRef } from "react-native-chessboard";
-// @ts-ignore – internal import to access piece images for custom renderPiece
-import { PIECES } from "react-native-chessboard/lib/commonjs/constants";
 import { Chess } from "chess.js";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
+import { makeRenderPiece } from "@/constants/pieceSet";
 import { getBestMove } from "@/services/game";
 import { parseUciMove } from "@/utils/chessSpecialMoves";
 import { reportAiResult } from "@/services/profile";
@@ -674,20 +672,7 @@ export default function GameScreen({
                 promotionLabels={PROMOTION_LABELS}
                 withLetters={!isFlipped}
                 withNumbers={!isFlipped}
-                renderPiece={
-                  isFlipped
-                    ? (piece) => (
-                        <Image
-                          source={PIECES[piece]}
-                          style={{
-                            width: boardSize / 8,
-                            height: boardSize / 8,
-                            transform: [{ rotate: "180deg" }],
-                          }}
-                        />
-                      )
-                    : undefined
-                }
+                renderPiece={makeRenderPiece(boardSize, isFlipped)}
               />
             </View>
           )}
