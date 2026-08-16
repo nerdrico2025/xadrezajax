@@ -119,13 +119,30 @@ describe("CampaignMapScreen — os três estados de nó", () => {
     }
   });
 
-  it("os 5 níveis estão na trilha, na ordem", () => {
-    const t = textos(render().root);
-    const ordem = ["Iniciante", "Fácil", "Médio", "Difícil", "Mestre"].map((l) =>
-      t.indexOf(l)
+  it("os 5 nós estão no mapa, na ordem da campanha", () => {
+    // Pelos rótulos de ACESSIBILIDADE, não por texto na tela: os nomes dos
+    // territórios agora vivem na arte (imagem), e um teste que dependa de
+    // texto renderizado quebraria a cada troca de ilustração.
+    const rotulos = render()
+      .root.findAll(
+        (n) =>
+          typeof n.props?.accessibilityLabel === "string" &&
+          !!n.props?.onPress &&
+          n.props.accessibilityLabel !== "Voltar"
+      )
+      .map((n) => n.props.accessibilityLabel as string);
+
+    const ordem = ["Iniciante", "Fácil", "Médio", "Difícil", "Mestre"];
+    expect(rotulos.map((r) => r.split(",")[0])).toEqual(ordem);
+  });
+
+  it("a arte do mapa é renderizada com descrição para leitor de tela", () => {
+    const imagens = render().root.findAll(
+      (n) =>
+        typeof n.props?.accessibilityLabel === "string" &&
+        n.props.accessibilityLabel.startsWith("Mapa ilustrado")
     );
-    expect(ordem.every((i) => i >= 0)).toBe(true);
-    expect([...ordem].sort((a, b) => a - b)).toEqual(ordem);
+    expect(imagens.length).toBeGreaterThan(0);
   });
 });
 

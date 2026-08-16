@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,25 +20,44 @@ import {
   type CampaignNode,
 } from "@/hooks/useCampaignUnlockState";
 
-// Mapa da Campanha — a trilha dos 5 níveis da IA.
+// Mapa da Campanha — a trilha ilustrada dos 5 níveis.
 //
-// O TRILHO É SERPENTEADO e feito de `View` posicionada, não de SVG: são 5 nós
-// numa coluna, alternando esquerda/direita, e o "caminho" entre eles é um
-// segmento diagonal por par. Com essa contagem, SVG custaria uma dependência
-// e um viewBox a manter sem entregar nada que o layout não resolva.
+// O FUNDO É ARTE, não desenho em código: `assets/campaign/mapa-campanha-ajax.webp`
+// (1080×3840). Os nomes dos territórios ("Vale das Aberturas", "Cidadela do
+// Adversário", ...) já vêm embutidos na imagem, com tipografia própria — por
+// isso a tela NÃO renderiza rótulo de nível por cima. Repetir o nome em texto
+// brigaria com a arte e deslocaria em cada tamanho de tela.
 //
-// O estado de cada nó NÃO é decidido aqui: vem de `useCampaignUnlockState`,
-// que é a mesma fonte que o wizard usa para desenhar o cadeado. Duas telas
-// com a mesma regra escrita duas vezes é a receita para elas divergirem.
+// Os 5 nós continuam sendo componentes React de verdade, sobrepostos: é o que
+// permite estado (concluído/atual/bloqueado), toque e acessibilidade. Só a
+// camada de fundo mudou; a lógica é a mesma do hook compartilhado.
 
-/** Deslocamento horizontal do nó em relação ao centro, por posição na trilha.
- *  É o que dá o serpenteado — nó par à esquerda, ímpar à direita. */
-const SERPENTINE_OFFSET = 52;
+const ART = require("@/assets/campaign/mapa-campanha-ajax.webp");
 
-const NODE_SIZE = 68;
-const NODE_SIZE_CURRENT = 84;
-/** Altura do espaço entre dois nós — é onde o segmento do trilho é desenhado. */
-const GAP = 46;
+/** Dimensões da arte, em pixels. As coordenadas dos nós são dadas neste
+ *  espaço e convertidas em porcentagem — assim o posicionamento acompanha
+ *  qualquer largura de tela sem depender de medição. */
+const ART_WIDTH = 1080;
+const ART_HEIGHT = 3840;
+
+/**
+ * Onde cada nó cai sobre a trilha, em pixels da arte.
+ *
+ * A ordem aqui é a da CAMPANHA (Iniciante → Mestre), mas repare que o `y`
+ * DIMINUI: a trilha sobe, do Vale das Aberturas (embaixo) até a Cidadela do
+ * Adversário (no topo). Mexer nestes números sem olhar a arte tira o nó de
+ * cima do caminho.
+ */
+const NODE_POSITIONS: Record<Difficulty, { x: number; y: number }> = {
+  beginner: { x: 540, y: 3480 },
+  easy: { x: 770, y: 2790 },
+  medium: { x: 360, y: 2100 },
+  hard: { x: 730, y: 1400 },
+  master: { x: 540, y: 540 },
+};
+
+const NODE_SIZE = 58;
+const NODE_SIZE_CURRENT = 72;
 
 interface Props {
   /** Abre o wizard já travado neste nível, pulando a escolha de dificuldade. */
@@ -72,10 +92,9 @@ export default function CampaignMapScreen({ onPlayLevel, onBack }: Props) {
         return;
       }
 
-      // Concluído é JOGÁVEL (prática livre), não inerte. Decisão de baixo
-      // risco tomada aqui: um nó dominado que não responde ao toque parece
-      // quebrado, e revisitar um nível fácil é um uso legítimo — o progresso
-      // não muda, porque o selo já foi concedido e não é concedido de novo.
+      // Concluído é JOGÁVEL (prática livre), não inerte: um nó dominado que
+      // não responde ao toque parece quebrado, e o progresso não muda —
+      // o selo já foi concedido e não é concedido de novo.
       setAviso(null);
       onPlayLevel(node.id);
     },
@@ -125,22 +144,31 @@ export default function CampaignMapScreen({ onPlayLevel, onBack }: Props) {
       ) : null}
 
       <ScrollView
-        contentContainerStyle={[
-          styles.trail,
-          { paddingBottom: insets.bottom + 32 },
-        ]}
+        contentContainerStyle={{ paddingBottom: insets.bottom }}
         showsVerticalScrollIndicator={false}
       >
-        {nodes.map((node, index) => (
-          <TrailStep
-            key={node.id}
-            node={node}
-            index={index}
-            isLast={index === nodes.length - 1}
-            colors={colors}
-            onPress={() => handlePress(node, index)}
+        {/* `aspectRatio` em vez de medir a tela: a arte mantém a proporção
+            1080:3840 em qualquer largura, e os nós são posicionados em % da
+            MESMA caixa — então não há um segundo cálculo para dessincronizar. */}
+        <View style={styles.artBox}>
+          <Image
+            source={ART}
+            style={styles.art}
+            resizeMode="cover"
+            accessible
+            accessibilityLabel="Mapa ilustrado da campanha, do Vale das Aberturas até a Cidadela do Adversário"
           />
-        ))}
+
+          {nodes.map((node, index) => (
+            <MapNode
+              key={node.id}
+              node={node}
+              index={index}
+              colors={colors}
+              onPress={() => handlePress(node, index)}
+            />
+          ))}
+        </View>
       </ScrollView>
 
       {aviso ? (
@@ -165,21 +193,18 @@ export default function CampaignMapScreen({ onPlayLevel, onBack }: Props) {
 
 type ThemeColors = (typeof Colors)[keyof typeof Colors];
 
-function TrailStep({
+function MapNode({
   node,
   index,
-  isLast,
   colors,
   onPress,
 }: {
   node: CampaignNode;
   index: number;
-  isLast: boolean;
   colors: ThemeColors;
   onPress: () => void;
 }) {
-  const daDireita = index % 2 === 1;
-  const offset = daDireita ? SERPENTINE_OFFSET : -SERPENTINE_OFFSET;
+  const pos = NODE_POSITIONS[node.id];
   const isCurrent = node.state === "current";
   const isDone = node.state === "done";
   const size = isCurrent ? NODE_SIZE_CURRENT : NODE_SIZE;
@@ -191,12 +216,12 @@ function TrailStep({
     ? colors.accent
     : isCurrent
     ? colors.primary
-    : colors.buttonSecondary;
+    : "rgba(20,24,28,0.55)";
   const conteudo = isDone
     ? colors.accentText
     : isCurrent
     ? colors.primaryText
-    : colors.secondary;
+    : "rgba(255,255,255,0.75)";
 
   const rotulo =
     node.state === "locked"
@@ -206,7 +231,16 @@ function TrailStep({
       : `${node.label}, nível atual, ${node.wins} de ${node.winsToUnlock} vitórias`;
 
   return (
-    <View style={styles.step}>
+    <View
+      style={[
+        styles.nodeAnchor,
+        {
+          left: `${(pos.x / ART_WIDTH) * 100}%`,
+          top: `${(pos.y / ART_HEIGHT) * 100}%`,
+        },
+      ]}
+      pointerEvents="box-none"
+    >
       <Pressable
         onPress={onPress}
         style={[
@@ -216,10 +250,14 @@ function TrailStep({
             height: size,
             borderRadius: size / 2,
             backgroundColor: fundo,
-            transform: [{ translateX: offset }],
-            opacity: node.state === "locked" ? 0.45 : 1,
-            borderColor: isCurrent ? colors.primary : "transparent",
-            borderWidth: isCurrent ? 3 : 0,
+            // Centraliza o nó no ponto: o anchor marca a coordenada exata, e
+            // metade do tamanho tira o canto superior esquerdo de cima dela.
+            marginLeft: -size / 2,
+            marginTop: -size / 2,
+            // Aro branco para o nó se destacar de qualquer trecho da arte —
+            // a trilha é clara, a floresta é escura.
+            borderWidth: isCurrent ? 3 : 2,
+            borderColor: isCurrent ? colors.primaryText : "rgba(255,255,255,0.85)",
           },
         ]}
         accessibilityRole="button"
@@ -234,68 +272,38 @@ function TrailStep({
               ? "lock-closed"
               : (node.icon as any)
           }
-          size={isCurrent ? 30 : 26}
+          size={isCurrent ? 28 : 24}
           color={conteudo}
         />
       </Pressable>
 
-      {/* Rótulo do nó, ao lado (segue o serpenteado, no lado oposto ao nó
-          para não brigar por espaço em tela estreita). */}
-      <View
-        style={[
-          styles.labelBox,
-          daDireita ? styles.labelLeft : styles.labelRight,
-        ]}
-      >
-        <Text
-          style={[
-            styles.label,
-            { color: node.state === "locked" ? colors.secondary : colors.text },
-          ]}
-          numberOfLines={1}
-        >
-          {node.label}
-        </Text>
-        {isCurrent ? (
-          <>
-            <Text style={[styles.progresso, { color: colors.primary }]}>
-              {node.wins}/{node.winsToUnlock} vitórias
-            </Text>
-            {/* "Você está aqui" — a peça marca a posição do jogador na trilha. */}
-            <View style={styles.aqui}>
-              <Text style={[styles.peca, { color: colors.accentOnLight }]}>♟</Text>
-              <Text style={[styles.aquiText, { color: colors.accentOnLight }]}>
-                você está aqui
-              </Text>
-            </View>
-          </>
-        ) : (
-          <Text style={[styles.elo, { color: colors.secondary }]}>
-            ~{node.elo}
-          </Text>
-        )}
-        {node.unlockedByQaOnly ? (
-          <Text style={[styles.qa, { color: colors.secondary }]}>
-            destravado só no build de QA
-          </Text>
-        ) : null}
-      </View>
-
-      {/* Segmento do trilho até o próximo nó. Dourado quando o nível já foi
-          concluído (o caminho "andado"), neutro à frente. */}
-      {!isLast ? (
+      {/* Só o nó ATUAL ganha texto por cima da arte, e só o que a arte não
+          tem: o contador de vitórias e o "você está aqui". Os NOMES dos
+          territórios já estão ilustrados — repeti-los aqui brigaria com a
+          tipografia do mapa. */}
+      {isCurrent ? (
         <View
           style={[
-            styles.conector,
-            {
-              backgroundColor: isDone ? colors.accent : colors.divider,
-              transform: [
-                { translateX: offset },
-                { rotate: daDireita ? "-28deg" : "28deg" },
-              ],
-            },
+            styles.badge,
+            { backgroundColor: colors.primary, marginTop: size / 2 - 4 },
           ]}
-        />
+        >
+          <Text style={[styles.badgeWins, { color: colors.primaryText }]}>
+            {node.wins}/{node.winsToUnlock} vitórias
+          </Text>
+          <View style={styles.aqui}>
+            <Text style={[styles.peca, { color: colors.primaryText }]}>♟</Text>
+            <Text style={[styles.aquiText, { color: colors.primaryText }]}>
+              você está aqui
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {node.unlockedByQaOnly ? (
+        <View style={[styles.qaBadge, { marginTop: size / 2 - 4 }]}>
+          <Text style={styles.qaText}>destravado só no build de QA</Text>
+        </View>
       ) : null}
     </View>
   );
@@ -325,22 +333,33 @@ const styles = StyleSheet.create({
   },
   errorText: { fontSize: 13, flexShrink: 1 },
   retry: { fontSize: 13, fontWeight: "700" },
-  trail: { paddingTop: 28, alignItems: "center" },
-  step: { alignItems: "center", width: "100%" },
+  artBox: { width: "100%", aspectRatio: ART_WIDTH / ART_HEIGHT },
+  art: { width: "100%", height: "100%" },
+  // Caixa de tamanho zero na coordenada exata: os filhos se posicionam em
+  // relação a ela, então o nó e o balão nunca saem de sincronia.
+  nodeAnchor: { position: "absolute", width: 0, height: 0, alignItems: "center" },
   node: { alignItems: "center", justifyContent: "center" },
-  labelBox: { position: "absolute", top: 8, maxWidth: 140 },
-  // O rótulo vai do lado OPOSTO ao deslocamento do nó: nó à direita, texto à
-  // esquerda. Em 320px é o que impede o texto de sair da tela.
-  labelLeft: { right: "58%", alignItems: "flex-end" },
-  labelRight: { left: "58%", alignItems: "flex-start" },
-  label: { fontSize: 15, fontWeight: "700" },
-  elo: { fontSize: 11 },
-  progresso: { fontSize: 12, fontWeight: "700" },
-  aqui: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
-  peca: { fontSize: 14 },
-  aquiText: { fontSize: 10, fontWeight: "700", textTransform: "uppercase" },
-  qa: { fontSize: 9, fontStyle: "italic", marginTop: 2 },
-  conector: { width: 4, height: GAP, borderRadius: 2, marginVertical: 4 },
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    alignItems: "center",
+    // Largo o bastante para "VOCÊ ESTÁ AQUI" caber em UMA linha — quebrado
+    // em duas, o balão vira um bloco alto que cobre a trilha.
+    minWidth: 136,
+  },
+  badgeWins: { fontSize: 12, fontWeight: "800" },
+  aqui: { flexDirection: "row", alignItems: "center", gap: 4 },
+  peca: { fontSize: 12 },
+  aquiText: { fontSize: 9, fontWeight: "700", textTransform: "uppercase" },
+  aquiLinha: { flexShrink: 0 },
+  qaBadge: {
+    backgroundColor: "rgba(20,24,28,0.7)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  qaText: { fontSize: 9, fontStyle: "italic", color: "rgba(255,255,255,0.85)" },
   aviso: {
     flexDirection: "row",
     alignItems: "center",
