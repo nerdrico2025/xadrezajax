@@ -25,9 +25,11 @@ type Props = {
   onPlayPuzzles: () => void;
   /** Treino (problemas além do diário) — exclusivo do plano pago. */
   onTraining: () => void;
+  /** Modo Turno (correspondência) — lista de partidas assíncronas. */
+  onCorrespondence: () => void;
 };
 
-export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPlayPuzzles, onTraining }: Props) {
+export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPlayPuzzles, onTraining, onCorrespondence }: Props) {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const { user, token } = useAuth();
@@ -154,6 +156,24 @@ export default function HomeScreen({ onPlayAI, onPlayOnline, onPrivateRoom, onPl
           <View>
             <Text style={[styles.cardTitle, { color: colors.text }]}>Partida Online</Text>
             <Text style={[styles.cardSub, { color: colors.secondary }]}>Busca rápida por oponente</Text>
+          </View>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.secondary} />
+      </Pressable>
+
+      {/* Card: Modo Turno — mesmo padrão visual do card "Modo Campanha"
+          (destaque secundário: relógio no lugar da trilha, sem o fundo
+          dourado, que já é a CTA primária da campanha). */}
+      <Pressable
+        style={[styles.card, { backgroundColor: colors.card, borderColor: colors.divider, borderWidth: 1 }]}
+        onPress={onCorrespondence}
+        android_ripple={{ color: colors.primary + "20" }}
+      >
+        <View style={styles.cardLeft}>
+          <Ionicons name="time" size={26} color={colors.accent} style={styles.cardIcon} />
+          <View>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Modo Turno</Text>
+            <Text style={[styles.cardSub, { color: colors.secondary }]}>Partidas por dias, no seu ritmo</Text>
           </View>
         </View>
         <Ionicons name="chevron-forward" size={20} color={colors.secondary} />
