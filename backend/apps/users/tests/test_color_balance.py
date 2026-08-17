@@ -149,7 +149,11 @@ class ResetUnearnedRatingsCommandTests(APITestCase):
         self.assertIn("DRY-RUN", output)
         profile = Profile.objects.get(user=user)
         self.assertIsNotNone(profile.onboarding_completed_at)
-        self.assertEqual(profile.modality_ratings.count(), 3)
+        # Uma linha por modalidade em MODALITY_CHOICES — inclui "corr" desde
+        # o Modo Turno.
+        self.assertEqual(
+            profile.modality_ratings.count(), len(ModalityRating.MODALITY_CHOICES)
+        )
 
     def test_apply_deletes_ratings_and_returns_account_to_onboarding(self):
         """As linhas são APAGADAS, não zeradas: o seed do onboarding usa
@@ -175,7 +179,9 @@ class ResetUnearnedRatingsCommandTests(APITestCase):
 
         profile = Profile.objects.get(user=played)
         self.assertIsNotNone(profile.onboarding_completed_at)
-        self.assertEqual(profile.modality_ratings.count(), 3)
+        self.assertEqual(
+            profile.modality_ratings.count(), len(ModalityRating.MODALITY_CHOICES)
+        )
         self.assertIn("PRESERVADAS", output)
 
     def test_is_idempotent(self):

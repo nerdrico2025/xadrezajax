@@ -130,11 +130,26 @@ class ModalityRating(models.Model):
     MODALITY_BULLET = "bullet"
     MODALITY_BLITZ = "blitz"
     MODALITY_RAPID = "rapid"
+    # Modo Turno (correspondência, dias por lance): pool de rating PRÓPRIO,
+    # não misturado com blitz/rápido. Um jogo de dias exercita habilidade
+    # diferente de um jogo de minutos, e jogar bem um não implica jogar bem
+    # o outro — colocar os dois no mesmo balde de rating distorceria os dois.
+    # Sem CheckConstraint no banco para `modality` (choices é só validação
+    # Python), então esta é uma adição sem risco ao schema existente.
+    MODALITY_CORRESPONDENCE = "corr"
     MODALITY_CHOICES = [
         ("bullet", "Bullet"),
         ("blitz", "Blitz"),
         ("rapid", "Rápido"),
+        ("corr", "Correspondência"),
     ]
+    # Subconjunto usado pelo ONBOARDING para semear o rating autodeclarado
+    # (item 0.4). Correspondência fica de fora DE PROPÓSITO: a pergunta de
+    # onboarding mede reflexo/velocidade de decisão, que não se aplica a um
+    # modo de dias por lance — o rating correspondente nasce neutro (1500,
+    # RD 350) no primeiro `_locked_modality_rating`, como qualquer perfil
+    # sem partida jogada naquela modalidade.
+    ONBOARDING_MODALITIES = (MODALITY_BULLET, MODALITY_BLITZ, MODALITY_RAPID)
 
     PROVISIONAL_GAMES = 20
 
@@ -1326,3 +1341,179 @@ def register_device_token(user, token, platform):
         # get_or_create() do caminho "já existe" não salva sozinho.
         device.save(update_fields=["last_seen_at"])
     return device
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODO TURNO (correspondência)
+#
+# Partida humano-vs-humano por DIAS, não por relógio de segundos — o
+# jogador fica offline a maior parte do tempo entre lances. Deliberadamente
+# fora do substrato de `Game`/`GameHistory` (que só representam partida JÁ
+# TERMINADA — `result` é campo obrigatório nos dois) e fora do Redis do
+# node-api (TTL de 2h, pensado para partida sendo jogada agora, não para
+# sobreviver dias sem lance). Este é o primeiro model do produto que
+# representa PARTIDA EM ANDAMENTO em Postgres.
+#
+# `GameHistory` NÃO é escrita por este subsistema nesta fase — `mode` lá só
+# aceita "ai"/"online" (max_length=6, "correspondence" não caberia), e a
+# tela de Histórico não foi tocada (Fase D, fora de escopo). É um gap
+# conhecido, não esquecimento: quando a UI mobile precisar mostrar
+# Correspondência junto do histórico de online/IA, ali é o ponto de decisão
+# entre estender GameHistory ou unir as duas fontes na tela.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+TIME_CONTROL_DAYS_CHOICES = [
+    (1, "1 dia por lance"),
+    (3, "3 dias por lance"),
+    (7, "7 dias por lance"),
+]
+
+
+class CorrespondenceGame(models.Model):
+    """
+    Uma partida do Modo Turno — do desafio/pareamento até o resultado.
+
+    STATUS, os três do desenho:
+      pending  → desafio direto enviado, aguardando aceite/recusa. Não vale
+                 para o limite de simultâneas (só `active` conta — decisão
+                 explícita, ver `count_active_correspondence_games`).
+      active   → aceito (desafio) ou pareado (matchmaking). Relógio rodando,
+                 lance pode ser submetido.
+      finished → terminada. Resultado gravado, Glicko-2 já aplicado.
+
+    SEMPRE `rated=True` — é humano-vs-humano, mesma regra de sempre (ver
+    GameResultView). Não existe campo `rated`: numa tabela dedicada a UM
+    modo que nunca varia nisso, um campo que nunca muda de valor não haveria
+    o que decidir — é constante do subsistema, documentada aqui.
+    """
+
+    STATUS_PENDING = "pending"
+    STATUS_ACTIVE = "active"
+    STATUS_FINISHED = "finished"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Aguardando aceite"),
+        (STATUS_ACTIVE, "Em andamento"),
+        (STATUS_FINISHED, "Terminada"),
+    ]
+
+    COLOR_WHITE = "w"
+    COLOR_BLACK = "b"
+    COLOR_CHOICES = [(COLOR_WHITE, "Brancas"), (COLOR_BLACK, "Pretas")]
+
+    START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+    # Vocabulário de resultado/término REAPROVEITADO de Game — um vocabulário
+    # só de fim de partida no produto inteiro (mesmo espírito do comentário
+    # em Game.TERMINATION_CHOICES).
+    RESULT_CHOICES = Game.RESULT_CHOICES
+    TERMINATION_CHOICES = Game.TERMINATION_CHOICES
+
+    white_player = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="correspondence_as_white"
+    )
+    black_player = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="correspondence_as_black"
+    )
+    # Quem enviou o desafio direto — null quando a partida veio do
+    # matchmaking (os dois lados são estranhos, não há "quem convidou").
+    # Existe SÓ para responder "quem pode aceitar/recusar": enquanto
+    # `status == pending`, é o usuário que NÃO é `challenger` (branco ou
+    # preto ainda não foi sorteado nesse ponto — o sorteio acontece no
+    # aceite, ver `respond_to_challenge`).
+    challenger = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="correspondence_challenges_sent",
+    )
+    status = models.CharField(
+        max_length=8, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
+
+    # Fixo na criação — não é campo livre. 1/3/7 dias, a mesma unidade usada
+    # para calcular `current_deadline` a cada lance.
+    time_control_days = models.PositiveSmallIntegerField(
+        choices=TIME_CONTROL_DAYS_CHOICES
+    )
+
+    fen = models.CharField(max_length=100, default=START_FEN)
+    # Lances em SAN, mesmo formato de Game.moves — um vocabulário de partida
+    # só, entre os dois subsistemas.
+    moves = models.JSONField(default=list, blank=True)
+    # De quem é a vez agora. Redundante com o FEN (que já codifica isso), mas
+    # como campo próprio permite ordenar/filtrar sem parsear FEN em toda
+    # consulta — é o que a listagem por prazo faz o tempo todo.
+    turn = models.CharField(max_length=1, choices=COLOR_CHOICES, default=COLOR_WHITE)
+
+    # Relógio por DIAS, não por segundos. `last_move_at` é carimbado no
+    # início (aceite/pareamento) e a cada lance; `current_deadline` é
+    # SEMPRE `last_move_at + time_control_days`, recalculado no mesmo
+    # instante — nunca fica implícito nem é recalculado em leitura.
+    last_move_at = models.DateTimeField(null=True, blank=True)
+    current_deadline = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    result = models.CharField(
+        max_length=5, choices=RESULT_CHOICES, blank=True, default=""
+    )
+    termination = models.CharField(
+        max_length=20, choices=TERMINATION_CHOICES, blank=True, default=""
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Partida do Modo Turno"
+        verbose_name_plural = "Partidas do Modo Turno"
+        ordering = ["current_deadline"]
+        indexes = [
+            models.Index(fields=["white_player", "status"]),
+            models.Index(fields=["black_player", "status"]),
+        ]
+
+    def player_color(self, user_id):
+        """Cor do usuário nesta partida, ou None se ele não participa."""
+        if self.white_player_id == user_id:
+            return self.COLOR_WHITE
+        if self.black_player_id == user_id:
+            return self.COLOR_BLACK
+        return None
+
+    def __str__(self):
+        return (
+            f"{self.white_player.email} × {self.black_player.email} " f"[{self.status}]"
+        )
+
+
+class CorrespondenceQueueEntry(models.Model):
+    """
+    Bilhete de espera do matchmaking assíncrono — REST puro, sem socket.
+
+    Fila DELIBERADAMENTE em Postgres, não Redis: o pareamento de blitz/rápido
+    de hoje precisa ser instantâneo (o jogador está com o app aberto, socket
+    conectado); aqui o "oponente" que vai preencher a fila pode aparecer
+    minutos ou horas depois, com o criador do bilhete já offline. Redis TTL
+    curto mataria o bilhete antes de alguém aparecer.
+
+    `unique_together` (user, time_control_days): um usuário só pode ter UM
+    bilhete por controle de tempo — evita a mesma pessoa duplicar entrada
+    tocando "procurar" duas vezes.
+    """
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="correspondence_queue_entries"
+    )
+    time_control_days = models.PositiveSmallIntegerField(
+        choices=TIME_CONTROL_DAYS_CHOICES
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "time_control_days")
+        verbose_name = "Fila do Modo Turno"
+        verbose_name_plural = "Filas do Modo Turno"
+
+    def __str__(self):
+        return f"{self.user.email} esperando {self.time_control_days}d"

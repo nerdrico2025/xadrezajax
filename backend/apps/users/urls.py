@@ -6,9 +6,15 @@ from .views import (
     CampaignProgressView,
     ChangePasswordView,
     ChessTokenObtainPairView,
+    CorrespondenceChallengeRespondView,
+    CorrespondenceChallengeView,
+    CorrespondenceDetailView,
+    CorrespondenceListView,
+    CorrespondenceMatchmakingView,
+    CorrespondenceMoveView,
     DeleteAccountView,
-    FriendListView,
     DeviceTokenView,
+    FriendListView,
     FriendRequestActionView,
     GameAnalysisView,
     GameDetailView,
@@ -114,4 +120,36 @@ urlpatterns = [
     path("friends/<int:pk>/", FriendRequestActionView.as_view(), name="friends-action"),
     # Fundação de push (pré-requisito do Modo Turno) — ver DeviceTokenView.
     path("device-token/", DeviceTokenView.as_view(), name="device-token"),
+    # Modo Turno (correspondência) — desafio/matchmaking/lance, REST puro,
+    # sem depender do node-api/Redis (ver docstring de CorrespondenceGame).
+    path(
+        "correspondence/",
+        CorrespondenceListView.as_view(),
+        name="correspondence-list",
+    ),
+    path(
+        "correspondence/challenge/",
+        CorrespondenceChallengeView.as_view(),
+        name="correspondence-challenge",
+    ),
+    path(
+        "correspondence/matchmaking/",
+        CorrespondenceMatchmakingView.as_view(),
+        name="correspondence-matchmaking",
+    ),
+    path(
+        "correspondence/<int:pk>/",
+        CorrespondenceDetailView.as_view(),
+        name="correspondence-detail",
+    ),
+    path(
+        "correspondence/<int:pk>/respond/",
+        CorrespondenceChallengeRespondView.as_view(),
+        name="correspondence-respond",
+    ),
+    path(
+        "correspondence/<int:pk>/move/",
+        CorrespondenceMoveView.as_view(),
+        name="correspondence-move",
+    ),
 ]

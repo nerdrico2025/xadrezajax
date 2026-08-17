@@ -527,7 +527,10 @@ class ProfileRatingsTests(APITestCase):
         response = self.client.get(PROFILE_URL)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         ratings = response.data["ratings"]
-        self.assertEqual(set(ratings.keys()), {"bullet", "blitz", "rapid"})
+        # "corr" (Modo Turno) entra na lista de modalidades com o mesmo
+        # default neutro das demais — ver ModalityRating.ONBOARDING_MODALITIES
+        # para a diferença entre "aparece no perfil" e "é semeada no onboarding".
+        self.assertEqual(set(ratings.keys()), {"bullet", "blitz", "rapid", "corr"})
         for modality in ratings.values():
             self.assertEqual(modality["rating"], 1500)
             self.assertEqual(modality["deviation"], 350)
