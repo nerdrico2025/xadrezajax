@@ -304,8 +304,70 @@ def submit_move(game, user, uci_move):
 
 
 def _finish_game(game, outcome):
-    """Grava resultado/término e aplica Glicko-2. `game` é salvo pelo
+    """Grava resultado/término de um lance que encerrou a partida no
+    TABULEIRO (mate/afogamento/etc.) e aplica Glicko-2. `game` é salvo pelo
     chamador — esta função só prepara os campos e chama o rating."""
+    game.termination = _TERMINATION_MAP.get(outcome.termination, "draw")
+    if outcome.winner is None:
+        result = "draw"
+    elif outcome.winner:  # True = brancas
+        result = "white"
+    else:
+        result = "black"
+    _apply_result_and_rating(game, result)
+
+
+def finalize_by_timeout(game):
+    """Perda por tempo: quem está com o turno no momento do prazo perde —
+    `game.turn` já diz de quem é a vez, e o prazo (`current_deadline`) é
+    sempre o prazo PARA ESSE turno (ver docstring de CorrespondenceGame).
+
+    Chamada só pelo comando `finalize_expired_correspondence_games`, nunca
+    por request de usuário — não existe (nem deve existir) um endpoint HTTP
+    "declarar perda de tempo do oponente": o servidor detecta sozinho.
+
+    Não salva `game` nem `status`/`current_deadline` já checados — quem
+    chama decide quando persistir, sob o MESMO lock de linha que já leu o
+    prazo vencido (ver o comando).
+    """
+    loser_color = game.turn
+    winner_color = (
+        CorrespondenceGame.COLOR_BLACK
+        if loser_color == CorrespondenceGame.COLOR_WHITE
+        else CorrespondenceGame.COLOR_WHITE
+    )
+    game.termination = "timeout"
+    result = "white" if winner_color == CorrespondenceGame.COLOR_WHITE else "black"
+    _apply_result_and_rating(game, result)
+
+    winner = (
+        game.white_player
+        if winner_color == CorrespondenceGame.COLOR_WHITE
+        else game.black_player
+    )
+    loser = game.black_player if winner is game.white_player else game.white_player
+
+    send_push(
+        loser,
+        "Tempo esgotado",
+        "Você perdeu por tempo — o prazo do lance venceu.",
+        {"type": "correspondence_timeout", "game_id": game.id, "result": "loss"},
+    )
+    send_push(
+        winner,
+        "Vitória por tempo",
+        "Seu oponente não jogou a tempo — você venceu.",
+        {"type": "correspondence_timeout", "game_id": game.id, "result": "win"},
+    )
+    return game
+
+
+def _apply_result_and_rating(game, result):
+    """Marca `game` FINISHED com `result` ("white"/"black"/"draw") e aplica
+    Glicko-2 no pool de correspondência. `game.termination` já deve estar
+    setado pelo chamador — o MOTIVO do fim varia (mate, afogamento, tempo
+    esgotado...) mas a mecânica de rating é sempre a mesma.
+    """
     from .models import ModalityRating
     from .views import (
         _apply_glicko2_result,
@@ -315,17 +377,14 @@ def _finish_game(game, outcome):
     from .glicko2 import Rating as GlickoRating, WIN, LOSS, DRAW
 
     game.status = CorrespondenceGame.STATUS_FINISHED
-    game.termination = _TERMINATION_MAP.get(outcome.termination, "draw")
+    game.result = result
     game.ended_at = timezone.now()
 
-    if outcome.winner is None:
-        game.result = "draw"
+    if result == "draw":
         score_white = score_black = DRAW
-    elif outcome.winner:  # True = brancas
-        game.result = "white"
+    elif result == "white":
         score_white, score_black = WIN, LOSS
     else:
-        game.result = "black"
         score_white, score_black = LOSS, WIN
 
     white_profile = get_or_create_profile(game.white_player)
