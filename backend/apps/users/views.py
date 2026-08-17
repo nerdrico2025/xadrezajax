@@ -32,6 +32,7 @@ from .glicko2 import (
 from .achievements import check_achievements, serialize_new
 from .models import (
     AchievementDefinition,
+    CorrespondenceGame,
     Game,
     GameAnalysis,
     GameLLMFeedback,
@@ -1886,7 +1887,7 @@ class OnboardingView(APIView):
             seed = ONBOARDING_SEED_RATING[level]
 
             blitz_rating = None
-            for modality, _ in ModalityRating.MODALITY_CHOICES:
+            for modality in ModalityRating.ONBOARDING_MODALITIES:
                 # get_or_create: se o perfil já tem rating na modalidade (caso
                 # raro de quem jogou antes de onboardar), não sobrescreve —
                 # rating conquistado vale mais que o seed autodeclarado.
@@ -2331,3 +2332,299 @@ class DeviceTokenView(APIView):
 
         register_device_token(request.user, token, platform)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODO TURNO (correspondência)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_VALID_TIME_CONTROL_DAYS = (1, 3, 7)
+
+
+def _serialize_correspondence_game(game, user):
+    """Sempre da PERSPECTIVA de quem pediu — `opponent`/`my_color`/
+    `is_my_turn` poupam o app de comparar ids de usuário que ele não tem.
+
+    `my_color`/`is_my_turn` vêm `None` enquanto `pending`: a cor gravada
+    nesse status é só o valor provisório que satisfaz o campo obrigatório
+    (ver `CorrespondenceGame.challenger`) — mostrá-la como se fosse
+    definitiva confundiria o app antes do sorteio de verdade no aceite.
+    """
+    opponent = (
+        game.black_player if user.id == game.white_player_id else game.white_player
+    )
+    opponent_profile = getattr(opponent, "profile", None)
+    pending = game.status == CorrespondenceGame.STATUS_PENDING
+    my_color = None if pending else game.player_color(user.id)
+
+    return {
+        "id": game.id,
+        "status": game.status,
+        "time_control_days": game.time_control_days,
+        "fen": game.fen,
+        "moves": game.moves,
+        "my_color": my_color,
+        "is_my_turn": None if pending else my_color == game.turn,
+        "is_challenger": user.id == game.challenger_id,
+        "opponent": {
+            "id": opponent.id,
+            "username": getattr(opponent_profile, "username", None),
+            "full_name": opponent.full_name,
+        },
+        "result": game.result,
+        "termination": game.termination,
+        "last_move_at": game.last_move_at.isoformat() if game.last_move_at else None,
+        "current_deadline": (
+            game.current_deadline.isoformat() if game.current_deadline else None
+        ),
+        "created_at": game.created_at.isoformat(),
+        "ended_at": game.ended_at.isoformat() if game.ended_at else None,
+    }
+
+
+# Código de erro de negócio → status HTTP. `not_participant`/`not_found`
+# viram 404 (esconder existência de algo que não é seu, mesmo padrão de
+# GameDetailView); os demais são 400/403 conforme a origem.
+_CORRESPONDENCE_ERROR_STATUS = {
+    "not_found": status.HTTP_404_NOT_FOUND,
+    "not_participant": status.HTTP_404_NOT_FOUND,
+    "self": status.HTTP_400_BAD_REQUEST,
+    "not_pending": status.HTTP_400_BAD_REQUEST,
+    "not_target": status.HTTP_403_FORBIDDEN,
+    "limit": status.HTTP_403_FORBIDDEN,
+    "not_active": status.HTTP_400_BAD_REQUEST,
+    "not_your_turn": status.HTTP_400_BAD_REQUEST,
+    "illegal": status.HTTP_400_BAD_REQUEST,
+}
+
+
+def _correspondence_error_response(exc):
+    return Response(
+        {"detail": exc.message, "code": exc.code},
+        status=_CORRESPONDENCE_ERROR_STATUS.get(exc.code, status.HTTP_400_BAD_REQUEST),
+    )
+
+
+class CorrespondenceChallengeView(APIView):
+    """
+    POST /api/v1/auth/correspondence/challenge/
+    Desafia um amigo pelo username. Body: {"username", "time_control_days"}.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from . import correspondence
+
+        username = str(request.data.get("username", "")).strip()
+        try:
+            time_control_days = int(request.data.get("time_control_days"))
+        except (TypeError, ValueError):
+            time_control_days = None
+
+        if not username:
+            return Response(
+                {"detail": "username é obrigatório."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if time_control_days not in _VALID_TIME_CONTROL_DAYS:
+            return Response(
+                {"detail": "time_control_days deve ser 1, 3 ou 7."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            game = correspondence.create_challenge(
+                request.user, username, time_control_days
+            )
+        except correspondence.ChallengeError as exc:
+            return _correspondence_error_response(exc)
+
+        return Response(
+            _serialize_correspondence_game(game, request.user),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CorrespondenceChallengeRespondView(APIView):
+    """
+    POST /api/v1/auth/correspondence/{id}/respond/
+    Body: {"accept": true|false}. Só o alvo do desafio pode responder.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from . import correspondence
+
+        game = CorrespondenceGame.objects.filter(
+            id=pk, status=CorrespondenceGame.STATUS_PENDING
+        ).first()
+        if game is None or request.user.id not in (
+            game.white_player_id,
+            game.black_player_id,
+        ):
+            return Response(
+                {"detail": "Desafio não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        accept = bool(request.data.get("accept"))
+        try:
+            game = correspondence.respond_to_challenge(game, request.user, accept)
+        except correspondence.ChallengeError as exc:
+            return _correspondence_error_response(exc)
+
+        if not accept:
+            return Response({"detail": "Desafio recusado."})
+        return Response(_serialize_correspondence_game(game, request.user))
+
+
+class CorrespondenceMatchmakingView(APIView):
+    """
+    POST   /api/v1/auth/correspondence/matchmaking/ → entra na fila (ou
+           pareia na hora se já houver alguém esperando).
+    DELETE /api/v1/auth/correspondence/matchmaking/ → sai da fila.
+    Body/query em ambos: {"time_control_days"}.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from . import correspondence
+
+        try:
+            time_control_days = int(request.data.get("time_control_days"))
+        except (TypeError, ValueError):
+            time_control_days = None
+        if time_control_days not in _VALID_TIME_CONTROL_DAYS:
+            return Response(
+                {"detail": "time_control_days deve ser 1, 3 ou 7."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            game, queued = correspondence.join_matchmaking(
+                request.user, time_control_days
+            )
+        except correspondence.ChallengeError as exc:
+            return _correspondence_error_response(exc)
+
+        if queued:
+            return Response({"detail": "Na fila.", "queued": True})
+        return Response(
+            {
+                **_serialize_correspondence_game(game, request.user),
+                "queued": False,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    def delete(self, request):
+        from . import correspondence
+
+        try:
+            time_control_days = int(
+                request.data.get("time_control_days")
+                or request.query_params.get("time_control_days")
+            )
+        except (TypeError, ValueError):
+            time_control_days = None
+        if time_control_days not in _VALID_TIME_CONTROL_DAYS:
+            return Response(
+                {"detail": "time_control_days deve ser 1, 3 ou 7."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        correspondence.leave_matchmaking(request.user, time_control_days)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CorrespondenceMoveView(APIView):
+    """
+    POST /api/v1/auth/correspondence/{id}/move/
+    Body: {"move": "e2e4"} (UCI). Validado 100% no servidor via python-chess.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from . import correspondence
+
+        uci_move = str(request.data.get("move", "")).strip()
+        if not uci_move:
+            return Response(
+                {"detail": "move é obrigatório."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            # Lock de linha: dois lances concorrentes na mesma partida (duplo
+            # toque em "confirmar") serializam aqui — o segundo vê o turno já
+            # trocado pelo primeiro e cai em `not_your_turn`.
+            game = CorrespondenceGame.objects.select_for_update().filter(id=pk).first()
+            if game is None or request.user.id not in (
+                game.white_player_id,
+                game.black_player_id,
+            ):
+                return Response(
+                    {"detail": "Partida não encontrada."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            try:
+                game = correspondence.submit_move(game, request.user, uci_move)
+            except correspondence.MoveError as exc:
+                return Response(
+                    {"detail": exc.message, "code": exc.code},
+                    status=_CORRESPONDENCE_ERROR_STATUS.get(
+                        exc.code, status.HTTP_400_BAD_REQUEST
+                    ),
+                )
+
+        return Response(_serialize_correspondence_game(game, request.user))
+
+
+class CorrespondenceListView(APIView):
+    """
+    GET /api/v1/auth/correspondence/
+    Minhas partidas (desafios pendentes, em andamento e terminadas),
+    prazo mais urgente primeiro — segue `CorrespondenceGame.Meta.ordering`.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        games = CorrespondenceGame.objects.filter(
+            Q(white_player=request.user) | Q(black_player=request.user)
+        ).select_related("white_player__profile", "black_player__profile")
+        return Response(
+            [_serialize_correspondence_game(g, request.user) for g in games]
+        )
+
+
+class CorrespondenceDetailView(APIView):
+    """
+    GET /api/v1/auth/correspondence/{id}/
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        game = (
+            CorrespondenceGame.objects.select_related(
+                "white_player__profile", "black_player__profile"
+            )
+            .filter(id=pk)
+            .first()
+        )
+        if game is None or request.user.id not in (
+            game.white_player_id,
+            game.black_player_id,
+        ):
+            return Response(
+                {"detail": "Partida não encontrada."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(_serialize_correspondence_game(game, request.user))

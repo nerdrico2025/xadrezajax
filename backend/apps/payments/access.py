@@ -61,3 +61,34 @@ def can_play_daily_puzzle(profile):  # noqa: ARG001 - assinatura por simetria
 def can_train_puzzles(profile):
     """Treino (problemas além do diário) é exclusivo do plano pago."""
     return has_paid_access(profile)
+
+
+# Modo Turno (correspondência): 2 partidas simultâneas no Grátis, ilimitado
+# no pago. Só `active` conta para o limite — desafio `pending` (aguardando
+# aceite) não ocupa cota, porque pode ser recusado e nunca virar partida.
+FREE_CORRESPONDENCE_LIMIT = 2
+
+
+def active_correspondence_games(profile):
+    from django.db.models import Q
+
+    from apps.users.models import CorrespondenceGame
+
+    return CorrespondenceGame.objects.filter(
+        status=CorrespondenceGame.STATUS_ACTIVE
+    ).filter(Q(white_player_id=profile.user_id) | Q(black_player_id=profile.user_id))
+
+
+def can_start_correspondence_game(profile):
+    """(permitido, restantes) — restantes é None para plano pago (ilimitado).
+
+    Mesmo padrão de `can_play_game`/`can_train_puzzles`: a checagem mora aqui,
+    perto das outras de plano; a mensagem ao usuário fica por conta de quem
+    chama.
+    """
+    if has_paid_access(profile):
+        return True, None
+    restantes = max(
+        0, FREE_CORRESPONDENCE_LIMIT - active_correspondence_games(profile).count()
+    )
+    return restantes > 0, restantes

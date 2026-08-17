@@ -11,6 +11,12 @@ requests==2.32.3
 gunicorn==23.0.0
 Pillow==11.2.1
 stripe==15.3.0
+# Validação de regras de xadrez no servidor — Modo Turno (correspondência).
+# O node-api já valida via chess.js (JS); Django não tinha nenhum motor de
+# regras até aqui. O pacote no PyPI se chama `chess`, não `python-chess`
+# (esse é o nome do projeto/repo, não o nome instalável — confundir os dois
+# faz o pip procurar o pacote errado).
+chess==1.11.2
 
 # ── testes ──
 pytest==8.3.5
