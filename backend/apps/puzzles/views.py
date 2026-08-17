@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from django.db.models import Sum
@@ -20,6 +21,8 @@ from .models import (
     UserPuzzleProgress,
     get_daily_puzzle,
 )
+
+logger = logging.getLogger(__name__)
 
 # Modelo de produto (redesenho de 2026-07-21):
 #   - Problema do dia (`daily/`): 1 por dia, o MESMO para todos, grátis;
@@ -328,9 +331,15 @@ class PuzzleCheckMoveView(APIView):
     resposta lia o corpo da requisição. Movendo a comparação para cá, a solução
     deixa de sair do servidor enquanto o problema está jogável.
 
-    NÃO conta tentativa e NÃO grava progresso: quem faz isso continua sendo o
-    `progress/`, que é onde o esgotamento é carimbado. Este endpoint é uma
-    função pura sobre (problema, índice, lance).
+    CONTA A TENTATIVA E GRAVA O PROGRESSO. Era função pura, e o `progress/`
+    contava a partir do que o CLIENTE dizia — o que abria dois buracos: dava
+    para varrer lances aqui sem custo nenhum (nada era registrado) e dava para
+    mandar `solved: true` ao `progress/` sem nunca ter acertado.
+
+    Agora o servidor é a única autoridade: quem sabe se o lance está certo é
+    este endpoint, então é ele que incrementa tentativa, carimba o
+    esgotamento e marca o problema como resolvido. O `progress/` virou leitura
+    de estado (ver a docstring de lá).
 
     Formato UCI ("e2e4", "e7e8q"), que é como a solução está gravada. SAN
     exigiria um motor de xadrez no backend (não há python-chess nas
@@ -338,6 +347,10 @@ class PuzzleCheckMoveView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    # Teto por VELOCIDADE, independente da contagem de tentativas. A contagem
+    # sozinha não impede um script de varrer lances na velocidade da rede no
+    # Treino, que é ilimitado por regra de produto.
+    throttle_scope = "puzzle_check_move"
 
     def post(self, request, pk):
         try:
@@ -356,6 +369,26 @@ class PuzzleCheckMoveView(APIView):
         is_daily = bool(daily and daily.id == puzzle.id)
         if not is_daily and not can_train_puzzles(profile):
             return _premium_required_response()
+
+        today = timezone.localdate()
+        progress, _created = UserPuzzleProgress.objects.get_or_create(
+            user=request.user, puzzle=puzzle
+        )
+
+        # Esgotou hoje: recusa explícita, em vez de seguir aceitando lance.
+        # 200 e não 429 de propósito — esgotar as tentativas é ESTADO DE JOGO,
+        # previsto pela regra de produto, e a tela sabe desenhá-lo. Um 429
+        # aqui se confundiria com o throttle, que é outra coisa (velocidade).
+        if is_daily and progress.is_exhausted_today(today):
+            return Response(
+                {
+                    "correct": False,
+                    "exhausted": True,
+                    "next_index": None,
+                    "solved": False,
+                    "reply": None,
+                }
+            )
 
         solution = puzzle.solution or []
 
@@ -387,12 +420,26 @@ class PuzzleCheckMoveView(APIView):
             )
 
         if played != _normalize_uci(solution[index]):
+            # A tentativa é CONTADA AQUI, que é onde o servidor sabe que errou.
+            # `attempts` é o acumulado de sempre (alimenta o stats/);
+            # `daily_attempts` é o contador com data, que é quem tem o teto.
+            progress.attempts += 1
+            if is_daily:
+                if progress.daily_attempts_date != today:
+                    progress.daily_attempts = 0
+                    progress.daily_attempts_date = today
+                progress.daily_attempts += 1
+                if progress.daily_attempts >= DAILY_PUZZLE_MAX_ATTEMPTS:
+                    progress.exhausted_at = timezone.now()
+            progress.save()
+
             # Resposta mínima: só o booleano. Nada aqui pode deixar escapar
             # qual era o lance certo, nem por omissão (tamanho da sequência,
             # lance seguinte, etc.).
             return Response(
                 {
                     "correct": False,
+                    "exhausted": is_daily and progress.is_exhausted_today(today),
                     "next_index": index,
                     "solved": False,
                     "reply": None,
@@ -403,22 +450,79 @@ class PuzzleCheckMoveView(APIView):
         # (se houver) é a resposta do oponente — que o cliente precisa receber
         # para animar no tabuleiro. Não é vazamento: é a consequência de um
         # lance que o usuário já encontrou.
-        after_player = index + 1
-        if after_player >= len(solution):
-            return Response(
-                {"correct": True, "next_index": None, "solved": True, "reply": None}
-            )
+        progress.attempts += 1
 
-        reply = solution[after_player]
-        next_index = after_player + 1
-        finished = next_index >= len(solution)
+        after_player = index + 1
+        finished = after_player >= len(solution)
+        reply = None
+        next_index = None
+        if not finished:
+            reply = solution[after_player]
+            next_index = after_player + 1
+            finished = next_index >= len(solution)
+            if finished:
+                next_index = None
+
+        if finished:
+            self._mark_solved(progress, is_daily, today)
+        progress.save()
+
+        if finished:
+            # Conquistas de problema: o gatilho passa a ser a resolução
+            # CONFIRMADA pelo servidor, não o `solved` que o cliente mandava.
+            from apps.users.achievements import check_achievements
+            from apps.users.models import AchievementDefinition
+
+            check_achievements(request.user, AchievementDefinition.TRIGGER_PUZZLE)
+
         return Response(
             {
                 "correct": True,
-                "next_index": None if finished else next_index,
+                "next_index": next_index,
                 "solved": finished,
                 "reply": reply,
             }
+        )
+
+    @staticmethod
+    def _mark_solved(progress, is_daily, today):
+        """Carimba a resolução — o ÚNICO lugar que faz isso agora.
+
+        Mantém a distinção que já existia: `solved`/`solved_at` são a PRIMEIRA
+        resolução por qualquer fluxo (progressão do Treino e fonte do streak),
+        e `daily_solved_date` é do diário, por DATA, para um problema reciclado
+        poder ser marcado de novo num ciclo futuro.
+        """
+        if is_daily:
+            progress.daily_solved_date = today
+        if not progress.solved:
+            progress.solved = True
+            progress.solved_at = timezone.now()
+
+
+def _log_client_divergence(request, progress, is_daily, today):
+    """Compara o que o cliente ALEGOU com o que o servidor REGISTROU.
+
+    Só observabilidade: nada aqui altera resposta nem estado. Existe para o
+    caso de um cliente e o servidor discordarem — o que hoje significa cliente
+    antigo (que não chama `check-move/`) ou tentativa de fraude, e nos dois
+    casos é bom saber que aconteceu.
+    """
+    try:
+        alegou_resolvido = bool(request.data.get("solved", False))
+        servidor_resolvido = (
+            progress.is_solved_today(today) if is_daily else progress.solved
+        )
+        if alegou_resolvido and not servidor_resolvido:
+            logger.warning(
+                "[puzzles] cliente alegou resolvido sem confirmação do servidor "
+                "(user=%s puzzle=%s)",
+                request.user.id,
+                progress.puzzle_id,
+            )
+    except Exception:  # noqa: BLE001 - log nunca derruba a requisição
+        logger.warning(
+            "[puzzles] falha ao comparar progresso do cliente", exc_info=True
         )
 
 
@@ -457,59 +561,24 @@ class PuzzleProgressView(APIView):
         if not is_daily and not can_train_puzzles(profile):
             return _premium_required_response()
 
-        solved = bool(request.data.get("solved", False))
-        attempts = max(1, int(request.data.get("attempts", 1)))
         today = timezone.localdate()
-
         progress, _created = UserPuzzleProgress.objects.get_or_create(
             user=request.user, puzzle=puzzle
         )
 
-        if is_daily and progress.is_exhausted_today():
-            # Já esgotou hoje: nada muda, nem solve tardio conta. A solução vai
-            # na resposta (estado terminal) — reabrir esgotado revela o lance.
-            return Response(self._state(progress, puzzle, is_daily, today))
-
-        progress.attempts += attempts
-
-        if is_daily:
-            # Reinicia a contagem quando o carimbo é de outro dia (o mesmo
-            # problema pode voltar a ser o do dia num ciclo futuro).
-            if progress.daily_attempts_date != today:
-                progress.daily_attempts = 0
-                progress.daily_attempts_date = today
-            if solved:
-                # ÚNICO lugar que carimba o diário como resolvido. O Treino
-                # nunca passa por aqui, mesmo resolvendo o mesmo puzzle_id no
-                # mesmo dia — diário e treino são estados independentes.
-                #
-                # Incondicional (não é `if not progress.daily_solved_date`):
-                # um problema que volta pelo ciclo de 7 dias precisa poder ser
-                # marcado de novo, com a data de hoje.
-                progress.daily_solved_date = today
-            else:
-                progress.daily_attempts += 1
-                if progress.daily_attempts >= DAILY_PUZZLE_MAX_ATTEMPTS:
-                    progress.exhausted_at = timezone.now()
-
-        # `solved`/`solved_at` seguem sendo a PRIMEIRA resolução, por qualquer
-        # fluxo: é progressão de Treino e fonte do streak. Não são reescritos
-        # numa re-resolução — e é por isso que o diário precisa do carimbo
-        # próprio acima.
-        if solved and not progress.solved:
-            progress.solved = True
-            progress.solved_at = timezone.now()
-
-        progress.save()
-
-        # Conquistas de problema. Só quando resolveu — o streak conta dias com
-        # resolução, e tentativa errada não muda nada nele. Import local para
-        # não criar ciclo entre os apps `puzzles` e `users` no carregamento.
-        if solved:
-            from apps.users.achievements import check_achievements
-            from apps.users.models import AchievementDefinition
-
-            check_achievements(request.user, AchievementDefinition.TRIGGER_PUZZLE)
+        # O CORPO DA REQUISIÇÃO NÃO É MAIS FONTE DE VERDADE.
+        #
+        # `solved` e `attempts` vinham do cliente e eram gravados como vieram —
+        # dava para mandar `solved: true` sem ter acertado nada, e inflar a
+        # estatística de tentativas à vontade. Quem sabe o que de fato
+        # aconteceu é o `check-move/`, que compara o lance contra a solução; é
+        # ele que conta e carimba agora.
+        #
+        # O contrato HTTP não muda: cliente antigo continua podendo mandar os
+        # dois campos e recebendo 200 com o estado. Eles só são IGNORADOS —
+        # e a divergência vira log, para dar visibilidade sem criar
+        # dependência de comportamento em cima do valor do cliente.
+        _log_client_divergence(request, progress, is_daily, today)
 
         return Response(self._state(progress, puzzle, is_daily, today))
 

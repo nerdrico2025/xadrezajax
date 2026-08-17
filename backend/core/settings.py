@@ -189,6 +189,12 @@ REST_FRAMEWORK = {
         # O teto por PARTIDA é o MAX_ATTEMPTS do model; este aqui é o outro
         # eixo — um usuário disparando geração em muitas partidas seguidas.
         "llm_feedback": "10/hour",
+        # Validação de lance de problema. É teto por VELOCIDADE, não por
+        # tentativa: o Treino é ilimitado por regra de produto, então a
+        # contagem de tentativas sozinha não impede um script de varrer lances
+        # na velocidade da rede. 30/min é folgado para quem joga com a mão
+        # (um lance por ~2s) e fecha a porta para automação.
+        "puzzle_check_move": "30/minute",
     },
 }
 
