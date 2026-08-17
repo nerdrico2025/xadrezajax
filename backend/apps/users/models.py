@@ -1236,3 +1236,93 @@ class UserAchievement(models.Model):
 
     def __str__(self):
         return f"{self.user.email} — {self.achievement.code}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PUSH NOTIFICATION — FUNDAÇÃO
+#
+# Pré-requisito do Modo Turno (correspondência): sem push, um jogador só
+# descobre que tem lance pendente reabrindo o app por conta própria. Esta
+# fase é SÓ o encanamento — token registrado e função de envio. Nenhuma
+# feature dispara notificação real ainda.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class DeviceToken(models.Model):
+    """
+    Um device de um usuário, para envio de push via Expo.
+
+    TABELA PRÓPRIA, não campo único no perfil: um usuário pode ter o app
+    aberto no celular e num tablet ao mesmo tempo, e os dois precisam receber
+    o aviso — um campo único sobrescreveria o token do primeiro device toda
+    vez que o segundo se registrasse.
+
+    O token Expo (`ExponentPushToken[...]`) é por INSTALAÇÃO do app, não por
+    usuário: reinstalar gera token novo, e o antigo simplesmente para de
+    receber (a Expo descarta silenciosamente). Não há de-registro explícito
+    por ora — é limpeza de custo baixo para uma fase futura.
+    """
+
+    PLATFORM_IOS = "ios"
+    PLATFORM_ANDROID = "android"
+    PLATFORM_CHOICES = [
+        (PLATFORM_IOS, "iOS"),
+        (PLATFORM_ANDROID, "Android"),
+    ]
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="device_tokens"
+    )
+    # unique=True (não unique_together com user): o MESMO token nunca pode
+    # pertencer a dois usuários ao mesmo tempo — é o dispositivo físico. Se
+    # user A faz logout e user B loga no mesmo aparelho, o registro seguinte
+    # precisa REASSOCIAR o token a B, não duplicar a linha (ver
+    # register_device_token).
+    token = models.CharField(max_length=200, unique=True)
+    platform = models.CharField(max_length=10, choices=PLATFORM_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+    # Atualizado a cada registro do MESMO token — é o que permite, numa fase
+    # futura, podar tokens que o app parou de renovar (desinstalado, sem uso
+    # há meses) sem esperar a Expo reportar erro de envio.
+    last_seen_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Token de dispositivo"
+        verbose_name_plural = "Tokens de dispositivo"
+        indexes = [
+            models.Index(fields=["user"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} — {self.platform} ({self.token[:20]}…)"
+
+
+def register_device_token(user, token, platform):
+    """Registra ou reassocia um token de push. IDEMPOTENTE por `token`.
+
+    Três casos, na ordem em que valem:
+      1. token novo             → cria a linha para `user`.
+      2. token já é do `user`   → só atualiza `last_seen_at` (via auto_now).
+      3. token era de OUTRO user → REASSOCIA para `user`.
+
+    O caso 3 existe porque o token pertence ao APARELHO, não à conta: logout
+    de A e login de B no mesmo device manda o mesmo token de novo, e a linha
+    tem de seguir o usuário atual — senão A continuaria recebendo os pushes
+    de B.
+    """
+    token = (token or "").strip()
+    if not token:
+        return None
+
+    device, created = DeviceToken.objects.get_or_create(
+        token=token, defaults={"user": user, "platform": platform}
+    )
+    if not created and (device.user_id != user.id or device.platform != platform):
+        device.user = user
+        device.platform = platform
+        device.save(update_fields=["user", "platform"])
+    elif not created:
+        # `auto_now` já atualiza `last_seen_at`, mas só em .save() — o
+        # get_or_create() do caminho "já existe" não salva sozinho.
+        device.save(update_fields=["last_seen_at"])
+    return device

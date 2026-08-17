@@ -8,6 +8,7 @@ from .views import (
     ChessTokenObtainPairView,
     DeleteAccountView,
     FriendListView,
+    DeviceTokenView,
     FriendRequestActionView,
     GameAnalysisView,
     GameDetailView,
@@ -111,4 +112,6 @@ urlpatterns = [
     path("friends/request/", SendFriendRequestView.as_view(), name="friends-request"),
     path("friends/requests/", PendingRequestsView.as_view(), name="friends-pending"),
     path("friends/<int:pk>/", FriendRequestActionView.as_view(), name="friends-action"),
+    # Fundação de push (pré-requisito do Modo Turno) — ver DeviceTokenView.
+    path("device-token/", DeviceTokenView.as_view(), name="device-token"),
 ]

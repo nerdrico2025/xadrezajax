@@ -2292,3 +2292,42 @@ class FriendRequestActionView(APIView):
 
         friendship.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DeviceTokenView(APIView):
+    """
+    POST /api/v1/auth/device-token/
+    Registra (ou reassocia) o token Expo push do device atual.
+
+    Body: {"token": "ExponentPushToken[...]", "platform": "ios"|"android"}
+
+    IDEMPOTENTE por `token`: chamar de novo com o mesmo token só atualiza
+    `last_seen_at` (é o que o app faz a cada abertura, sem custo). Chamar com
+    um token que pertencia a OUTRO usuário reassocia — é o caminho de logout
+    de A / login de B no mesmo aparelho. Ver `register_device_token`.
+
+    FUNDAÇÃO do Modo Turno: nenhuma feature dispara push ainda. Este endpoint
+    só grava o token para quando alguma existir.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from .models import DeviceToken, register_device_token
+
+        token = str(request.data.get("token", "")).strip()
+        platform = request.data.get("platform")
+
+        if not token:
+            return Response(
+                {"detail": "token é obrigatório."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if platform not in (DeviceToken.PLATFORM_IOS, DeviceToken.PLATFORM_ANDROID):
+            return Response(
+                {"detail": "platform deve ser 'ios' ou 'android'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        register_device_token(request.user, token, platform)
+        return Response(status=status.HTTP_204_NO_CONTENT)
