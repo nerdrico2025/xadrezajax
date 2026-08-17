@@ -668,6 +668,10 @@ describe("tamanho do tabuleiro medido (paridade com Puzzle/Online)", () => {
     const tree = renderSemMedir();
     layoutBoard(tree.root);
     expect(chessboardRenders[0].flipped).toBe(false);
-    expect(chessboardRenders[0].renderPiece).toBeUndefined();
+    // `renderPiece` agora existe SEMPRE (é o conjunto rhosgfx). O que muda
+    // nas pretas é a contra-rotação DENTRO dele — então o teste olha o estilo
+    // da peça renderizada, não a ausência da prop.
+    const peca = chessboardRenders[0].renderPiece("wq");
+    expect(peca.props.style).toBeUndefined();
   });
 });

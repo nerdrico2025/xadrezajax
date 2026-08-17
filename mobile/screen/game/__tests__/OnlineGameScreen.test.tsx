@@ -265,7 +265,9 @@ describe("orientação do tabuleiro no primeiro paint", () => {
 
     const first = chessboardRenders[0];
     expect(first.flipped).toBe(false);
-    expect(first.renderPiece).toBeUndefined();
+    // `renderPiece` agora existe SEMPRE (conjunto rhosgfx). Nas brancas a
+    // peça não leva estilo de rotação; nas pretas, leva.
+    expect(first.renderPiece("wq").props.style).toBeUndefined();
   });
 
   it("passa o tamanho medido ao tabuleiro em vez do default da lib", () => {
