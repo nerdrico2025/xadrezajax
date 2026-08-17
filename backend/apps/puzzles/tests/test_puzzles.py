@@ -13,12 +13,17 @@ esgotadas persistindo até a virada do dia, e o ponto crítico de gating do
 from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
+from django.conf import settings
+from django.core.cache import cache
 from django.urls import reverse
+from unittest.mock import patch
+from rest_framework.throttling import ScopedRateThrottle
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.payments.models import Subscription
+from apps.puzzles.views import PuzzleCheckMoveView
 from apps.puzzles.models import (
     DAILY_PUZZLE_MAX_ATTEMPTS,
     DailyPuzzle,
@@ -86,6 +91,37 @@ def detail_url(puzzle):
 
 def check_move_url(puzzle):
     return reverse("puzzles:check_move", args=[puzzle.id])
+
+
+# ── Produzir estado pelo caminho REAL ────────────────────────────────────────
+#
+# Antes destes helpers os testes empurravam `{"solved": ..., "attempts": ...}`
+# no `progress/`, que gravava o que o cliente dissesse. Agora o servidor é a
+# autoridade: só `check-move/` conta tentativa e carimba resolução, então é por
+# ele que o estado é produzido. As asserções de REGRA não mudaram — mudou de
+# onde o estado vem.
+
+
+def acertar(client, puzzle, index=0):
+    """Joga o lance CERTO e devolve o ESTADO resultante (`progress/`).
+
+    Devolve o estado, e não a resposta do `check-move/`, para os testes
+    continuarem afirmando sobre os mesmos campos de sempre
+    (`solved`, `attempts_used`, `exhausted`, `solution`) — o que mudou é como
+    o estado é PRODUZIDO, não o que ele significa.
+    """
+    client.post(
+        check_move_url(puzzle),
+        {"move": puzzle.solution[index], "index": index},
+        format="json",
+    )
+    return client.post(progress_url(puzzle), {}, format="json")
+
+
+def errar(client, puzzle, index=0):
+    """Joga um lance errado e devolve o ESTADO resultante."""
+    client.post(check_move_url(puzzle), {"move": "h8h7", "index": index}, format="json")
+    return client.post(progress_url(puzzle), {}, format="json")
 
 
 # Sequência de 3 lances (jogador, oponente, jogador) — o caso que prova que o
@@ -247,9 +283,7 @@ class ProgressGatingTests(CleanPuzzleBankMixin, APITestCase):
 
     # ── sentido 1: não travar o diário grátis ────────────────────────────
     def test_gratis_registra_solve_do_diario(self):
-        response = self.client.post(
-            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
-        )
+        response = acertar(self.client, self.daily)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["solved"])
         self.assertEqual(response.data["mode"], "daily")
@@ -258,17 +292,13 @@ class ProgressGatingTests(CleanPuzzleBankMixin, APITestCase):
         )
 
     def test_gratis_registra_falha_do_diario(self):
-        response = self.client.post(
-            progress_url(self.daily), {"solved": False, "attempts": 1}, format="json"
-        )
+        response = errar(self.client, self.daily)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["attempts_used"], 1)
 
     # ── sentido 2: não vazar o treino ────────────────────────────────────
     def test_gratis_e_bloqueado_no_progresso_de_problema_de_treino(self):
-        response = self.client.post(
-            progress_url(self.training), {"solved": True, "attempts": 1}, format="json"
-        )
+        response = acertar(self.client, self.training)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(response.data["code"], "training_requires_premium")
         self.assertFalse(
@@ -280,29 +310,19 @@ class ProgressGatingTests(CleanPuzzleBankMixin, APITestCase):
     def test_cliente_nao_escolhe_o_modo(self):
         """Mandar 'mode: daily' no corpo não convence o servidor: quem decide
         é a comparação com o problema do dia."""
-        response = self.client.post(
-            progress_url(self.training),
-            {"solved": True, "attempts": 1, "mode": "daily"},
-            format="json",
-        )
+        response = acertar(self.client, self.training)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_pago_registra_progresso_no_treino(self):
         make_paid(self.user)
-        response = self.client.post(
-            progress_url(self.training), {"solved": True, "attempts": 2}, format="json"
-        )
+        response = acertar(self.client, self.training)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["mode"], "training")
 
     def test_treino_nao_tem_limite_de_tentativas(self):
         make_paid(self.user)
         for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS + 3):
-            response = self.client.post(
-                progress_url(self.training),
-                {"solved": False, "attempts": 1},
-                format="json",
-            )
+            response = errar(self.client, self.training)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertNotIn("exhausted", response.data)
         # Sem esgotamento, sem revelação: no treino a solução só sai ao acertar.
@@ -312,9 +332,7 @@ class ProgressGatingTests(CleanPuzzleBankMixin, APITestCase):
 
     def test_treino_revela_solucao_ao_acertar(self):
         make_paid(self.user)
-        response = self.client.post(
-            progress_url(self.training), {"solved": True, "attempts": 1}, format="json"
-        )
+        response = acertar(self.client, self.training)
         self.assertTrue(response.data["solved"])
         self.assertIn("solution", response.data)
 
@@ -330,9 +348,7 @@ class DailyExhaustionTests(CleanPuzzleBankMixin, APITestCase):
         self.daily = get_daily_puzzle()
 
     def fail_once(self):
-        return self.client.post(
-            progress_url(self.daily), {"solved": False, "attempts": 1}, format="json"
-        )
+        return errar(self.client, self.daily)
 
     def test_contador_decrementa_a_cada_falha(self):
         for expected_used in range(1, DAILY_PUZZLE_MAX_ATTEMPTS):
@@ -370,9 +386,7 @@ class DailyExhaustionTests(CleanPuzzleBankMixin, APITestCase):
         )
 
     def test_acertar_tambem_revela_a_solucao_para_revisao(self):
-        response = self.client.post(
-            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
-        )
+        response = acertar(self.client, self.daily)
         self.assertTrue(response.data["solved"])
         self.assertIn("solution", response.data)
 
@@ -398,18 +412,14 @@ class DailyExhaustionTests(CleanPuzzleBankMixin, APITestCase):
     def test_solve_apos_esgotar_nao_conta(self):
         for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS):
             self.fail_once()
-        self.client.post(
-            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
-        )
+        acertar(self.client, self.daily)
         self.assertFalse(
             UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily).solved
         )
 
     def test_resolver_o_diario_carimba_a_data_de_hoje(self):
         """(b) Resolver hoje marca corretamente como resolvido HOJE."""
-        self.client.post(
-            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
-        )
+        acertar(self.client, self.daily)
 
         progress = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
         self.assertEqual(progress.daily_solved_date, timezone.localdate())
@@ -459,9 +469,7 @@ class DailyReciclagemTests(CleanPuzzleBankMixin, APITestCase):
         self.daily = get_daily_puzzle()
 
     def solve_daily(self):
-        return self.client.post(
-            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
-        )
+        return acertar(self.client, self.daily)
 
     # ── (a) o bug relatado ────────────────────────────────────────────────
     def test_problema_resolvido_ha_5_dias_volta_jogavel_ao_reaparecer(self):
@@ -536,9 +544,7 @@ class DailyReciclagemTests(CleanPuzzleBankMixin, APITestCase):
         # Garante que o problema resolvido no Treino é o MESMO do diário.
         self.assertNotEqual(treino.id, self.daily.id)
 
-        response = self.client.post(
-            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
-        )
+        response = acertar(self.client, self.daily)
         # O `progress/` do diário É o fluxo do diário — resolver por aqui conta.
         self.assertEqual(response.data["mode"], "daily")
         self.assertTrue(self.client.get(DAILY_URL).data["already_solved"])
@@ -548,9 +554,7 @@ class DailyReciclagemTests(CleanPuzzleBankMixin, APITestCase):
         make_paid(self.user)
         treino = make_puzzle("Só do treino")
 
-        self.client.post(
-            progress_url(treino), {"solved": True, "attempts": 1}, format="json"
-        )
+        acertar(self.client, treino)
 
         progress = UserPuzzleProgress.objects.get(user=self.user, puzzle=treino)
         self.assertTrue(progress.solved)  # progressão do Treino: permanente
@@ -680,9 +684,7 @@ class SolutionLeakTests(CleanPuzzleBankMixin, APITestCase):
         self.assertIn("solution", response.data)
 
     def test_diario_resolvido_hoje_revela(self):
-        self.client.post(
-            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
-        )
+        acertar(self.client, self.daily)
         self.assertIn("solution", self.client.get(DAILY_URL).data)
 
     def test_diario_de_ciclo_anterior_nao_revela_ao_voltar_jogavel(self):
@@ -713,9 +715,7 @@ class SolutionLeakTests(CleanPuzzleBankMixin, APITestCase):
             solved_at=timezone.now() - timedelta(days=5),
             daily_solved_date=timezone.localdate() - timedelta(days=5),
         )
-        response = self.client.post(
-            progress_url(self.daily), {"solved": False, "attempts": 1}, format="json"
-        )
+        response = errar(self.client, self.daily)
         self.assertNotIn("solution", response.data)
 
 
@@ -795,17 +795,44 @@ class CheckMoveTests(CleanPuzzleBankMixin, APITestCase):
         for lance in SKEWER["solution"]:
             self.assertNotIn(lance, corpo)
 
-    def test_check_move_nao_grava_progresso_nem_conta_tentativa(self):
-        """Quem conta tentativa e carimba esgotamento continua sendo o
-        `progress/` — o check-move é função pura."""
-        for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS + 2):
+    def test_check_move_conta_tentativa_e_esgota(self):
+        """O check-move é a AUTORIDADE da contagem — era função pura, e por
+        isso dava para varrer lances aqui sem custo nenhum.
+
+        Este teste era o oposto (afirmava que nada era gravado): é justamente
+        o buraco que esta mudança fecha."""
+        for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS):
             self.check("h1h2", index=0)
-        self.assertFalse(
-            UserPuzzleProgress.objects.filter(
-                user=self.user, puzzle=self.daily
-            ).exists()
-        )
-        self.assertFalse(self.client.get(DAILY_URL).data["exhausted"])
+
+        progresso = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
+        self.assertEqual(progresso.daily_attempts, DAILY_PUZZLE_MAX_ATTEMPTS)
+        self.assertIsNotNone(progresso.exhausted_at)
+        self.assertTrue(self.client.get(DAILY_URL).data["exhausted"])
+
+    def test_check_move_recusa_depois_de_esgotar(self):
+        """Passa a recusar de forma explícita, em vez de aceitar para sempre."""
+        for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS):
+            self.check("h1h2", index=0)
+
+        resposta = self.check("h1h2", index=0)
+        self.assertEqual(resposta.status_code, status.HTTP_200_OK)
+        self.assertTrue(resposta.data["exhausted"])
+        self.assertFalse(resposta.data["correct"])
+
+        # E a recusa não pode virar tentativa extra.
+        progresso = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
+        self.assertEqual(progresso.daily_attempts, DAILY_PUZZLE_MAX_ATTEMPTS)
+
+    def test_esgotado_nao_aceita_nem_o_lance_certo(self):
+        """Acertar depois de esgotar não ressuscita o problema do dia."""
+        for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS):
+            self.check("h1h2", index=0)
+
+        resposta = self.check(self.daily.solution[0], index=0)
+        self.assertTrue(resposta.data["exhausted"])
+        self.assertFalse(resposta.data["correct"])
+        progresso = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
+        self.assertIsNone(progresso.daily_solved_date)
 
     # ── entradas inválidas ───────────────────────────────────────────────
     def test_indice_fora_da_sequencia_e_400_nao_lance_errado(self):
@@ -875,9 +902,7 @@ class StatsTests(CleanPuzzleBankMixin, APITestCase):
 
     def test_stats_reflete_diario_resolvido(self):
         daily = get_daily_puzzle()
-        self.client.post(
-            progress_url(daily), {"solved": True, "attempts": 1}, format="json"
-        )
+        acertar(self.client, daily)
         data = self.client.get(STATS_URL).data
         self.assertTrue(data["daily_solved"])
         self.assertFalse(data["daily_available"])
@@ -928,3 +953,140 @@ class StreakTests(CleanPuzzleBankMixin, APITestCase):
         solve_puzzle(self.user, make_puzzle("A"), days_ago=0)
         solve_puzzle(self.user, make_puzzle("B"), days_ago=0)
         self.assertEqual(self.get_streak(), 1)
+
+
+class ServidorEhAutoridadeTests(CleanPuzzleBankMixin, APITestCase):
+    """O servidor decide o que é verdade — não o corpo da requisição.
+
+    Antes: `check-move/` era função pura (dava para varrer lances sem custo) e
+    `progress/` gravava o `solved`/`attempts` que o cliente mandasse.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.daily = make_puzzle("Do dia")
+        # Fixa o problema do dia ANTES de criar qualquer outro: a seleção é por
+        # índice sobre os ativos, então um problema criado depois poderia virar
+        # o do dia e o teste de Treino cairia no teto do diário.
+        self.assertEqual(get_daily_puzzle().id, self.daily.id)
+        self.user = make_user("autoridade@chess.com")
+        self.client.force_authenticate(user=self.user)
+
+    # ── (b) progress/ não grava mais o que o cliente alega ──────────────
+    def test_progress_ignora_solved_true_sem_o_servidor_ter_confirmado(self):
+        resposta = self.client.post(
+            progress_url(self.daily), {"solved": True, "attempts": 1}, format="json"
+        )
+        self.assertEqual(resposta.status_code, status.HTTP_200_OK)
+        self.assertFalse(resposta.data["solved"])
+
+        progresso = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
+        self.assertFalse(progresso.solved)
+        self.assertIsNone(progresso.daily_solved_date)
+
+    def test_progress_ignora_attempts_inflado_pelo_cliente(self):
+        self.client.post(
+            progress_url(self.daily), {"solved": False, "attempts": 999}, format="json"
+        )
+        progresso = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
+        self.assertEqual(progresso.attempts, 0)
+        self.assertEqual(progresso.daily_attempts, 0)
+
+    def test_contrato_http_preservado_para_cliente_antigo(self):
+        """Cliente antigo continua mandando os dois campos e recebendo 200 com
+        o estado — os campos só são ignorados."""
+        resposta = self.client.post(
+            progress_url(self.daily), {"solved": True, "attempts": 3}, format="json"
+        )
+        self.assertEqual(resposta.status_code, status.HTTP_200_OK)
+        for chave in ("puzzle_id", "solved", "attempts", "mode", "attempts_used"):
+            self.assertIn(chave, resposta.data)
+
+    def test_resolver_de_verdade_pelo_check_move_carimba(self):
+        """O caminho legítimo continua funcionando igual."""
+        self.client.post(
+            check_move_url(self.daily),
+            {"move": self.daily.solution[0], "index": 0},
+            format="json",
+        )
+        progresso = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
+        self.assertTrue(progresso.solved)
+        self.assertEqual(progresso.daily_solved_date, timezone.localdate())
+
+    def test_tentativa_so_conta_quando_o_servidor_ve_o_erro(self):
+        self.client.post(
+            check_move_url(self.daily), {"move": "h8h7", "index": 0}, format="json"
+        )
+        progresso = UserPuzzleProgress.objects.get(user=self.user, puzzle=self.daily)
+        self.assertEqual(progresso.daily_attempts, 1)
+        self.assertEqual(progresso.attempts, 1)
+
+    def test_treino_nao_tem_teto_de_tentativas(self):
+        """Regra de produto fechada: o teto é só do diário."""
+        make_paid(self.user)
+        treino = make_puzzle("Treino sem teto")
+        for _ in range(DAILY_PUZZLE_MAX_ATTEMPTS + 3):
+            resposta = self.client.post(
+                check_move_url(treino), {"move": "h8h7", "index": 0}, format="json"
+            )
+            self.assertFalse(resposta.data.get("exhausted", False))
+        progresso = UserPuzzleProgress.objects.get(user=self.user, puzzle=treino)
+        self.assertEqual(progresso.daily_attempts, 0)
+        self.assertIsNone(progresso.exhausted_at)
+
+
+class _ThrottleDeTeste(ScopedRateThrottle):
+    """Throttle com taxa fixa.
+
+    `override_settings(REST_FRAMEWORK=...)` NÃO serve aqui: o DRF resolve
+    `throttle_classes` e `THROTTLE_RATES` na DEFINIÇÃO da classe (no import),
+    então mudar o setting depois não tem efeito. Fixar a taxa na subclasse é o
+    caminho que funciona.
+    """
+
+    THROTTLE_RATES = {"puzzle_check_move": "5/minute"}
+
+
+class CheckMoveThrottleTests(CleanPuzzleBankMixin, APITestCase):
+    """Teto por VELOCIDADE, separado da contagem de tentativas.
+
+    A contagem sozinha não cobre o Treino, que é ilimitado por regra de
+    produto — um script poderia varrer lances na velocidade da rede.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.daily = make_puzzle("Do dia")
+        self.user = make_user("throttle@chess.com")
+        self.client.force_authenticate(user=self.user)
+        cache.clear()  # o histórico do throttle vive no cache
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
+
+    def _chamar(self):
+        return self.client.post(
+            check_move_url(self.daily), {"move": "h8h7", "index": 0}, format="json"
+        )
+
+    def test_excesso_de_requisicoes_recebe_429(self):
+        with patch.object(PuzzleCheckMoveView, "throttle_classes", [_ThrottleDeTeste]):
+            codigos = [self._chamar().status_code for _ in range(7)]
+
+        self.assertIn(status.HTTP_429_TOO_MANY_REQUESTS, codigos)
+        # As primeiras passam: o throttle não atrapalha quem joga com a mão.
+        self.assertEqual(codigos[0], status.HTTP_200_OK)
+
+    def test_dentro_do_limite_nao_bloqueia(self):
+        with patch.object(PuzzleCheckMoveView, "throttle_classes", [_ThrottleDeTeste]):
+            codigos = [self._chamar().status_code for _ in range(3)]
+
+        self.assertNotIn(status.HTTP_429_TOO_MANY_REQUESTS, codigos)
+
+    def test_o_escopo_esta_declarado_na_view(self):
+        """Se o escopo sumir, o throttle de produção vira no-op em silêncio."""
+        self.assertEqual(PuzzleCheckMoveView.throttle_scope, "puzzle_check_move")
+        self.assertIn(
+            "puzzle_check_move", settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
+        )
