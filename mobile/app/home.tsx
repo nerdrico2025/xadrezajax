@@ -18,6 +18,7 @@ import { Colors } from "@/constants/theme";
 import { useGameSocket, type HostGameSetup } from "@/hooks/useGameSocket";
 import { useAuth } from "@/context/AuthContext";
 import { useFriends } from "@/hooks/useFriends";
+import { usePushPermission } from "@/hooks/usePushPermission";
 import { loadSavedGame, clearSavedGame, type SavedAiGame } from "@/utils/savedGame";
 import { checkAiGameAllowed } from "@/utils/preGameGate";
 import {
@@ -39,17 +40,22 @@ import SettingsScreen from "@/screen/profile/SettingsScreen";
 import LeaderboardScreen from "@/screen/home/LeaderboardScreen";
 import SubscriptionScreen from "@/screen/home/SubscriptionScreen";
 import MatchmakingScreen from "@/screen/online/MatchmakingScreen";
+import CorrespondenceListScreen from "@/screen/game/CorrespondenceListScreen";
+import CorrespondenceChallengeScreen from "@/screen/game/CorrespondenceChallengeScreen";
+import CorrespondenceGameScreen from "@/screen/game/CorrespondenceGameScreen";
+import type { CorrespondenceGame } from "@/services/correspondence";
 import MenuBottomSheet from "@/presentation/components/MenuBottomSheet";
 import { gameMenu, profileMenu } from "@/presentation/config/menuConfigs";
 
 type ActiveMenu = "game" | "profile" | null;
-type ActiveScreen = "home" | "campaign_map" | "ai_setup" | "play" | "puzzles" | "puzzle_training" | "private_room" | "profile" | "settings" | "leaderboard" | "subscription";
+type ActiveScreen = "home" | "campaign_map" | "ai_setup" | "play" | "puzzles" | "puzzle_training" | "private_room" | "profile" | "settings" | "leaderboard" | "subscription" | "correspondence_list" | "correspondence_challenge" | "correspondence_game";
 
 export default function Home() {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const { user, token } = useAuth();
   const { pendingRequests } = useFriends();
+  const { requestAndRegister } = usePushPermission();
 
   const [activeTab, setActiveTab] = useState<BottomTab>("home");
   const [activeScreen, setActiveScreen] = useState<ActiveScreen>("home");
@@ -67,6 +73,7 @@ export default function Home() {
   const [savedGame, setSavedGame] = useState<SavedAiGame | null>(null);
   const [showContinueModal, setShowContinueModal] = useState(false);
   const [pendingSavedGame, setPendingSavedGame] = useState<SavedAiGame | null>(null);
+  const [correspondenceGame, setCorrespondenceGame] = useState<CorrespondenceGame | null>(null);
 
   const {
     status: socketStatus,
@@ -254,6 +261,22 @@ export default function Home() {
     setActiveScreen("ai_setup");
   }, []);
 
+  // Ponto de entrada do Modo Turno. `requestAndRegister` é o gatilho de
+  // permissão de push que ficou pendente desde a Fase A (fundação) — sem
+  // tela que a chamasse, o hook nunca era usado. Chamar aqui é seguro em
+  // toda entrada, não só a primeira: o hook não reabre o diálogo do SO se a
+  // permissão já foi decidida, e re-registrar um token já ativo é no-op no
+  // servidor (ver usePushPermission).
+  const handleOpenCorrespondence = useCallback(() => {
+    requestAndRegister();
+    setActiveScreen("correspondence_list");
+  }, [requestAndRegister]);
+
+  const handleOpenCorrespondenceGame = useCallback((game: CorrespondenceGame) => {
+    setCorrespondenceGame(game);
+    setActiveScreen("correspondence_game");
+  }, []);
+
   const handleCancelQuickSearch = useCallback(() => {
     leaveQueue();
     setQuickSearching(false);
@@ -412,6 +435,7 @@ export default function Home() {
             onPrivateRoom={() => { setActiveScreen("private_room"); }}
             onPlayPuzzles={() => { setActiveScreen("puzzles"); }}
             onTraining={() => { setActiveScreen("puzzle_training"); }}
+            onCorrespondence={handleOpenCorrespondence}
           />
         ) : activeScreen === "campaign_map" ? (
           <CampaignMapScreen
@@ -483,6 +507,27 @@ export default function Home() {
           <LeaderboardScreen onBack={() => setActiveScreen("home")} />
         ) : activeScreen === "subscription" ? (
           <SubscriptionScreen onBack={() => setActiveScreen("home")} />
+        ) : activeScreen === "correspondence_list" ? (
+          <CorrespondenceListScreen
+            onBack={() => { setActiveScreen("home"); setActiveTab("home"); }}
+            onChallenge={() => setActiveScreen("correspondence_challenge")}
+            onOpenGame={handleOpenCorrespondenceGame}
+          />
+        ) : activeScreen === "correspondence_challenge" ? (
+          <CorrespondenceChallengeScreen
+            onBack={() => setActiveScreen("correspondence_list")}
+            onChallengeSent={() => setActiveScreen("correspondence_list")}
+            onMatched={handleOpenCorrespondenceGame}
+          />
+        ) : activeScreen === "correspondence_game" && correspondenceGame ? (
+          <CorrespondenceGameScreen
+            game={correspondenceGame}
+            onBack={() => {
+              setCorrespondenceGame(null);
+              setActiveScreen("correspondence_list");
+            }}
+            onUpgrade={handleUpgrade}
+          />
         ) : null}
       </View>
 
