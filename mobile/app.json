@@ -55,7 +55,14 @@
       "expo-secure-store",
       "expo-audio",
       "expo-font",
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon_new.png",
+          "color": "#C9A84C"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
