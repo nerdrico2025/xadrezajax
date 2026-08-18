@@ -1,11 +1,13 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  LayoutChangeEvent,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -23,14 +25,14 @@ import {
 // Mapa da Campanha — a trilha ilustrada dos 5 níveis.
 //
 // O FUNDO É ARTE, não desenho em código: `assets/campaign/mapa-campanha-ajax.webp`
-// (1080×3840). Os nomes dos territórios ("Vale das Aberturas", "Cidadela do
-// Adversário", ...) já vêm embutidos na imagem, com tipografia própria — por
-// isso a tela NÃO renderiza rótulo de nível por cima. Repetir o nome em texto
-// brigaria com a arte e deslocaria em cada tamanho de tela.
+// (1080×3840, SEM texto embutido — a versão anterior tinha os nomes dos
+// territórios queimados na imagem e foi trocada por esta, exportada de propósito
+// sem tipografia, para o contraste do texto poder ser ajustado por tema/fundo).
 //
-// Os 5 nós continuam sendo componentes React de verdade, sobrepostos: é o que
-// permite estado (concluído/atual/bloqueado), toque e acessibilidade. Só a
-// camada de fundo mudou; a lógica é a mesma do hook compartilhado.
+// Os nomes de região e os 5 nós são componentes React sobrepostos à arte, nas
+// coordenadas de `mobile/assets/campaign/labels-manifest.json` (pixels da
+// imagem original 1080×3840, convertidos em % da mesma caixa que os nós já
+// usavam — por isso ambos compartilham o mesmo sistema sem conversão extra).
 
 const ART = require("@/assets/campaign/mapa-campanha-ajax.webp");
 
@@ -44,7 +46,7 @@ const ART_HEIGHT = 3840;
  * Onde cada nó cai sobre a trilha, em pixels da arte.
  *
  * A ordem aqui é a da CAMPANHA (Iniciante → Mestre), mas repare que o `y`
- * DIMINUI: a trilha sobe, do Vale das Aberturas (embaixo) até a Cidadela do
+ * DIMINUI: a trilha sobe, do Vale das Bandeiras (embaixo) até a Cidadela do
  * Adversário (no topo). Mexer nestes números sem olhar a arte tira o nó de
  * cima do caminho.
  */
@@ -59,6 +61,20 @@ const NODE_POSITIONS: Record<Difficulty, { x: number; y: number }> = {
 const NODE_SIZE = 58;
 const NODE_SIZE_CURRENT = 72;
 
+/**
+ * Nomes das regiões, na mesma caixa de coordenadas dos nós (pixels da arte
+ * 1080×3840). Vem de `labels-manifest.json` — `tamanho` é o tamanho na arte
+ * original, usado só como referência de proporção entre labels, não como
+ * fontSize final (que escala com a largura real da tela, ver `RegionLabel`).
+ */
+const REGION_LABELS: Record<Difficulty, { text: string; x: number; y: number; tamanho: number }> = {
+  master: { text: "CIDADELA DO ADVERSÁRIO", x: 540, y: 862, tamanho: 38 },
+  hard: { text: "DESFILADEIRO DA TORRE", x: 742, y: 1218, tamanho: 32 },
+  medium: { text: "PASSO DAS SENTINELAS", x: 372, y: 1910, tamanho: 32 },
+  easy: { text: "BOSQUE RASTEIRO", x: 782, y: 2600, tamanho: 32 },
+  beginner: { text: "VALE DAS BANDEIRAS", x: 540, y: 3320, tamanho: 34 },
+};
+
 interface Props {
   /** Abre o wizard já travado neste nível, pulando a escolha de dificuldade. */
   onPlayLevel: (level: Difficulty) => void;
@@ -70,11 +86,48 @@ export default function CampaignMapScreen({ onPlayLevel, onBack }: Props) {
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
   const { nodes, loading, error, refresh, blocking } = useCampaignUnlockState();
+  const { width: windowWidth } = useWindowDimensions();
 
   // Feedback do toque em nó bloqueado. Inline (e não Alert) porque o mapa é
   // uma tela de leitura: um diálogo modal para dizer "ainda não" interrompe
   // mais do que informa.
   const [aviso, setAviso] = useState<string | null>(null);
+
+  // Escala da arte para a largura real da tela: a caixa da arte (`artBox`)
+  // tem `width: "100%"` sem padding ao redor, então a largura da janela é a
+  // largura renderizada da imagem. Usada tanto para converter as coordenadas
+  // do manifest em pixels de tela quanto para o scroll inicial (Fix 1B).
+  const artScale = windowWidth / ART_WIDTH;
+  const artHeightPx = ART_HEIGHT * artScale;
+
+  // Scroll inicial no nó do nível atual (Fix 1B). `nodes` sempre tem 5
+  // entradas (vem de AI_LEVELS), então não dá pra usar `nodes.length` como
+  // sinal de "progresso ainda não carregou" — por isso esperamos `loading`
+  // virar false (sucesso OU erro já assentado) antes do scroll único.
+  const scrollRef = useRef<ScrollView>(null);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const hasScrolledRef = useRef(false);
+
+  const handleScrollViewLayout = useCallback((e: LayoutChangeEvent) => {
+    setViewportHeight(e.nativeEvent.layout.height);
+  }, []);
+
+  useEffect(() => {
+    if (hasScrolledRef.current || loading || !viewportHeight) return;
+
+    const currentNode = nodes.find((n) => n.state === "current");
+    const target = NODE_POSITIONS[currentNode?.id ?? "beginner"];
+    const targetY = (target.y / ART_HEIGHT) * artHeightPx;
+
+    // Centraliza o nó na viewport, não só encosta no topo — e nunca deixa
+    // scrollar para além do conteúdo (arte + padding de baixo).
+    const contentHeight = artHeightPx + insets.bottom;
+    const maxOffset = Math.max(0, contentHeight - viewportHeight);
+    const offset = Math.min(maxOffset, Math.max(0, targetY - viewportHeight / 2));
+
+    scrollRef.current?.scrollTo({ y: offset, animated: false });
+    hasScrolledRef.current = true;
+  }, [loading, viewportHeight, nodes, artHeightPx, insets.bottom]);
 
   const handlePress = useCallback(
     (node: CampaignNode, index: number) => {
@@ -144,6 +197,8 @@ export default function CampaignMapScreen({ onPlayLevel, onBack }: Props) {
       ) : null}
 
       <ScrollView
+        ref={scrollRef}
+        onLayout={handleScrollViewLayout}
         contentContainerStyle={{ paddingBottom: insets.bottom }}
         showsVerticalScrollIndicator={false}
       >
@@ -156,8 +211,12 @@ export default function CampaignMapScreen({ onPlayLevel, onBack }: Props) {
             style={styles.art}
             resizeMode="cover"
             accessible
-            accessibilityLabel="Mapa ilustrado da campanha, do Vale das Aberturas até a Cidadela do Adversário"
+            accessibilityLabel="Mapa ilustrado da campanha, do Vale das Bandeiras até a Cidadela do Adversário"
           />
+
+          {(Object.keys(REGION_LABELS) as Difficulty[]).map((id) => (
+            <RegionLabel key={id} label={REGION_LABELS[id]} scale={artScale} />
+          ))}
 
           {nodes.map((node, index) => (
             <MapNode
@@ -309,6 +368,67 @@ function MapNode({
   );
 }
 
+function RegionLabel({
+  label,
+  scale,
+}: {
+  label: { text: string; x: number; y: number; tamanho: number };
+  scale: number;
+}) {
+  // fontSize escala com a largura real da tela (a arte é 1080px de origem,
+  // renderizada em ~360-430px num telefone) e ganha um reforço de +15% sobre
+  // o tamanho da arte antiga — critério de aceite é "visivelmente maior".
+  const fontSize = Math.round(label.tamanho * scale * 1.15);
+
+  return (
+    <View
+      style={[
+        styles.nodeAnchor,
+        {
+          left: `${(label.x / ART_WIDTH) * 100}%`,
+          top: `${(label.y / ART_HEIGHT) * 100}%`,
+          // Empilha acima da arte explicitamente — no Android não dá pra
+          // confiar só na ordem de declaração dos irmãos absolutamente
+          // posicionados para decidir quem pinta por cima.
+          zIndex: 2,
+          elevation: 2,
+        },
+      ]}
+      pointerEvents="none"
+    >
+      <View
+        style={[
+          styles.labelScrim,
+          // A âncora tem tamanho ZERO de propósito (ver comentário de
+          // `nodeAnchor`) — o deslocamento negativo para centralizar tem que
+          // ir no FILHO com tamanho de verdade, nunca na âncora. É o mesmo
+          // padrão do nó (`marginTop: -size/2` no Pressable, não no anchor);
+          // pôr a margem negativa na âncora de tamanho zero é o que sumia
+          // com os labels em build nativo (Android), mesmo com posição e
+          // estilo corretos — confirmado que a matemática batia via render
+          // isolado em react-native-web antes deste fix.
+          { marginTop: -fontSize },
+        ]}
+      >
+        <Text
+          style={[
+            styles.labelText,
+            {
+              fontSize,
+              // Cinzel (fonte da arte original) não está empacotada no app;
+              // '700' é o mesmo peso de heading já usado no resto da tela.
+              fontWeight: "700",
+              letterSpacing: 1.5,
+            },
+          ]}
+        >
+          {label.text}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
@@ -339,6 +459,22 @@ const styles = StyleSheet.create({
   // relação a ela, então o nó e o balão nunca saem de sincronia.
   nodeAnchor: { position: "absolute", width: 0, height: 0, alignItems: "center" },
   node: { alignItems: "center", justifyContent: "center" },
+  // Scrim sólido (regra de marca: sem gradiente) atrás do nome da região —
+  // aproximação de --bg-deep (#0F1E24) do brand guide, semi-transparente
+  // para funcionar tanto sobre trecho claro quanto escuro da arte.
+  labelScrim: {
+    backgroundColor: "rgba(15,30,36,0.55)",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  labelText: {
+    color: "#F4F1EA",
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.4)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   badge: {
     paddingHorizontal: 10,
     paddingVertical: 5,

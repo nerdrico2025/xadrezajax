@@ -215,6 +215,183 @@ describe("CampaignMapScreen — toque em cada estado", () => {
   });
 });
 
+/** A ScrollView do mapa é o único nó com `onLayout` E ref-instance com
+ *  `scrollTo` — é assim que a distinguimos dos `Pressable`s dos nós. */
+function scrollView(root: ReactTestInstance): ReactTestInstance {
+  return root.findAll(
+    (n) => typeof n.props?.onLayout === "function" && n.instance?.scrollTo
+  )[0];
+}
+
+/** Dispara o onLayout da ScrollView com uma altura de viewport arbitrária e
+ *  devolve o `y` do último `scrollTo` chamado (ou undefined, se nenhum). */
+function medirViewportEObterScroll(
+  root: ReactTestInstance,
+  height = 800
+): number | undefined {
+  const scroll = scrollView(root);
+  const spy = jest.spyOn(scroll.instance, "scrollTo");
+  act(() =>
+    scroll.props.onLayout({ nativeEvent: { layout: { width: 400, height } } })
+  );
+  const y = (spy.mock.calls[0]?.[0] as { y?: number } | undefined)?.y;
+  spy.mockRestore();
+  return y;
+}
+
+const REGIOES = [
+  "VALE DAS BANDEIRAS",
+  "BOSQUE RASTEIRO",
+  "PASSO DAS SENTINELAS",
+  "DESFILADEIRO DA TORRE",
+  "CIDADELA DO ADVERSÁRIO",
+];
+
+function flatStyle(style: unknown): Record<string, unknown> {
+  const { StyleSheet } = require("react-native");
+  return (StyleSheet.flatten(style) ?? {}) as Record<string, unknown>;
+}
+
+/** Achado por texto: sobe do <Text> até a âncora, pegando só as duas
+ *  primeiras ancestrais HOST do tipo "View" — o react-test-renderer insere
+ *  um wrapper composite entre cada elemento host (Text → wrapper → View
+ *  scrim → wrapper → View âncora), então `.parent` puro pega o wrapper, não
+ *  o próximo View de verdade. */
+function labelViews(root: ReactTestInstance, texto: string) {
+  const textNode = root.findAll(
+    (n) => (n.type as unknown as string) === "Text" && n.props.children === texto
+  )[0];
+  const hostViews: ReactTestInstance[] = [];
+  let p: ReactTestInstance | null = textNode.parent;
+  while (p && hostViews.length < 2) {
+    if ((p.type as unknown as string) === "View") hostViews.push(p);
+    p = p.parent;
+  }
+  const [scrim, anchor] = hostViews;
+  return { scrim, anchor };
+}
+
+describe("CampaignMapScreen — labels de região", () => {
+  it("renderiza o nome de cada região sobre a arte", () => {
+    const tree = render();
+    for (const regiao of REGIOES) {
+      expect(textos(tree.root)).toContain(regiao);
+    }
+  });
+
+  // Regressão (PR #122, achado em build de preview real): os 5 labels
+  // desapareciam por completo em Android nativo, embora a matemática de
+  // posição/fontSize estivesse comprovadamente correta (conferido via
+  // render isolado em react-native-web — mesmos valores, tudo visível e no
+  // lugar certo). A diferença estrutural do único elemento que SEMPRE
+  // funcionou (o nó — `MapNode`) é que ele nunca põe margem negativa na
+  // âncora de tamanho zero, só no filho já dimensionado. Trava isso aqui
+  // para o padrão não regredir mesmo sem conseguir reproduzir o bug do
+  // Android neste ambiente.
+  it("a margem negativa de centralização vive no filho com tamanho, nunca na âncora de tamanho zero", () => {
+    const tree = render();
+    for (const regiao of REGIOES) {
+      const { scrim, anchor } = labelViews(tree.root, regiao);
+      const anchorStyle = flatStyle(anchor.props.style);
+      const scrimStyle = flatStyle(scrim.props.style);
+
+      expect(anchorStyle.width).toBe(0);
+      expect(anchorStyle.height).toBe(0);
+      expect(anchorStyle.marginTop).toBeUndefined();
+
+      expect(typeof scrimStyle.marginTop).toBe("number");
+      expect(scrimStyle.marginTop as number).toBeLessThan(0);
+    }
+  });
+
+  it("a âncora empilha explicitamente acima da arte (zIndex/elevation), não por ordem implícita", () => {
+    const tree = render();
+    const { anchor } = labelViews(tree.root, REGIOES[0]);
+    const anchorStyle = flatStyle(anchor.props.style);
+    expect(anchorStyle.zIndex).toBeGreaterThan(0);
+    expect(anchorStyle.elevation).toBeGreaterThan(0);
+  });
+
+  it("fontSize e posição de cada label são números finitos dentro dos limites da arte", () => {
+    const tree = render();
+    for (const regiao of REGIOES) {
+      const { scrim, anchor } = labelViews(tree.root, regiao);
+      const textNode = scrim.findAll(
+        (n) => (n.type as unknown as string) === "Text" && n.props.children === regiao
+      )[0];
+      const textStyle = flatStyle(textNode.props.style);
+      const anchorStyle = flatStyle(anchor.props.style);
+
+      expect(Number.isFinite(textStyle.fontSize)).toBe(true);
+      expect(textStyle.fontSize as number).toBeGreaterThan(0);
+
+      // left/top vêm como string "NN.NN%" — extrai o número e confere 0–100.
+      for (const key of ["left", "top"] as const) {
+        const pct = parseFloat(String(anchorStyle[key]));
+        expect(Number.isFinite(pct)).toBe(true);
+        expect(pct).toBeGreaterThanOrEqual(0);
+        expect(pct).toBeLessThanOrEqual(100);
+      }
+    }
+  });
+});
+
+describe("CampaignMapScreen — scroll inicial no nível atual (Fix 1B)", () => {
+  it("rola mais fundo na trilha quando o nível atual é mais avançado", () => {
+    // Iniciante (y=3480, base da trilha) está mais fundo que Fácil (y=2790,
+    // mais perto do topo) — então o offset de scroll de quem está no
+    // Iniciante deve ser MAIOR que o de quem já está no Fácil.
+    mockCampaign.progress = progressoAte(0, 1); // current = Iniciante
+    const noIniciante = medirViewportEObterScroll(render().root);
+
+    mockCampaign.progress = progressoAte(1, 1); // current = Fácil
+    const noFacil = medirViewportEObterScroll(render().root);
+
+    expect(noIniciante).toEqual(expect.any(Number));
+    expect(noFacil).toEqual(expect.any(Number));
+    expect(noIniciante as number).toBeGreaterThan(noFacil as number);
+  });
+
+  it("com progresso ainda não carregado, não tenta rolar (sem viewport não há alvo confiável)", () => {
+    mockCampaign = {
+      progress: null,
+      loading: true,
+      error: null,
+      refresh: jest.fn(),
+    };
+    const tree = render();
+    expect(medirViewportEObterScroll(tree.root)).toBeUndefined();
+  });
+
+  it("com falha de carga (sem progresso), cai no fallback Iniciante sem quebrar", () => {
+    mockCampaign = {
+      progress: null,
+      loading: false,
+      error: "falhou",
+      refresh: jest.fn(),
+    };
+    const tree = render();
+    const y = medirViewportEObterScroll(tree.root);
+    expect(y).toEqual(expect.any(Number));
+  });
+
+  it("só rola uma vez por montagem, mesmo com a viewport remedida depois", () => {
+    const tree = render();
+    const scroll = scrollView(tree.root);
+    const spy = jest.spyOn(scroll.instance, "scrollTo");
+
+    act(() =>
+      scroll.props.onLayout({ nativeEvent: { layout: { width: 400, height: 800 } } })
+    );
+    act(() =>
+      scroll.props.onLayout({ nativeEvent: { layout: { width: 400, height: 900 } } })
+    );
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+});
+
 describe("CampaignMapScreen — flag de QA", () => {
   it("com a flag ligada, nível travado vira jogável e se anuncia como QA", () => {
     mockQaUnlock = true;

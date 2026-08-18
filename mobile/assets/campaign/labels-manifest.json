@@ -1,0 +1,77 @@
+{
+  "imagem": "mapa-campanha-ajax-sem-texto-1080x3840.png",
+  "dimensoes": {
+    "w": 1080,
+    "h": 3840
+  },
+  "observacao": "y=0 no topo (fim da jornada / castelo inimigo), y=3840 na base (inicio / reino do jogador). x e o centro horizontal do texto (textAlign center). Fonte original: Cinzel 700, letter-spacing 3px.",
+  "labels": [
+    {
+      "nome_da_regiao": "CIDADELA DO ADVERSÁRIO",
+      "nivel": "Mestre",
+      "x": 540,
+      "y": 862,
+      "tamanho_original_px": 38
+    },
+    {
+      "nome_da_regiao": "DESFILADEIRO DA TORRE",
+      "nivel": "Difícil",
+      "x": 742,
+      "y": 1218,
+      "tamanho_original_px": 32
+    },
+    {
+      "nome_da_regiao": "PASSO DAS SENTINELAS",
+      "nivel": "Médio",
+      "x": 372,
+      "y": 1910,
+      "tamanho_original_px": 32
+    },
+    {
+      "nome_da_regiao": "BOSQUE RASTEIRO",
+      "nivel": "Fácil",
+      "x": 782,
+      "y": 2600,
+      "tamanho_original_px": 32
+    },
+    {
+      "nome_da_regiao": "VALE DAS BANDEIRAS",
+      "nivel": "Iniciante",
+      "x": 540,
+      "y": 3320,
+      "tamanho_original_px": 34
+    }
+  ],
+  "nos_de_progresso": [
+    {
+      "nivel": "Mestre",
+      "x": 540,
+      "y": 540,
+      "raio_livre": 120
+    },
+    {
+      "nivel": "Difícil",
+      "x": 730,
+      "y": 1400,
+      "raio_livre": 120
+    },
+    {
+      "nivel": "Médio",
+      "x": 360,
+      "y": 2100,
+      "raio_livre": 120
+    },
+    {
+      "nivel": "Fácil",
+      "x": 770,
+      "y": 2790,
+      "raio_livre": 120
+    },
+    {
+      "nivel": "Iniciante",
+      "x": 540,
+      "y": 3480,
+      "raio_livre": 120
+    }
+  ]
+}
