@@ -239,17 +239,99 @@ function medirViewportEObterScroll(
   return y;
 }
 
+const REGIOES = [
+  "VALE DAS BANDEIRAS",
+  "BOSQUE RASTEIRO",
+  "PASSO DAS SENTINELAS",
+  "DESFILADEIRO DA TORRE",
+  "CIDADELA DO ADVERSÁRIO",
+];
+
+function flatStyle(style: unknown): Record<string, unknown> {
+  const { StyleSheet } = require("react-native");
+  return (StyleSheet.flatten(style) ?? {}) as Record<string, unknown>;
+}
+
+/** Achado por texto: sobe do <Text> até a âncora, pegando só as duas
+ *  primeiras ancestrais HOST do tipo "View" — o react-test-renderer insere
+ *  um wrapper composite entre cada elemento host (Text → wrapper → View
+ *  scrim → wrapper → View âncora), então `.parent` puro pega o wrapper, não
+ *  o próximo View de verdade. */
+function labelViews(root: ReactTestInstance, texto: string) {
+  const textNode = root.findAll(
+    (n) => (n.type as unknown as string) === "Text" && n.props.children === texto
+  )[0];
+  const hostViews: ReactTestInstance[] = [];
+  let p: ReactTestInstance | null = textNode.parent;
+  while (p && hostViews.length < 2) {
+    if ((p.type as unknown as string) === "View") hostViews.push(p);
+    p = p.parent;
+  }
+  const [scrim, anchor] = hostViews;
+  return { scrim, anchor };
+}
+
 describe("CampaignMapScreen — labels de região", () => {
   it("renderiza o nome de cada região sobre a arte", () => {
     const tree = render();
-    for (const regiao of [
-      "VALE DAS BANDEIRAS",
-      "BOSQUE RASTEIRO",
-      "PASSO DAS SENTINELAS",
-      "DESFILADEIRO DA TORRE",
-      "CIDADELA DO ADVERSÁRIO",
-    ]) {
+    for (const regiao of REGIOES) {
       expect(textos(tree.root)).toContain(regiao);
+    }
+  });
+
+  // Regressão (PR #122, achado em build de preview real): os 5 labels
+  // desapareciam por completo em Android nativo, embora a matemática de
+  // posição/fontSize estivesse comprovadamente correta (conferido via
+  // render isolado em react-native-web — mesmos valores, tudo visível e no
+  // lugar certo). A diferença estrutural do único elemento que SEMPRE
+  // funcionou (o nó — `MapNode`) é que ele nunca põe margem negativa na
+  // âncora de tamanho zero, só no filho já dimensionado. Trava isso aqui
+  // para o padrão não regredir mesmo sem conseguir reproduzir o bug do
+  // Android neste ambiente.
+  it("a margem negativa de centralização vive no filho com tamanho, nunca na âncora de tamanho zero", () => {
+    const tree = render();
+    for (const regiao of REGIOES) {
+      const { scrim, anchor } = labelViews(tree.root, regiao);
+      const anchorStyle = flatStyle(anchor.props.style);
+      const scrimStyle = flatStyle(scrim.props.style);
+
+      expect(anchorStyle.width).toBe(0);
+      expect(anchorStyle.height).toBe(0);
+      expect(anchorStyle.marginTop).toBeUndefined();
+
+      expect(typeof scrimStyle.marginTop).toBe("number");
+      expect(scrimStyle.marginTop as number).toBeLessThan(0);
+    }
+  });
+
+  it("a âncora empilha explicitamente acima da arte (zIndex/elevation), não por ordem implícita", () => {
+    const tree = render();
+    const { anchor } = labelViews(tree.root, REGIOES[0]);
+    const anchorStyle = flatStyle(anchor.props.style);
+    expect(anchorStyle.zIndex).toBeGreaterThan(0);
+    expect(anchorStyle.elevation).toBeGreaterThan(0);
+  });
+
+  it("fontSize e posição de cada label são números finitos dentro dos limites da arte", () => {
+    const tree = render();
+    for (const regiao of REGIOES) {
+      const { scrim, anchor } = labelViews(tree.root, regiao);
+      const textNode = scrim.findAll(
+        (n) => (n.type as unknown as string) === "Text" && n.props.children === regiao
+      )[0];
+      const textStyle = flatStyle(textNode.props.style);
+      const anchorStyle = flatStyle(anchor.props.style);
+
+      expect(Number.isFinite(textStyle.fontSize)).toBe(true);
+      expect(textStyle.fontSize as number).toBeGreaterThan(0);
+
+      // left/top vêm como string "NN.NN%" — extrai o número e confere 0–100.
+      for (const key of ["left", "top"] as const) {
+        const pct = parseFloat(String(anchorStyle[key]));
+        expect(Number.isFinite(pct)).toBe(true);
+        expect(pct).toBeGreaterThanOrEqual(0);
+        expect(pct).toBeLessThanOrEqual(100);
+      }
     }
   });
 });

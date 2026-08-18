@@ -387,12 +387,29 @@ function RegionLabel({
         {
           left: `${(label.x / ART_WIDTH) * 100}%`,
           top: `${(label.y / ART_HEIGHT) * 100}%`,
-          marginTop: -fontSize,
+          // Empilha acima da arte explicitamente — no Android não dá pra
+          // confiar só na ordem de declaração dos irmãos absolutamente
+          // posicionados para decidir quem pinta por cima.
+          zIndex: 2,
+          elevation: 2,
         },
       ]}
       pointerEvents="none"
     >
-      <View style={styles.labelScrim}>
+      <View
+        style={[
+          styles.labelScrim,
+          // A âncora tem tamanho ZERO de propósito (ver comentário de
+          // `nodeAnchor`) — o deslocamento negativo para centralizar tem que
+          // ir no FILHO com tamanho de verdade, nunca na âncora. É o mesmo
+          // padrão do nó (`marginTop: -size/2` no Pressable, não no anchor);
+          // pôr a margem negativa na âncora de tamanho zero é o que sumia
+          // com os labels em build nativo (Android), mesmo com posição e
+          // estilo corretos — confirmado que a matemática batia via render
+          // isolado em react-native-web antes deste fix.
+          { marginTop: -fontSize },
+        ]}
+      >
         <Text
           style={[
             styles.labelText,
