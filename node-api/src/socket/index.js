@@ -24,6 +24,7 @@ const {
   resolveHumanTimeControl,
 } = require("./gameRoom");
 const { decideFirstPlaysWhite } = require("./colorBalance");
+const { presenceRoom, normalizeWatchIds, getOnlineSnapshot } = require("./presence");
 
 // Timers de carência por abandono, por usuário desconectado. Cancelados
 // assim que o jogador reconecta. Processo único por design (o node-api roda
@@ -170,6 +171,8 @@ function setupSocket(httpServer) {
 
     // Mark user online in Redis (TTL 600s — cleared on disconnect)
     getRedis().set(`online:${userId}`, socket.id, "EX", 600).catch(() => {});
+    // Avisa quem está observando este usuário (Item 4, presença de amigos).
+    io.to(presenceRoom(userId)).emit("friend_online", { user_id: userId });
 
     // Voltou dentro da carência: a partida não é encerrada por abandono.
     clearAbandonTimer(userId);
@@ -611,11 +614,38 @@ function setupSocket(httpServer) {
       }
     });
 
+    // ── PRESENÇA DE AMIGOS (Item 4) ──────────────────────────────────────
+    // O cliente manda os IDs que quer observar (os amigos que já buscou via
+    // REST) — não valida amizade aqui, mesmo tradeoff de `invite_friend`
+    // acima (o node-api não tem acesso ao Postgres do Django para checar).
+    socket.on("watch_presence", async ({ user_ids } = {}) => {
+      const ids = normalizeWatchIds(user_ids);
+
+      // Troca a assinatura: sai das salas antigas antes de entrar nas novas
+      // (senão uma tela que reabre com uma lista menor de amigos continuaria
+      // recebendo eventos de quem não está mais na lista).
+      for (const id of socket.data.watchedPresenceIds ?? []) {
+        socket.leave(presenceRoom(id));
+      }
+      for (const id of ids) {
+        socket.join(presenceRoom(id));
+      }
+      socket.data.watchedPresenceIds = ids;
+
+      try {
+        const onlineIds = await getOnlineSnapshot(ids);
+        socket.emit("presence_snapshot", { online_ids: onlineIds });
+      } catch (err) {
+        console.error("[Socket] watch_presence snapshot error:", err);
+      }
+    });
+
     // ── DISCONNECT ───────────────────────────────────────────────────────
     socket.on("disconnect", async () => {
       console.log(`[Socket] user=${userId} disconnected`);
       try {
         getRedis().del(`online:${userId}`).catch(() => {});
+        io.to(presenceRoom(userId)).emit("friend_offline", { user_id: userId });
         await removeFromQueue(userId);
         const gameId = await getUserGame(userId);
         if (!gameId) return;

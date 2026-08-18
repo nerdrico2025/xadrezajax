@@ -99,6 +99,8 @@ export default function Home() {
     drawOfferDeclined,
     ratingOutcome,
     gamePublicId,
+    onlineFriendIds,
+    watchPresence,
     clearGame,
     inviteFriend,
     dismissInvitation,
@@ -518,6 +520,8 @@ export default function Home() {
             onBack={() => setActiveScreen("correspondence_list")}
             onChallengeSent={() => setActiveScreen("correspondence_list")}
             onMatched={handleOpenCorrespondenceGame}
+            onlineFriendIds={onlineFriendIds}
+            watchPresence={watchPresence}
           />
         ) : activeScreen === "correspondence_game" && correspondenceGame ? (
           <CorrespondenceGameScreen

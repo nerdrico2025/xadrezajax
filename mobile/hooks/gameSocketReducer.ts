@@ -95,6 +95,15 @@ export type State = {
    *  Chega junto do `game_rated` (é a resposta do mesmo endpoint) e vale só
    *  para a partida corrente — some na revanche, igual ao rating. */
   gamePublicId: string | null;
+  /** IDs de amigos que a tela pediu para observar (Item 4, presença em
+   *  tempo real) — guardado para reassinar depois de uma queda/reconexão,
+   *  já que o servidor esquece as salas do socket antigo. */
+  watchedFriendIds: string[];
+  /** IDs de amigos observados que estão online AGORA. Sobrevive a
+   *  DISCONNECTED/RECONNECTING de propósito: a lista não pode zerar só
+   *  porque o socket caiu — mostra o último estado conhecido até
+   *  reconectar e um novo PRESENCE_SNAPSHOT corrigir. */
+  onlineFriendIds: string[];
 };
 
 export type Action =
@@ -122,7 +131,11 @@ export type Action =
   | { type: "DRAW_OFFER_DECLINED" }
   | { type: "INCOMING_DRAW_CLEARED" }
   | { type: "OUTGOING_DRAW_CLEARED" }
-  | { type: "DISMISS_DRAW_DECLINED" };
+  | { type: "DISMISS_DRAW_DECLINED" }
+  | { type: "WATCH_PRESENCE"; ids: string[]; onlineIds: string[] }
+  | { type: "PRESENCE_SNAPSHOT"; onlineIds: string[] }
+  | { type: "FRIEND_ONLINE"; id: string }
+  | { type: "FRIEND_OFFLINE"; id: string };
 
 export const initialState: State = {
   status: "idle",
@@ -138,6 +151,8 @@ export const initialState: State = {
   drawOfferDeclined: false,
   ratingOutcome: null,
   gamePublicId: null,
+  watchedFriendIds: [],
+  onlineFriendIds: [],
 };
 
 const noDrawOffers = {
@@ -285,6 +300,19 @@ export function gameSocketReducer(state: State, action: Action): State {
       return { ...state, outgoingDrawOffer: false };
     case "DISMISS_DRAW_DECLINED":
       return { ...state, drawOfferDeclined: false };
+    case "WATCH_PRESENCE":
+      return { ...state, watchedFriendIds: action.ids, onlineFriendIds: action.onlineIds };
+    case "PRESENCE_SNAPSHOT":
+      return { ...state, onlineFriendIds: action.onlineIds };
+    case "FRIEND_ONLINE":
+      return state.onlineFriendIds.includes(action.id)
+        ? state
+        : { ...state, onlineFriendIds: [...state.onlineFriendIds, action.id] };
+    case "FRIEND_OFFLINE":
+      return {
+        ...state,
+        onlineFriendIds: state.onlineFriendIds.filter((id) => id !== action.id),
+      };
     default:
       return state;
   }

@@ -51,6 +51,14 @@ beforeEach(() => {
 });
 
 function render(props: Partial<Record<string, unknown>> = {}) {
+  // Sem override, `onlineFriendIds` nasce do `is_online` do fetch REST —
+  // é exatamente a semente que a tela passaria pra `watchPresence` na vida
+  // real, então os testes que já giram em torno de `is_online` continuam
+  // valendo sem mudança.
+  const defaultOnlineIds = mockFriends.friends
+    .filter((f) => f.is_online)
+    .map((f) => String(f.id));
+
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(
@@ -58,6 +66,8 @@ function render(props: Partial<Record<string, unknown>> = {}) {
         onBack={(props.onBack as any) ?? jest.fn()}
         onChallengeSent={(props.onChallengeSent as any) ?? jest.fn()}
         onMatched={(props.onMatched as any) ?? jest.fn()}
+        onlineFriendIds={(props.onlineFriendIds as string[]) ?? defaultOnlineIds}
+        watchPresence={(props.watchPresence as any) ?? jest.fn()}
       />
     );
   });
@@ -178,5 +188,43 @@ describe("CorrespondenceChallengeScreen — matchmaking", () => {
     });
 
     expect(mockLeaveMatchmaking).toHaveBeenCalledWith("test-token", 3);
+  });
+});
+
+// Presença de amigos em tempo real (Item 4): a tela não deve mais depender só
+// do `is_online` estático do fetch — o socket (via `onlineFriendIds`) é quem
+// manda depois do mount.
+describe("CorrespondenceChallengeScreen — presença em tempo real", () => {
+  it("assina a presença de TODOS os amigos ao montar, não só os já online", () => {
+    mockFriends.friends = [
+      friend({ id: 2, username: "bob", is_online: true }),
+      friend({ id: 3, username: "carol", is_online: false }),
+    ];
+    const watchPresence = jest.fn();
+    render({ watchPresence, onlineFriendIds: ["2"] });
+
+    expect(watchPresence).toHaveBeenCalledWith([2, 3], [2]);
+  });
+
+  it("um amigo que fica online via socket aparece na lista sem precisar de novo fetch", () => {
+    mockFriends.friends = [friend({ id: 2, username: "bob", is_online: false })];
+
+    // Estado real: fetch REST disse offline, mas o socket já sabe que ficou
+    // online (chegou um friend_online depois do snapshot inicial).
+    const tree = render({ onlineFriendIds: ["2"] });
+
+    expect(textos(tree.root)).toContain("@bob");
+    expect(mockFriends.refresh).not.toHaveBeenCalled();
+  });
+
+  it("um amigo que fica offline via socket some da lista, mesmo que o fetch REST tenha dito online", () => {
+    mockFriends.friends = [friend({ id: 2, username: "bob", is_online: true })];
+
+    // O socket é a fonte de verdade DEPOIS do mount — um is_online:true do
+    // fetch inicial não pode travar o amigo como "online" pra sempre.
+    const tree = render({ onlineFriendIds: [] });
+
+    expect(textos(tree.root)).not.toContain("@bob");
+    expect(textos(tree.root)).toContain("Nenhum amigo online agora. Tente o pareamento acima.");
   });
 });
