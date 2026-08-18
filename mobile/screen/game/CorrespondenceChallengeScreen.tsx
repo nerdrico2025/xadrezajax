@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -37,18 +37,38 @@ interface Props {
   onChallengeSent: () => void;
   /** Pareamento instantâneo — a partida já nasce `active`. */
   onMatched: (game: CorrespondenceGame) => void;
+  /** IDs (como string) de amigos observados que estão online AGORA, via
+   *  socket — atualiza sem precisar de novo fetch. Vem do `useGameSocket`
+   *  compartilhado (montado em `home.tsx`), não é uma conexão própria desta
+   *  tela. */
+  onlineFriendIds: string[];
+  /** Assina/reassina a presença de uma lista de amigos. Chamar de novo com
+   *  uma lista diferente troca a assinatura. */
+  watchPresence: (ids: (number | string)[], initialOnlineIds?: (number | string)[]) => void;
 }
 
 export default function CorrespondenceChallengeScreen({
   onBack,
   onChallengeSent,
   onMatched,
+  onlineFriendIds,
+  watchPresence,
 }: Props) {
   const { theme } = useTheme();
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
   const { token } = useAuth();
   const { friends, loading: friendsLoading, refresh: refreshFriends } = useFriends();
+
+  // Assina a presença de TODOS os amigos (não só os já online no fetch REST)
+  // assim que a lista chega — é a única forma de saber quando um amigo que
+  // estava offline no fetch inicial fica online depois, sem novo fetch.
+  useEffect(() => {
+    if (!friends.length) return;
+    const ids = friends.map((f) => f.id);
+    const initialOnline = friends.filter((f) => f.is_online).map((f) => f.id);
+    watchPresence(ids, initialOnline);
+  }, [friends, watchPresence]);
 
   const [timeControlDays, setTimeControlDays] = useState<1 | 3 | 7>(3);
   const [challengingId, setChallengingId] = useState<number | null>(null);
@@ -132,7 +152,10 @@ export default function CorrespondenceChallengeScreen({
     );
   };
 
-  const onlineFriends = friends.filter((f) => f.is_online);
+  // Fonte de verdade passa a ser o socket assim que a assinatura confirma
+  // (Item 4) — `is_online` do fetch REST fica só como semente inicial, já
+  // repassada a `watchPresence` acima.
+  const onlineFriends = friends.filter((f) => onlineFriendIds.includes(String(f.id)));
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>

@@ -338,3 +338,75 @@ describe("reconnect durante a partida", () => {
     expect(state.error).toContain("não foi enviado");
   });
 });
+
+// Presença de amigos em tempo real (Item 4).
+describe("presença de amigos", () => {
+  it("WATCH_PRESENCE semeia a lista observada e o online inicial (do fetch REST)", () => {
+    const state = gameSocketReducer(initialState, {
+      type: "WATCH_PRESENCE",
+      ids: ["1", "2", "3"],
+      onlineIds: ["2"],
+    });
+    expect(state.watchedFriendIds).toEqual(["1", "2", "3"]);
+    expect(state.onlineFriendIds).toEqual(["2"]);
+  });
+
+  it("FRIEND_ONLINE adiciona sem duplicar", () => {
+    let state = gameSocketReducer(initialState, {
+      type: "WATCH_PRESENCE",
+      ids: ["1", "2"],
+      onlineIds: ["1"],
+    });
+    state = gameSocketReducer(state, { type: "FRIEND_ONLINE", id: "2" });
+    state = gameSocketReducer(state, { type: "FRIEND_ONLINE", id: "2" });
+    expect(state.onlineFriendIds.sort()).toEqual(["1", "2"]);
+  });
+
+  it("FRIEND_OFFLINE remove da lista", () => {
+    let state = gameSocketReducer(initialState, {
+      type: "WATCH_PRESENCE",
+      ids: ["1", "2"],
+      onlineIds: ["1", "2"],
+    });
+    state = gameSocketReducer(state, { type: "FRIEND_OFFLINE", id: "1" });
+    expect(state.onlineFriendIds).toEqual(["2"]);
+  });
+
+  it("PRESENCE_SNAPSHOT substitui a lista pela resposta do servidor", () => {
+    let state = gameSocketReducer(initialState, {
+      type: "WATCH_PRESENCE",
+      ids: ["1", "2", "3"],
+      onlineIds: ["1"],
+    });
+    state = gameSocketReducer(state, {
+      type: "PRESENCE_SNAPSHOT",
+      onlineIds: ["2", "3"],
+    });
+    expect(state.onlineFriendIds).toEqual(["2", "3"]);
+  });
+
+  it("uma queda de conexão (DISCONNECTED) NÃO zera quem estava online — mantém o último estado conhecido", () => {
+    let state = gameSocketReducer(initialState, {
+      type: "WATCH_PRESENCE",
+      ids: ["1", "2"],
+      onlineIds: ["1", "2"],
+    });
+    state = gameSocketReducer(state, { type: "DISCONNECTED" });
+    expect(state.onlineFriendIds).toEqual(["1", "2"]);
+    expect(state.watchedFriendIds).toEqual(["1", "2"]);
+  });
+
+  it("RECONNECTING também preserva a lista — só uma nova sessão (CONNECTING) reseta", () => {
+    let state = gameSocketReducer(initialState, {
+      type: "WATCH_PRESENCE",
+      ids: ["1"],
+      onlineIds: ["1"],
+    });
+    state = gameSocketReducer(state, { type: "RECONNECTING" });
+    expect(state.onlineFriendIds).toEqual(["1"]);
+
+    state = gameSocketReducer(state, { type: "CONNECTING" });
+    expect(state.onlineFriendIds).toEqual([]);
+    expect(state.watchedFriendIds).toEqual([]);
+  });
+});

@@ -79,7 +79,13 @@ export function useGameSocket() {
       reconnectionDelay: 1500,
     });
 
-    socket.on("connect", () => dispatch({ type: "CONNECTED" }));
+    socket.on("connect", () => {
+      dispatch({ type: "CONNECTED" });
+      // Reassina a presença dos amigos depois de uma queda: o servidor
+      // esquece as salas do socket antigo a cada reconexão (novo socket.id).
+      const watched = stateRef.current.watchedFriendIds;
+      if (watched.length) socket.emit("watch_presence", { user_ids: watched });
+    });
 
     socket.on("connect_error", (e) =>
       dispatch({ type: "ERROR", error: e.message })
@@ -216,6 +222,17 @@ export function useGameSocket() {
             yourColor: your_color ?? null,
           },
         })
+    );
+
+    // ── PRESENÇA DE AMIGOS (Item 4) ──────────────────────────────────────
+    socket.on("presence_snapshot", ({ online_ids }: { online_ids: (string | number)[] }) =>
+      dispatch({ type: "PRESENCE_SNAPSHOT", onlineIds: (online_ids ?? []).map(String) })
+    );
+    socket.on("friend_online", ({ user_id }: { user_id: string | number }) =>
+      dispatch({ type: "FRIEND_ONLINE", id: String(user_id) })
+    );
+    socket.on("friend_offline", ({ user_id }: { user_id: string | number }) =>
+      dispatch({ type: "FRIEND_OFFLINE", id: String(user_id) })
     );
 
     socketRef.current = socket;
@@ -377,6 +394,18 @@ export function useGameSocket() {
     dispatch({ type: "DISMISS_INVITATION" });
   }, []);
 
+  // `initialOnlineIds` evita o "ninguém online" piscando antes da resposta
+  // do servidor: semeia com o que a tela já sabe do último fetch REST
+  // (`Friend.is_online`), e o `presence_snapshot`/eventos seguintes refinam.
+  const watchPresence = useCallback((ids: (number | string)[], initialOnlineIds: (number | string)[] = []) => {
+    const idsStr = ids.map(String);
+    dispatch({ type: "WATCH_PRESENCE", ids: idsStr, onlineIds: initialOnlineIds.map(String) });
+    const socket = socketRef.current;
+    if (socket?.connected && idsStr.length) {
+      socket.emit("watch_presence", { user_ids: idsStr });
+    }
+  }, []);
+
   return {
     status: state.status,
     game: state.game,
@@ -391,6 +420,8 @@ export function useGameSocket() {
     drawOfferDeclined: state.drawOfferDeclined,
     ratingOutcome: state.ratingOutcome,
     gamePublicId: state.gamePublicId,
+    onlineFriendIds: state.onlineFriendIds,
+    watchPresence,
     joinQueue,
     leaveQueue,
     createRoom,
