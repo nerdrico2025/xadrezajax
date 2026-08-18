@@ -215,6 +215,101 @@ describe("CampaignMapScreen — toque em cada estado", () => {
   });
 });
 
+/** A ScrollView do mapa é o único nó com `onLayout` E ref-instance com
+ *  `scrollTo` — é assim que a distinguimos dos `Pressable`s dos nós. */
+function scrollView(root: ReactTestInstance): ReactTestInstance {
+  return root.findAll(
+    (n) => typeof n.props?.onLayout === "function" && n.instance?.scrollTo
+  )[0];
+}
+
+/** Dispara o onLayout da ScrollView com uma altura de viewport arbitrária e
+ *  devolve o `y` do último `scrollTo` chamado (ou undefined, se nenhum). */
+function medirViewportEObterScroll(
+  root: ReactTestInstance,
+  height = 800
+): number | undefined {
+  const scroll = scrollView(root);
+  const spy = jest.spyOn(scroll.instance, "scrollTo");
+  act(() =>
+    scroll.props.onLayout({ nativeEvent: { layout: { width: 400, height } } })
+  );
+  const y = (spy.mock.calls[0]?.[0] as { y?: number } | undefined)?.y;
+  spy.mockRestore();
+  return y;
+}
+
+describe("CampaignMapScreen — labels de região", () => {
+  it("renderiza o nome de cada região sobre a arte", () => {
+    const tree = render();
+    for (const regiao of [
+      "VALE DAS BANDEIRAS",
+      "BOSQUE RASTEIRO",
+      "PASSO DAS SENTINELAS",
+      "DESFILADEIRO DA TORRE",
+      "CIDADELA DO ADVERSÁRIO",
+    ]) {
+      expect(textos(tree.root)).toContain(regiao);
+    }
+  });
+});
+
+describe("CampaignMapScreen — scroll inicial no nível atual (Fix 1B)", () => {
+  it("rola mais fundo na trilha quando o nível atual é mais avançado", () => {
+    // Iniciante (y=3480, base da trilha) está mais fundo que Fácil (y=2790,
+    // mais perto do topo) — então o offset de scroll de quem está no
+    // Iniciante deve ser MAIOR que o de quem já está no Fácil.
+    mockCampaign.progress = progressoAte(0, 1); // current = Iniciante
+    const noIniciante = medirViewportEObterScroll(render().root);
+
+    mockCampaign.progress = progressoAte(1, 1); // current = Fácil
+    const noFacil = medirViewportEObterScroll(render().root);
+
+    expect(noIniciante).toEqual(expect.any(Number));
+    expect(noFacil).toEqual(expect.any(Number));
+    expect(noIniciante as number).toBeGreaterThan(noFacil as number);
+  });
+
+  it("com progresso ainda não carregado, não tenta rolar (sem viewport não há alvo confiável)", () => {
+    mockCampaign = {
+      progress: null,
+      loading: true,
+      error: null,
+      refresh: jest.fn(),
+    };
+    const tree = render();
+    expect(medirViewportEObterScroll(tree.root)).toBeUndefined();
+  });
+
+  it("com falha de carga (sem progresso), cai no fallback Iniciante sem quebrar", () => {
+    mockCampaign = {
+      progress: null,
+      loading: false,
+      error: "falhou",
+      refresh: jest.fn(),
+    };
+    const tree = render();
+    const y = medirViewportEObterScroll(tree.root);
+    expect(y).toEqual(expect.any(Number));
+  });
+
+  it("só rola uma vez por montagem, mesmo com a viewport remedida depois", () => {
+    const tree = render();
+    const scroll = scrollView(tree.root);
+    const spy = jest.spyOn(scroll.instance, "scrollTo");
+
+    act(() =>
+      scroll.props.onLayout({ nativeEvent: { layout: { width: 400, height: 800 } } })
+    );
+    act(() =>
+      scroll.props.onLayout({ nativeEvent: { layout: { width: 400, height: 900 } } })
+    );
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+});
+
 describe("CampaignMapScreen — flag de QA", () => {
   it("com a flag ligada, nível travado vira jogável e se anuncia como QA", () => {
     mockQaUnlock = true;
